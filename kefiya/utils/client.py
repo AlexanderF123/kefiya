@@ -36,14 +36,17 @@ def get_accounts(kefiya_login, user_scope):
     :type user_scopet: str
     :return: FinTS accounts json formated
     """
-    from kefiya.utils.fints_controller import FinTSController
+    from kefiya.utils.fints_controller import FinTSController, TanInteractionRequired
     interactive = {"docname": user_scope, "enabled": True}
 
-    return {
-        "accounts": FinTSController(
-            kefiya_login,
-            interactive).get_fints_accounts()
-    }
+    try:
+        return {
+            "accounts": FinTSController(
+                kefiya_login,
+                interactive).get_fints_accounts()
+        }
+    except TanInteractionRequired:
+        pass
 
 
 @frappe.whitelist()
@@ -134,7 +137,7 @@ def create_payment_entry(bank_transaction_name, invoice_name, match_against):
 
     bank_transaction = frappe.get_doc("Bank Transaction", bank_transaction_name)
     invoice_doc = frappe.get_doc(match_against, invoice_name)
-    
+
     unallocated_amount = bank_transaction.unallocated_amount
     outstanding_amount = invoice_doc.outstanding_amount
     diff = frappe.format(abs(unallocated_amount - outstanding_amount), "Currency")
@@ -173,7 +176,7 @@ def create_payment_entry(bank_transaction_name, invoice_name, match_against):
 
     payment_entry.insert()
     payment_entry.submit()
-    
+
     return paid_amount, payment_entry.name, unallocated_amount, outstanding_amount, diff
 
 @frappe.whitelist()
@@ -181,3 +184,44 @@ def change_match_against(selected_match):
     kefiya_setting = frappe.get_single("Kefiya Settings")
     kefiya_setting.assign_against = selected_match
     kefiya_setting.save()
+
+@frappe.whitelist()
+def resolve_tan_interaction(fints_login: str, values: str | dict):
+    """
+    When a user was requested to perform a 2FA, this method is called as a callback to resolve the interaction.
+
+    This method is called twice:
+    1. When the user is requested to choose the TAN mode
+    2. When the user is requested to mark the required action (confirm access or enter TAN) as performed
+
+    :param values: dict containing the interaction values
+        The following keys are expected:
+            possible_tan_modes: list of possible TAN modes
+            tan_mode: selected TAN mode
+            mfa_confirmation: Indicates Step 2, that the user performed the MFA (or entered a TAN)
+            tan: entered TAN (optional: if TAN needs to be entered for chosen tan_mode)
+    :return: doesn't return anything, but raises information via socket to the user
+    """
+    from kefiya.utils.fints_controller import FinTSController, TanInteractionRequired
+
+    if isinstance(values, str):
+        values = frappe.parse_json(values)
+
+    tan_mode = None
+
+    if values.get("possible_tan_modes") and values.get("tan_mode") and isinstance(values["possible_tan_modes"], list) and isinstance(values["tan_mode"], str):
+        tan_mode = values["tan_mode"]
+
+    tan_medium = values.get("tan_medium") if tan_mode else None
+
+    try:
+        if values.get("mfa_confirmation"):
+            # for tan generators, the TAN is permitted here (may also be empty for Mobile TAN 2.0)
+            FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium, tan=values.get("tan"))
+
+        else:
+            # get index of tan_mode in possible_tan_modes
+            FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium)
+
+    except TanInteractionRequired:
+        pass # will have triggered user interaction via socket
