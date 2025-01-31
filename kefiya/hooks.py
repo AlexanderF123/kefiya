@@ -93,9 +93,9 @@ before_install = "kefiya.utils.install.before_install"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-#     "ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+    "Journal Entry": "kefiya.overrides.journal_entry.journal_entry.CustomJournalEntry"
+}
 
 # Document Events
 # ---------------
