@@ -135,7 +135,11 @@ kefiya.iban_tools = {
 			if (data.checkResults.bankCode) {
 				
 				let defalutValue = frm.doc.party_type ? frm.doc.party_type:frm.doc.deposit > 0 ? 'Customer': 'Supplier'
-				let party_name = await kefiya.iban_tools.getPartyName(defalutValue, frm.doc.party)
+
+				let party_name = ""
+				if (defalutValue && frm.doc.party){
+					party_name = await kefiya.iban_tools.getPartyName(defalutValue, frm.doc.party)
+				}
 				
 				let dialog = new frappe.ui.Dialog({
 					title: __('Create Bank Account'),
