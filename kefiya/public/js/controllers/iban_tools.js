@@ -157,7 +157,6 @@ kefiya.iban_tools = {
 						label: 'Date',
 						fieldname: 'date',
 						fieldtype: 'Date',
-						read_only: 1,
 						default: frm.doc.date,
 					}, {
 						label: 'Depost',
