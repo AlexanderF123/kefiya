@@ -12,8 +12,6 @@ from frappe.utils.scheduler import is_scheduler_inactive
 from frappe import _
 from kefiya.utils.client import import_fints_transactions
 from kefiya.utils.fints_controller import FinTSController
-# import kefiya.kefiya.doctype.kefiya_import.kefiya_import as fin_imp
-# from kefiya.utils.fints_wrapper import FinTSConnection
 
 
 class KefiyaSchedule(Document):
@@ -38,10 +36,13 @@ def scheduled_import_fints_payments(manual=None):
     current_datetime = now_datetime()
     current_hour = current_datetime.strftime("%H")
 
+    kefiya_settings = frappe.get_single('Kefiya Settings')
+    overlap_days = kefiya_settings.overlap_days
+
     # Query child table
     for child_item in schedule_settings.schedule_items:
         # Get the last run / last imported transaction date
-        if current_hour == child_item.hour:
+        if current_hour == child_item.hour or manual:
             try:
                 if child_item.active and (child_item.import_frequency or manual):
                     lastruns = frappe.get_list(
@@ -62,7 +63,7 @@ def scheduled_import_fints_payments(manual=None):
                     if lastruns[0] is not None:
                         if child_item.import_frequency == 'Daily':
                             checkdate = (
-                                now_datetime().date() - relativedelta(days=1)
+                                now_datetime().date()
                             )
                         elif child_item.import_frequency == 'Weekly':
                             checkdate = (
@@ -75,27 +76,20 @@ def scheduled_import_fints_payments(manual=None):
                         else:
                             raise ValueError('Unknown frequency')
 
-                        new_from_date = (
-                            lastruns[0].end_date + relativedelta(days=1)
-                        )
+                        new_from_date = lastruns[0].end_date - relativedelta(days=overlap_days)
                         if (
-                            new_from_date < now_datetime().date() and (
-                                lastruns[0].end_date < checkdate or manual
+                            new_from_date <= now_datetime().date() and (
+                                lastruns[0].end_date <= checkdate or manual
                             )
                         ):
                             kefiya_import.from_date = new_from_date
-                            # overlap = child_item.overlap
-                            # if overlap < 0:
-                            #    overlap = 0
                         else:
                             frappe.db.rollback()
                             continue
-
-                        # kefiya_import.from_date = lastruns[0].end_date - relativedelta(days=overlap) # noqa: E501
-                    # else: load all available transactions of the past
-                    # always import transactions from yesterday
-                    kefiya_import.to_date = \
-                        now_datetime().date() - relativedelta(days=1)
+                    else:
+                        kefiya_import.from_date = now_datetime().date() - relativedelta(days=overlap_days)
+                   
+                    kefiya_import.to_date = now_datetime().date()
 
                     kefiya_import.save()
                     if manual:
@@ -107,6 +101,5 @@ def scheduled_import_fints_payments(manual=None):
                     else:
                         FinTSController(child_item.kefiya_login) \
                             .import_fints_transactions(kefiya_import.name)
-                    # fin_imp.import_transactions(kefiya_import.name, child_item.kefiya_login) # noqa: E501
             except Exception:
                 frappe.log_error(frappe.get_traceback())
