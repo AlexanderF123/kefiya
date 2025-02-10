@@ -137,9 +137,11 @@ doc_events = {
 # }
 
 scheduler_events = {
-    "hourly": [
-        "kefiya.kefiya.doctype.kefiya_schedule.kefiya_schedule.scheduled_import_fints_payments"  # noqa: E501
-    ]
+    "cron": {
+        "*/20 * * * *": [
+            "kefiya.kefiya.doctype.kefiya_schedule.kefiya_schedule.scheduled_import_fints_payments"  # noqa: E501
+        ]
+    }
 }
 
 # Testing
