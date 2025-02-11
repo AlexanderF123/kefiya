@@ -82,8 +82,8 @@ def scheduled_import_fints_payments(manual=None):
                                 lastruns[0].end_date <= checkdate or manual
                             )
                         ):
-                            if (now_datetime().date() - new_from_date).days > 89:
-                                new_from_date = now_datetime().date() - relativedelta(days=89)
+                            if (now_datetime().date() - new_from_date).days > 90:
+                                new_from_date = now_datetime().date() - relativedelta(days=90)
 
                             kefiya_import.from_date = new_from_date
                         else:
