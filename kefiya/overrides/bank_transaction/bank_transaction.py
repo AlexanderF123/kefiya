@@ -8,14 +8,14 @@ class CustomBankTransaction(BankTransaction):
         for payment_entry in self.payment_entries[:]:
             self.remove_payment_entry(payment_entry)
             payment_entries.append(payment_entry)
-
         # runs on_update_after_submit
         self.save()
         
         should_cancel = self.cancel_entries_on_unreconciling()
-        for payment_entry in payment_entries:
-            if should_cancel and payment_entry.payment_document == "Payment Entry":
-                self.cancel_payment_entry(payment_entry)
+        if should_cancel:
+            for payment_entry in payment_entries:
+                if payment_entry.payment_document == "Payment Entry":
+                    self.cancel_payment_entry(payment_entry)
 
     def cancel_entries_on_unreconciling(self):
         settings = frappe.get_single("Kefiya Settings")
