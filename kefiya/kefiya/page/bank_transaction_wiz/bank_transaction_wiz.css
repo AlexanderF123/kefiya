@@ -12,3 +12,37 @@
 .list-row-contain:nth-of-type(even) {
     background-color: #FFFFFF;
 }
+
+/* Hide the Refresh button */
+.icon-btn {
+    display: none !important;
+}
+
+[data-original-title="Refresh"] {
+    display: none !important;
+}
+
+[data-original-title="Reload List"] {
+    display: none !important;
+}
+
+/* Hide the Button group */
+.custom-btn-group {
+    display: none !important;
+}
+
+[data-fieldname="name"] {
+    display: none !important;
+}
+
+[data-fieldname="status"] {
+    display: none !important;
+}
+
+[data-fieldname="bank_account"] {
+    display: none !important;
+}
+
+[data-fieldname="company"] {
+    display: none !important;
+}
