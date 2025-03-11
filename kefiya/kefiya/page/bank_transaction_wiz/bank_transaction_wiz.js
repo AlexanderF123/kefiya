@@ -212,6 +212,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"description",
 				"party",
 				"party_type",
+				"bank_party_name",
 				"unallocated_amount",
 				"deposit",
 				"withdrawal",
@@ -219,7 +220,6 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"company",
 				"currency",
 				"bank_account",
-				"bank_party_name",
 			];
 		}
 	}
