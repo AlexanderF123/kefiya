@@ -331,6 +331,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"name", 
 				"party",
 				"party_type",
+				"bank_party_name",
 				"date", 
 				"unallocated_amount", 
 				"description"
