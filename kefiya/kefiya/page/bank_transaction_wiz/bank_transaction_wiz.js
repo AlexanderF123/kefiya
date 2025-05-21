@@ -162,6 +162,21 @@ kefiya.tools.assignWizard = class assignWizard {
 						window.location.reload(false);
 					};
 			});
+		} else if (kefiyaSettings.assign_against==='Refund'){
+			frappe.model.with_doctype("Purchase Invoice", () => {
+				kefiya.tools.assignWizardList =
+					new kefiya.tools.AssignWizardTool({
+						parent: me.parent,
+						doctype: "Purchase Invoice",
+						page_title: __(me.page.title),
+						kefiyaSettings: kefiyaSettings,
+						changeMatchAgainst: changeMatchAgainst,
+					});
+				frappe.pages["bank-transaction-wiz"].refresh =
+					function (/* wrapper */) {
+						window.location.reload(false);
+					};
+			});
 		}
 	}
 };
@@ -221,6 +236,19 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"currency",
 				"bank_account",
 			];
+		} else if (this.kefiyaSettings.assign_against === 'Refund'){
+			this.sort_by = "supplier";
+			this.fields = [
+				"name",
+				"supplier",
+				"supplier_name",
+				"outstanding_amount",
+				"posting_date",
+				"due_date",
+				"currency",
+				"paid_amount",
+				"bill_no",
+			];
 		}
 	}
 
@@ -269,6 +297,13 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 					["Bank Transaction", "unallocated_amount", ">", 0]
 				),
 			});
+		} else if(this.kefiyaSettings.assign_against === 'Refund'){
+			return Object.assign({}, args, {
+				...args.filters.push(
+					["Purchase Invoice", "docstatus", "=", 1],
+					["Purchase Invoice", "outstanding_amount", "<", 0]
+				),
+			});
 		}
 
 	}
@@ -305,7 +340,8 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				docstatus: 1,
 				unallocated_amount: [">", 0],
 				...(matchAgainst === "Sales Invoice" ? { party, deposit: [">", 0] } : {}),
-				...(matchAgainst === "Purchase Invoice" ? { party, withdrawal: [">", 0] } : {})
+				...(matchAgainst === "Purchase Invoice" ? { party, withdrawal: [">", 0] } : {}),
+				...(matchAgainst === "Refund" ? { party, deposit: [">", 0] } : {})
 			};
 			order_by = "date";
 		} else {
@@ -333,6 +369,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 			{ label: 'Sales Invoice', value: 'Sales Invoice' },
 			{ label: 'Purchase Invoice', value: 'Purchase Invoice' },
 			{ label: 'Journal Entry', value: 'Journal Entry' },
+			{ label: 'Refund', value: 'Refund' },
 		];
 	
 		tabs.forEach((tab, index) => {
@@ -388,7 +425,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 					
 				if (matchAgainst==="Sales Invoice"){
 					party_value = value.customer
-				} else if (matchAgainst === "Purchase Invoice"){
+				} else if (matchAgainst === "Purchase Invoice" || matchAgainst === "Refund"){
 					party_value = value.supplier
 				}
 	
