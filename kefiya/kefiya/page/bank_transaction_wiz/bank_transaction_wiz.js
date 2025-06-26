@@ -253,7 +253,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 	}
 
 	setup_view() {
-		this.render_header();
+		this.render_header(this.kefiyaSettings.assign_against);
 	}
 
 	setup_side_bar() {
@@ -450,10 +450,16 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 		}
 	}
 
-	render_header() {
+	render_header(assignAgainst) {
 		const me = this;
 		if ($(this.wrapper).find(".payment-assign-wizard-header").length === 0) {
-			me.$result.append(frappe.render_template("bank_transaction_header"));
+			me.$result.append(frappe.render_template("bank_transaction_header", {
+				party_label: assignAgainst === "Sales Invoice"
+				? __("Customer")
+				: assignAgainst === "Purchase Invoice" || assignAgainst === "Refund"
+					? __("Supplier")
+					: __("Party")
+			}));
 		}
 	}
 };
