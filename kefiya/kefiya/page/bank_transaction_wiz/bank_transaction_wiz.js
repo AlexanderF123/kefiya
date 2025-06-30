@@ -18,10 +18,11 @@ kefiya.tools.assignWizard = class assignWizard {
 		this.parent = wrapper;
 		this.page = this.parent.page;
 		this.remove_page_buttons();
+		$(this.page.wrapper).addClass('bank-transaction-wiz-page');
 		this.make();
 	}
 	remove_page_buttons(){
-		$('.menu-btn-group').remove()
+		$(this.page.wrapper).find('.menu-btn-group').remove();
 	}
 
 	async fetchKefiyaSettings() {
@@ -253,7 +254,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 	}
 
 	setup_view() {
-		this.render_header();
+		this.render_header(this.kefiyaSettings.assign_against);
 	}
 
 	setup_side_bar() {
@@ -393,18 +394,18 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 
 		const me = this;
 		this.$result.find(".list-row-contain").remove();
-		$('[data-fieldname="name"]').remove();
-		$('[data-fieldname="status"]').remove();
-		$('[data-fieldname="title"]').remove();
-		$('[data-original-title="Refresh"]').remove();
-		$('[data-original-title="Reload List"]').remove();
-		$('[data-fieldname="bank_account"]').remove();
-		$('.custom-btn-group').remove();
-		$('.standard-filter-section').empty();
+		$(this.page.wrapper).find('[data-fieldname="name"]').remove();
+		$(this.page.wrapper).find('[data-fieldname="status"]').remove();
+		$(this.page.wrapper).find('[data-fieldname="title"]').remove();
+		$(this.page.wrapper).find('[data-original-title="Refresh"]').remove();
+		$(this.page.wrapper).find('[data-original-title="Refresh"]').remove();
+		$(this.page.wrapper).find('[data-original-title="Reload List"]').remove();
+		$(this.page.wrapper).find('[data-fieldname="bank_account"]').remove();
+		$(this.page.wrapper).find('.custom-btn-group').remove();
+		$(this.page.wrapper).find('.standard-filter-section').empty();
 		const tab_container = await this.add_custom();
 		tab_container.appendTo('.standard-filter-section');
-		
-		
+
 		let rowHTML;
 		let party_value;
 		rowHTML = '<div class="list-row-contain"></div>';
@@ -450,10 +451,16 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 		}
 	}
 
-	render_header() {
+	render_header(assignAgainst) {
 		const me = this;
 		if ($(this.wrapper).find(".payment-assign-wizard-header").length === 0) {
-			me.$result.append(frappe.render_template("bank_transaction_header"));
+			me.$result.append(frappe.render_template("bank_transaction_header", {
+				party_label: assignAgainst === "Sales Invoice"
+				? __("Customer")
+				: assignAgainst === "Purchase Invoice" || assignAgainst === "Refund"
+					? __("Supplier")
+					: __("Party")
+			}));
 		}
 	}
 };
