@@ -302,6 +302,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 			return Object.assign({}, args, {
 				...args.filters.push(
 					["Purchase Invoice", "docstatus", "=", 1],
+					["Purchase Invoice", "status", "=", "Return"],
 					["Purchase Invoice", "outstanding_amount", "<", 0]
 				),
 			});
