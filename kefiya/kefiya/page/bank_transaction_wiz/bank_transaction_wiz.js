@@ -335,6 +335,8 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"party_type",
 				"bank_party_name",
 				"date", 
+				"deposit",
+				"withdrawal",
 				"unallocated_amount", 
 				"description"
 			];
@@ -344,7 +346,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				unallocated_amount: [">", 0],
 				...(matchAgainst === "Sales Invoice" ? { party, deposit: [">", 0] } : {}),
 				...(matchAgainst === "Purchase Invoice" ? { party, withdrawal: [">", 0] } : {}),
-				...(matchAgainst === "Refund" ? { party, deposit: [">", 0] } : {})
+				...(matchAgainst === "Refund" ? { party } : {})
 			};
 			order_by = "date";
 		} else {

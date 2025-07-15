@@ -140,7 +140,11 @@
           </div>
           <div class="col-sm-2 ellipsis data-amount">
             {% if matchAgainst == "Refund" %}
-              + {{ payment.unallocated_amount }}
+              {% if payment.deposit > payment.withdrawal %}
+                + {{ payment.unallocated_amount }}
+              {% else %}
+                - {{ payment.unallocated_amount }}
+              {% endif %}
             {% else %}
               {{ payment.unallocated_amount }}
             {% endif %}
