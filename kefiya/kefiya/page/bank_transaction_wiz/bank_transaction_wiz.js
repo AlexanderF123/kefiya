@@ -549,7 +549,7 @@ kefiya.tools.AssignWizardRow = class AssignWizardRow {
 
 					if (match_against == "Refund"){
 
-						const unallocated_amount = r.message[0];
+						const unallocated_amount = r.message;
 
 						$('.list-row-contain').filter(function() {
 							return $(this).find(`[data-fieldname="${invoice_name}"]`).length > 0;
