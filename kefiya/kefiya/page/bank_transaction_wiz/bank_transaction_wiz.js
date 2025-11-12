@@ -18,10 +18,11 @@ kefiya.tools.assignWizard = class assignWizard {
 		this.parent = wrapper;
 		this.page = this.parent.page;
 		this.remove_page_buttons();
+		$(this.page.wrapper).addClass('bank-transaction-wiz-page');
 		this.make();
 	}
 	remove_page_buttons(){
-		$('.menu-btn-group').remove()
+		$(this.page.wrapper).find('.menu-btn-group').remove();
 	}
 
 	async fetchKefiyaSettings() {
@@ -162,6 +163,21 @@ kefiya.tools.assignWizard = class assignWizard {
 						window.location.reload(false);
 					};
 			});
+		} else if (kefiyaSettings.assign_against==='Mastercard'){
+			frappe.model.with_doctype("Purchase Invoice", () => {
+				kefiya.tools.assignWizardList =
+					new kefiya.tools.AssignWizardTool({
+						parent: me.parent,
+						doctype: "Purchase Invoice",
+						page_title: __(me.page.title),
+						kefiyaSettings: kefiyaSettings,
+						changeMatchAgainst: changeMatchAgainst,
+					});
+				frappe.pages["bank-transaction-wiz"].refresh =
+					function (/* wrapper */) {
+						window.location.reload(false);
+					};
+			});
 		}
 	}
 };
@@ -212,6 +228,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"description",
 				"party",
 				"party_type",
+				"bank_party_name",
 				"unallocated_amount",
 				"deposit",
 				"withdrawal",
@@ -219,13 +236,25 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"company",
 				"currency",
 				"bank_account",
-				"bank_party_name",
+			];
+		} else if (this.kefiyaSettings.assign_against === 'Mastercard'){
+			this.sort_by = "supplier";
+			this.fields = [
+				"name",
+				"supplier",
+				"supplier_name",
+				"outstanding_amount",
+				"posting_date",
+				"due_date",
+				"currency",
+				"paid_amount",
+				"bill_no",
 			];
 		}
 	}
 
 	setup_view() {
-		this.render_header();
+		this.render_header(this.kefiyaSettings.assign_against);
 	}
 
 	setup_side_bar() {
@@ -269,6 +298,14 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 					["Bank Transaction", "unallocated_amount", ">", 0]
 				),
 			});
+		} else if(this.kefiyaSettings.assign_against === 'Mastercard'){
+			return Object.assign({}, args, {
+				...args.filters.push(
+					["Purchase Invoice", "docstatus", "=", 1],
+					["Purchase Invoice", "supplier", "=", this.kefiyaSettings.mastercard],
+					["Purchase Invoice", "outstanding_amount", "!=", 0]
+				),
+			});
 		}
 
 	}
@@ -296,16 +333,20 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				"name", 
 				"party",
 				"party_type",
+				"bank_party_name",
 				"date", 
+				"deposit",
+				"withdrawal",
 				"unallocated_amount", 
 				"description"
 			];
 			
 			filters = {
 				docstatus: 1,
-				unallocated_amount: [">", 0],
+				unallocated_amount: ["!=", 0],
 				...(matchAgainst === "Sales Invoice" ? { party, deposit: [">", 0] } : {}),
-				...(matchAgainst === "Purchase Invoice" ? { party, withdrawal: [">", 0] } : {})
+				...(matchAgainst === "Purchase Invoice" ? { party, withdrawal: [">", 0] } : {}),
+				...(matchAgainst === "Mastercard" ? { party, party_type: ["=", "Supplier"] } : {})
 			};
 			order_by = "date";
 		} else {
@@ -333,6 +374,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 			{ label: 'Sales Invoice', value: 'Sales Invoice' },
 			{ label: 'Purchase Invoice', value: 'Purchase Invoice' },
 			{ label: 'Journal Entry', value: 'Journal Entry' },
+			{ label: 'Mastercard', value: 'Mastercard' },
 		];
 	
 		tabs.forEach((tab, index) => {
@@ -355,18 +397,18 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 
 		const me = this;
 		this.$result.find(".list-row-contain").remove();
-		$('[data-fieldname="name"]').remove();
-		$('[data-fieldname="status"]').remove();
-		$('[data-fieldname="title"]').remove();
-		$('[data-original-title="Refresh"]').remove();
-		$('[data-original-title="Reload List"]').remove();
-		$('[data-fieldname="bank_account"]').remove();
-		$('.custom-btn-group').remove();
-		$('.standard-filter-section').empty();	
+		$(this.page.wrapper).find('[data-fieldname="name"]').remove();
+		$(this.page.wrapper).find('[data-fieldname="status"]').remove();
+		$(this.page.wrapper).find('[data-fieldname="title"]').remove();
+		$(this.page.wrapper).find('[data-original-title="Refresh"]').remove();
+		$(this.page.wrapper).find('[data-original-title="Refresh"]').remove();
+		$(this.page.wrapper).find('[data-original-title="Reload List"]').remove();
+		$(this.page.wrapper).find('[data-fieldname="bank_account"]').remove();
+		$(this.page.wrapper).find('.custom-btn-group').remove();
+		$(this.page.wrapper).find('.standard-filter-section').empty();
 		const tab_container = await this.add_custom();
 		tab_container.appendTo('.standard-filter-section');
-		
-		
+
 		let rowHTML;
 		let party_value;
 		rowHTML = '<div class="list-row-contain"></div>';
@@ -388,7 +430,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 					
 				if (matchAgainst==="Sales Invoice"){
 					party_value = value.customer
-				} else if (matchAgainst === "Purchase Invoice"){
+				} else if (matchAgainst === "Purchase Invoice" || matchAgainst === "Mastercard"){
 					party_value = value.supplier
 				}
 	
@@ -412,10 +454,16 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 		}
 	}
 
-	render_header() {
+	render_header(assignAgainst) {
 		const me = this;
 		if ($(this.wrapper).find(".payment-assign-wizard-header").length === 0) {
-			me.$result.append(frappe.render_template("bank_transaction_header"));
+			me.$result.append(frappe.render_template("bank_transaction_header", {
+				party_label: assignAgainst === "Sales Invoice"
+				? __("Customer")
+				: assignAgainst === "Purchase Invoice" || assignAgainst === "Mastercard"
+					? __("Supplier")
+					: __("Party")
+			}));
 		}
 	}
 };
@@ -499,58 +547,79 @@ kefiya.tools.AssignWizardRow = class AssignWizardRow {
 				callback: function (r) {
 					let vouchers = [];
 
-					const paid_amount = r.message[0];
-					const payment_entry_name = r.message[1];
-					const unallocated_amount = r.message[2];
-					const outstanding_amount = r.message[3];
-					const diff = r.message[4];
+					if (match_against == "Mastercard"){
 
-					vouchers.push({
-						payment_doctype: "Payment Entry",
-						payment_name: payment_entry_name,
-						amount: format_currency(paid_amount, currency),
-					});
-					
-					frappe.call({
-						method:
-							"erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool.reconcile_vouchers",
-						args: {
-							bank_transaction_name: bank_transaction_name,
-							vouchers: vouchers,
-						},
-						callback(/* r */) {
-							// Refresh page after asignment		
-							// kefiya.tools.assignWizardList.refresh();
+						const unallocated_amount = r.message[0];
+						const formatted_unallocated_amount = r.message[1];
 
-							if (unallocated_amount > outstanding_amount){
+						$('.list-row-contain').filter(function() {
+							return $(this).find(`[data-fieldname="${invoice_name}"]`).length > 0;
+						}).remove();
+
+						if (unallocated_amount !== 0) {
+							$(`[data-fieldname="${bank_transaction_name}"]`).each(function() {
+								$(this).find('.data-amount').text(formatted_unallocated_amount);
+							});
+						} else {
+							$(`[data-fieldname="${bank_transaction_name}"]`).remove();
+						}
+
+						$('.list-row-contain').filter(function() {
+							return $(this).children().length === 1;
+						}).remove();
+
+					} else {
+						const paid_amount = r.message[0];
+						const payment_entry_name = r.message[1];
+						const unallocated_amount = r.message[2];
+						const outstanding_amount = r.message[3];
+						const diff = r.message[4];
+
+						vouchers.push({
+							payment_doctype: "Payment Entry",
+							payment_name: payment_entry_name,
+							amount: format_currency(paid_amount, currency),
+						});
+						
+						frappe.call({
+							method:
+								"erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool.reconcile_vouchers",
+							args: {
+								bank_transaction_name: bank_transaction_name,
+								vouchers: vouchers,
+							},
+							callback(/* r */) {
+								// Refresh page after asignment		
+								// kefiya.tools.assignWizardList.refresh();
+
+								if (unallocated_amount > outstanding_amount){
+
+									$('.list-row-contain').filter(function() {
+										return $(this).find(`[data-fieldname="${invoice_name}"]`).length > 0;
+									}).remove();
+
+									$(`[data-fieldname="${bank_transaction_name}"]`).each(function() {
+										$(this).find('.data-amount').text(diff);
+									});
+								}else if(unallocated_amount == outstanding_amount){
+
+									$('.list-row-contain').filter(function() {
+										return $(this).find(`[data-fieldname="${invoice_name}"]`).length > 0;
+									}).remove();
+
+									$(`[data-fieldname="${bank_transaction_name}"]`).remove();
+								}else{
+									
+									$(`[data-fieldname="${bank_transaction_name}"]`).remove();
+									$(`[data-fieldname="${invoice_name}"]`).find('.data-amount').text(diff);
+								}
 
 								$('.list-row-contain').filter(function() {
-									return $(this).find(`[data-fieldname="${invoice_name}"]`).length > 0;
+									return $(this).children().length === 1;
 								}).remove();
-
-								$(`[data-fieldname="${bank_transaction_name}"]`).each(function() {
-									$(this).find('.data-amount').text(diff);
-								});
-							}else if(unallocated_amount == outstanding_amount){
-
-								$('.list-row-contain').filter(function() {
-									return $(this).find(`[data-fieldname="${invoice_name}"]`).length > 0;
-								}).remove();
-
-								$(`[data-fieldname="${bank_transaction_name}"]`).remove();
-							}else{
-								
-								$(`[data-fieldname="${bank_transaction_name}"]`).remove();
-								$(`[data-fieldname="${invoice_name}"]`).find('.data-amount').text(diff);
-							}
-
-							$('.list-row-contain').filter(function() {
-								return $(this).children().length === 1;
-							}).remove();
-							
-
-						},
-					});
+							},
+						});
+					}
 				},
 			});
 
@@ -576,7 +645,7 @@ kefiya.tools.AssignWizardRow = class AssignWizardRow {
 					fieldtype: 'Small Text',
 					read_only:  me.data.description ? 1 : 0,
 					reqd: 1,
-					default: me.data.description.substring(0, 140),
+					default: me.data.description ? me.data.description.substring(0, 140) : '',
 				}, {
 					label: 'Posting Date',
 					fieldname: 'posting_date',
