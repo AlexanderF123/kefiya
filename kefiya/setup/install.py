@@ -4,7 +4,7 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 
 def after_migrate():
 	create_custom_fields(get_custom_fields())
-
+	
 def before_uninstall():
 	delete_custom_fields(get_custom_fields())
 
@@ -26,6 +26,15 @@ def get_custom_fields():
 			"fieldname": "kefiya_section",
 			"fieldtype": "Section Break",
 		},
+        {
+            "fieldname": "company",
+            "fieldtype": "Link",
+            "label": "Company",
+            "options": "Company",
+            "print_hide": 1,
+            "remember_last_selected_value": 1,
+            "insert_after": "kefiya_section",
+        },
 		{
 			"fieldname": "kefiya_column_break",
 			"fieldtype": "Column Break",
