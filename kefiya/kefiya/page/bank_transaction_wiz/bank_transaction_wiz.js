@@ -195,6 +195,8 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 	// It establishes default settings for various aspects of the assignment wizard tool's data display and behavior
 	setup_defaults() {
 		super.setup_defaults();
+		// Custom list API to prioritize invoices with matching bank transactions
+		this.method = "kefiya.utils.client.get_bank_transaction_wizard_list";
 		this.page_length = 20;
 		this.sort_order = "asc";
 		if (this.kefiyaSettings.assign_against === 'Sales Invoice'){
@@ -275,9 +277,10 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 
 	get_args() {
 		const args = super.get_args();
-		
+
 		if (this.kefiyaSettings.assign_against === 'Sales Invoice'){
 			return Object.assign({}, args, {
+				assign_against: this.kefiyaSettings.assign_against,
 				...args.filters.push(
 					["Sales Invoice", "docstatus", "=", 1],
 					["Sales Invoice", "outstanding_amount", ">", 0]
@@ -285,6 +288,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 			});
 		} else if(this.kefiyaSettings.assign_against === 'Purchase Invoice'){
 			return Object.assign({}, args, {
+				assign_against: this.kefiyaSettings.assign_against,
 				...args.filters.push(
 					["Purchase Invoice", "docstatus", "=", 1],
 					["Purchase Invoice", "outstanding_amount", ">", 0]
@@ -292,6 +296,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 			});
 		} else if(this.kefiyaSettings.assign_against === 'Journal Entry'){
 			return Object.assign({}, args, {
+				assign_against: this.kefiyaSettings.assign_against,
 				...args.filters.push(
 					["Bank Transaction", "docstatus", "=", 1],
 					["Bank Transaction", "status", "in", ["Unreconciled", "Settled"]],
@@ -305,6 +310,7 @@ kefiya.tools.AssignWizardTool = class AssignWizardTool extends (
 				? mastercard_rows.map((row) => (typeof row === 'string' ? row : row.supplier)).filter(Boolean)
 				: [];
 			return Object.assign({}, args, {
+				assign_against: this.kefiyaSettings.assign_against,
 				...args.filters.push(
 					["Purchase Invoice", "docstatus", "=", 1],
 					["Purchase Invoice", "supplier", "in", supplier_list],
