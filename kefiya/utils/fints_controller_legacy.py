@@ -237,38 +237,38 @@ class FinTSController:
 
                 # curr_doc.start_date = tansactions[0]["date"]
                 # curr_doc.end_date = tansactions[-1]["date"]
-                # PATCH: tansactions kann verschachtelt oder flach sein - normalisieren
-if tansactions and isinstance(tansactions[0], list):
-    flat = []
-    for entry in tansactions:
-        if isinstance(entry, list):
-            flat.extend(entry)
-        else:
-            flat.append(entry)
-    tansactions = flat
+                
+                # PATCH FIXED: Indented inside the else block
+                if tansactions and isinstance(tansactions[0], list):
+                    flat = []
+                    for entry in tansactions:
+                        if isinstance(entry, list):
+                            flat.extend(entry)
+                        else:
+                            flat.append(entry)
+                    tansactions = flat
 
-# PATCH: Debug-Log fuer Diagnose (kann spaeter entfernt werden)
-try:
-    frappe.log_error(
-        title="Kefiya FinTS Debug",
-        message="Count={} Type={} Sample={}".format(
-            len(tansactions),
-            type(tansactions[0]).__name__ if tansactions else 'N/A',
-            str(tansactions[0])[:500] if tansactions else 'empty'
-        )
-    )
-except Exception:
-    pass
+                # PATCH FIXED: Indented inside the else block
+                try:
+                    frappe.log_error(
+                        title="Kefiya FinTS Debug",
+                        message="Count={} Type={} Sample={}".format(
+                            len(tansactions),
+                            type(tansactions[0]).__name__ if tansactions else 'N/A',
+                            str(tansactions[0])[:500] if tansactions else 'empty'
+                        )
+                    )
+                except Exception:
+                    pass
 
-first_txn = tansactions[0]
-last_txn = tansactions[-1]
+                first_txn = tansactions[0]
+                last_txn = tansactions[-1]
 
-curr_doc.start_date = first_txn.get("date") or first_txn.get("ValueDate.Date")
-curr_doc.end_date   = last_txn.get("date") or last_txn.get("ValueDate.Date")
+                curr_doc.start_date = first_txn.get("date") or first_txn.get("ValueDate.Date")
+                curr_doc.end_date   = last_txn.get("date") or last_txn.get("ValueDate.Date")
 
-importer = ImportBankTransaction(self.kefiya_login, self.interactive)
-# PATCH: old_kefiya_import statt kefiya_import - MT940-Format-Handler fuer FinTS
-importer.old_kefiya_import(tansactions)
+                importer = ImportBankTransaction(self.kefiya_login, self.interactive)
+                importer.old_kefiya_import(tansactions)
 
                 if len(importer.bank_transactions) == 0:
                     frappe.msgprint(_("No new payments found"))
