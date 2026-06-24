@@ -151,12 +151,15 @@ class ImportBankTransaction:
                 )
 
                 # date is in YYYY.MM.DD (json)
-                date = t['date']
-                applicant_name = t['applicant_name']
-                posting_text = t['posting_text']
-                purpose = t['purpose']
-                applicant_iban = t['applicant_iban']
-                applicant_bin = t['applicant_bin']
+                date = t.get('date')
+                applicant_name = t.get('applicant_name')
+                posting_text = t.get('posting_text')
+                purpose = t.get('purpose')
+                # mt-940 key drift: 'applicant_iban' fehlt im aktuellen Parser-Output;
+                # Fallback auf 'gvc_applicant_iban' (IBAN steckt z. T. im 'applicant_name')
+                applicant_iban = t.get('applicant_iban') or t.get('gvc_applicant_iban')
+                applicant_bin = t.get('applicant_bin') or t.get('gvc_applicant_bin')
+
 
                 remarkType = ''
                 paid_to = None
