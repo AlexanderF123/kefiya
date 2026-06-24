@@ -399,6 +399,19 @@ class FinTSController:
                 curr_doc.to_date
             )
 
+            # normalise: some banks (e.g. Atruvia/VR) return a list of
+            # statements (list of lists); others (Finanz Informatik) return a
+            # flat list of transaction dicts. Flatten one nesting level so the
+            # downstream code (start/end date, old_kefiya_import) always sees a
+            # flat list of transactions.
+            flat_transactions = []
+            for statement in tansactions:
+                if isinstance(statement, list):
+                    flat_transactions.extend(statement)
+                else:
+                    flat_transactions.append(statement)
+            tansactions = flat_transactions
+            
             if(len(tansactions) == 0):
                 frappe.msgprint(_("No transaction found"))
             else:
