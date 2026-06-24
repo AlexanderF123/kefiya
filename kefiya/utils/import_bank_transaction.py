@@ -2,8 +2,62 @@
 from __future__ import unicode_literals
 
 import hashlib
+import re
 import frappe
 from frappe import _
+
+# IBAN total length per ISO 13616 for common SEPA countries (country code -> length)
+IBAN_LENGTHS = {
+    "DE": 22, "AT": 20, "CH": 21, "LI": 21, "LU": 20, "NL": 18, "BE": 16,
+    "FR": 27, "IT": 27, "ES": 24, "PT": 25, "DK": 18, "FI": 18, "SE": 24,
+    "NO": 15, "PL": 28, "CZ": 24, "SK": 24, "HU": 28, "GB": 22, "IE": 22,
+}
+
+IBAN_PATTERN = re.compile(r"[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}")
+
+
+def iban_is_valid(iban):
+    """Validate an IBAN via expected country length and ISO 7064 mod-97 checksum."""
+    if not iban:
+        return False
+    iban = iban.replace(" ", "").upper()
+    if len(iban) < 15 or len(iban) > 34:
+        return False
+    expected = IBAN_LENGTHS.get(iban[:2])
+    if expected and len(iban) != expected:
+        return False
+    rearranged = iban[4:] + iban[:4]
+    converted = ""
+    for char in rearranged:
+        if char.isdigit():
+            converted += char
+        elif "A" <= char <= "Z":
+            converted += str(ord(char) - 55)
+        else:
+            return False
+    return int(converted) % 97 == 1
+
+
+def extract_iban_from_name(name):
+    """Some banks concatenate the counterparty IBAN into the name field
+    (e.g. 'DE21....409Max Mustermann'). Return a tuple (iban_or_None,
+    cleaned_name). The name is changed only when a valid IBAN can be
+    removed cleanly."""
+    if not name:
+        return None, name
+    compact = name.replace(" ", "")
+    for match in IBAN_PATTERN.finditer(compact):
+        candidate = match.group(0)
+        # the greedy match may swallow an uppercase initial of the name;
+        # trim from the end until a structurally valid IBAN remains
+        for end in range(len(candidate), 14, -1):
+            trimmed = candidate[:end]
+            if iban_is_valid(trimmed):
+                # remove the IBAN and collapse leftover whitespace runs
+                cleaned = re.sub(r"\s+", " ", name.replace(trimmed, "")).strip()
+                return trimmed, (cleaned or None)
+    return None, name
+
 
 class ImportBankTransaction:
     def __init__(self, kefiya_login, interactive, allow_error=False):
@@ -155,10 +209,16 @@ class ImportBankTransaction:
                 applicant_name = t.get('applicant_name')
                 posting_text = t.get('posting_text')
                 purpose = t.get('purpose')
-                # mt-940 key drift: 'applicant_iban' fehlt im aktuellen Parser-Output;
-                # Fallback auf 'gvc_applicant_iban' (IBAN steckt z. T. im 'applicant_name')
+                # mt-940 key drift: 'applicant_iban' is absent in the current
+                # parser output; fall back to 'gvc_applicant_iban'.
                 applicant_iban = t.get('applicant_iban') or t.get('gvc_applicant_iban')
                 applicant_bin = t.get('applicant_bin') or t.get('gvc_applicant_bin')
+
+                # some banks concatenate the counterparty IBAN into the name
+                # field (e.g. 'DE21...Max Mustermann'); pull it out when no
+                # IBAN was provided and clean up the displayed name
+                if not applicant_iban:
+                    applicant_iban, applicant_name = extract_iban_from_name(applicant_name)
 
 
                 remarkType = ''
