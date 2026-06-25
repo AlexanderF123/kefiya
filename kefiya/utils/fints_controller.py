@@ -435,7 +435,14 @@ class FinTSController:
                 curr_doc.end_date = tansactions[-1]["date"]
 
                 importer = ImportBankTransaction(self.kefiya_login, self.interactive)
-                importer.old_kefiya_import(tansactions)
+                # Banks differ in transaction format: Atruvia/VR deliver CAMT
+                # (ISO 20022, recognisable by the CreditDebitIndicator field),
+                # Finanz Informatik (Sparkasse, LBBW) deliver MT940. Route each
+                # set to the matching parser.
+                if tansactions and isinstance(tansactions[0], dict) and "CreditDebitIndicator" in tansactions[0]:
+                    importer.kefiya_import(tansactions)
+                else:
+                    importer.old_kefiya_import(tansactions)
 
                 if len(importer.bank_transactions) == 0:
                     frappe.msgprint(_("No new payments found"))
