@@ -5,26 +5,29 @@ import hashlib
 import re
 import frappe
 from frappe import _
-from frappe.utils import now_datetime, getdate, add_days
+from frappe.utils import now_datetime, getdate, add_days, cint
 
-# FinTS rejects a start date that is 90 days or more in the past, so the widest
-# window we may request starts at today - 89 days.
-FINTS_MAX_LOOKBACK_DAYS = 89
+# Fallback look-back window when a Kefiya Login has no explicit
+# allowed_sync_days_in_past configured.
+DEFAULT_SYNC_DAYS_IN_PAST = 90
 
 
-def resolve_incremental_from_date(bank_account):
+def resolve_incremental_from_date(bank_account, max_days_in_past=DEFAULT_SYNC_DAYS_IN_PAST):
     """Start date for an incremental FinTS fetch.
 
-    Returns the date of the most recently imported Bank Transaction for the
-    given bank account (so the next fetch continues where the last one ended),
-    clamped to the FinTS 90-day window. When there is no history yet, falls
-    back to the widest allowed window (today - 89 days).
+    Returns the date of the most recently imported (submitted) Bank
+    Transaction for the given bank account (so the next fetch continues where
+    the last one ended), clamped to the login's allowed look-back window
+    (``max_days_in_past``). When there is no history yet, falls back to that
+    full window.
 
     :param bank_account: Bank Account name (kefiya_login.bank_account)
+    :param max_days_in_past: Kefiya Login.allowed_sync_days_in_past
     :return: datetime.date
     """
+    max_days_in_past = cint(max_days_in_past) or DEFAULT_SYNC_DAYS_IN_PAST
     today = now_datetime().date()
-    earliest = getdate(add_days(today, -FINTS_MAX_LOOKBACK_DAYS))
+    earliest = getdate(add_days(today, -max_days_in_past))
 
     last_date = None
     if bank_account:
