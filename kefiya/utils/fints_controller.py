@@ -19,7 +19,10 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
-from .import_bank_transaction import ImportBankTransaction
+from .import_bank_transaction import (
+    ImportBankTransaction,
+    resolve_incremental_from_date,
+)
 from .assign_payment_controller import AssignmentController
 
 class InitFailedException(Exception):
@@ -394,6 +397,16 @@ class FinTSController:
             )
             curr_doc = frappe.get_doc("Kefiya Import", kefiya_import)
             new_bank_transactions = None
+
+            # Incremental fetch: when no start date was entered, begin at the
+            # date of the most recently imported transaction for this account
+            # (clamped to the FinTS 90-day window) and fetch up to today.
+            if not curr_doc.from_date:
+                curr_doc.from_date = resolve_incremental_from_date(
+                    self.kefiya_login.bank_account
+                )
+                curr_doc.to_date = now_datetime().date()
+
             tansactions = self.get_fints_transactions(
                 curr_doc.from_date,
                 curr_doc.to_date
