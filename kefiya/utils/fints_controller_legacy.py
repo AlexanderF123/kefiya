@@ -216,6 +216,19 @@ class FinTSController:
                 curr_doc.to_date
             )
 
+            # python-fints 5.x returns a flat list of transactions; the older
+            # code (and the partial CAMT refactor) assumed a list of per-account
+            # buckets. Normalise to a flat list before the length check and any
+            # indexing, so empty or nested results are handled correctly.
+            if tansactions and isinstance(tansactions[0], list):
+                flat = []
+                for entry in tansactions:
+                    if isinstance(entry, list):
+                        flat.extend(entry)
+                    else:
+                        flat.append(entry)
+                tansactions = flat
+
             if(len(tansactions) == 0):
                 frappe.msgprint(_("No transaction found"))
             else:
@@ -234,22 +247,6 @@ class FinTSController:
                     )
                 except Exception as e:
                     frappe.throw(_("Failed to attach file"), e)
-
-                # curr_doc.start_date = tansactions[0]["date"]
-                # curr_doc.end_date = tansactions[-1]["date"]
-                
-                # python-fints 5.x returns a flat list of transactions; the older
-                # code (and the partial CAMT refactor) assumed a list of per-account
-                # buckets. Normalise to a flat list so indexing is correct regardless
-                # of the shape returned.
-                if tansactions and isinstance(tansactions[0], list):
-                    flat = []
-                    for entry in tansactions:
-                        if isinstance(entry, list):
-                            flat.extend(entry)
-                        else:
-                            flat.append(entry)
-                    tansactions = flat
 
                 first_txn = tansactions[0]
                 last_txn = tansactions[-1]
