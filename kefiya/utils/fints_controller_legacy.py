@@ -238,7 +238,10 @@ class FinTSController:
                 # curr_doc.start_date = tansactions[0]["date"]
                 # curr_doc.end_date = tansactions[-1]["date"]
                 
-                # PATCH FIXED: Indented inside the else block
+                # python-fints 5.x returns a flat list of transactions; the older
+                # code (and the partial CAMT refactor) assumed a list of per-account
+                # buckets. Normalise to a flat list so indexing is correct regardless
+                # of the shape returned.
                 if tansactions and isinstance(tansactions[0], list):
                     flat = []
                     for entry in tansactions:
@@ -248,19 +251,6 @@ class FinTSController:
                             flat.append(entry)
                     tansactions = flat
 
-                # PATCH FIXED: Indented inside the else block
-                try:
-                    frappe.log_error(
-                        title="Kefiya FinTS Debug",
-                        message="Count={} Type={} Sample={}".format(
-                            len(tansactions),
-                            type(tansactions[0]).__name__ if tansactions else 'N/A',
-                            str(tansactions[0])[:500] if tansactions else 'empty'
-                        )
-                    )
-                except Exception:
-                    pass
-
                 first_txn = tansactions[0]
                 last_txn = tansactions[-1]
 
@@ -268,6 +258,7 @@ class FinTSController:
                 curr_doc.end_date   = last_txn.get("date") or last_txn.get("ValueDate.Date")
 
                 importer = ImportBankTransaction(self.kefiya_login, self.interactive)
+                # FinTS delivers MT940; use the MT940-aware import path, not the CAMT one.
                 importer.old_kefiya_import(tansactions)
 
                 if len(importer.bank_transactions) == 0:
