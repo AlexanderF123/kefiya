@@ -5,6 +5,46 @@ import hashlib
 import re
 import frappe
 from frappe import _
+from frappe.utils import now_datetime, getdate, add_days
+
+# FinTS rejects a start date that is 90 days or more in the past, so the widest
+# window we may request starts at today - 89 days.
+FINTS_MAX_LOOKBACK_DAYS = 89
+
+
+def resolve_incremental_from_date(bank_account):
+    """Start date for an incremental FinTS fetch.
+
+    Returns the date of the most recently imported Bank Transaction for the
+    given bank account (so the next fetch continues where the last one ended),
+    clamped to the FinTS 90-day window. When there is no history yet, falls
+    back to the widest allowed window (today - 89 days).
+
+    :param bank_account: Bank Account name (kefiya_login.bank_account)
+    :return: datetime.date
+    """
+    today = now_datetime().date()
+    earliest = getdate(add_days(today, -FINTS_MAX_LOOKBACK_DAYS))
+
+    last_date = None
+    if bank_account:
+        rows = frappe.db.get_all(
+            "Bank Transaction",
+            # only submitted transactions; cancelled/draft rows must not
+            # determine where the next fetch starts.
+            filters={"bank_account": bank_account, "docstatus": 1},
+            fields=["date"],
+            order_by="date desc",
+            limit=1,
+        )
+        if rows and rows[0].date:
+            # never start in the future: value-dated / pre-booked entries can
+            # carry a date ahead of today; cap at today so from_date <= to_date.
+            last_date = min(getdate(rows[0].date), today)
+
+    if last_date and last_date > earliest:
+        return last_date
+    return earliest
 
 # IBAN total length per ISO 13616 for common SEPA countries (country code -> length)
 IBAN_LENGTHS = {
