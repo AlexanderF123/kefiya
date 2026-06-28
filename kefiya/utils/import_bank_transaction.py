@@ -180,9 +180,25 @@ class ImportBankTransaction:
 
         for idx, t in enumerate(fints_transaction):
             try:
-                # Convert to positive value if required
-                amount = abs(float(t['amount']['amount']))
-                status = t['status'].lower()
+                # Convert to positive value if required. Guard amount/status:
+                # unlike the date/name fields below, these used hard subscripts,
+                # so any key drift in the parser output raised and the whole
+                # transaction was silently dropped by the except block.
+                amount_field = t.get('amount')
+                raw_amount = (
+                    amount_field.get('amount')
+                    if isinstance(amount_field, dict) else amount_field
+                )
+                status = (t.get('status') or '').lower()
+
+                if raw_amount in (None, '') or not status:
+                    frappe.log_error(
+                        _('Transaction missing amount or status'),
+                        'Kefiya Import Error'
+                    )
+                    continue
+
+                amount = abs(float(raw_amount))
 
                 if amount == 0:
                     continue
@@ -207,6 +223,10 @@ class ImportBankTransaction:
                 # date is in YYYY.MM.DD (json)
                 date = t.get('date')
                 applicant_name = t.get('applicant_name')
+                # keep the raw name for the dedup hash so that display-only
+                # cleaning (IBAN extraction below) never changes the hash and
+                # re-imports transactions that were already imported.
+                original_applicant_name = applicant_name
                 posting_text = t.get('posting_text')
                 purpose = t.get('purpose')
                 # mt-940 key drift: 'applicant_iban' is absent in the current
@@ -228,7 +248,7 @@ class ImportBankTransaction:
                 uniquestr = "{0},{1},{2},{3},{4}".format(
                     date,
                     amount,
-                    applicant_name,
+                    original_applicant_name,
                     posting_text,
                     purpose
                 )
