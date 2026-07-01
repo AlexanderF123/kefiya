@@ -86,6 +86,11 @@ class FinTSController:
         if hasattr(self, "fints_connection"):
             return
 
+        # "TAN once per bank": before opening a brand-new dialog (which would
+        # trigger a fresh SCA/TAN), try to reuse an already-authenticated FinTS
+        # session from a sibling login of the same bank (same blz + fints_login).
+        self._seed_client_state_from_sibling()
+
         self.interactive.show_progress_realtime(
             _("Initialise connection"), 10, reload=False
         )
@@ -146,6 +151,88 @@ class FinTSController:
             self.kefiya_login.stored_dialog_blob = None
 
         self.kefiya_login.save()
+
+        # A clean, TAN-free authenticated state was just persisted -> share it
+        # with the sibling logins of the same bank so a single TAN unlocks every
+        # account ("TAN once per bank"). Never propagate a state that still
+        # carries a pending TAN challenge.
+        if not (tan_state and isinstance(tan_state, NeedTANResponse)):
+            self._propagate_client_state_to_siblings()
+
+    def _sibling_login_filters(self):
+        """Filters selecting the OTHER Kefiya Logins that share this login's
+        bank credentials (same BLZ + FinTS login) -- i.e. the same online-banking
+        access, just mapped to different bank accounts. Returns None when this
+        login has no usable credentials yet."""
+        blz = self.kefiya_login.blz
+        fints_login = self.kefiya_login.fints_login
+        if not (blz and fints_login):
+            return None
+        return {
+            "name": ("!=", self.kefiya_login.name),
+            "blz": blz,
+            "fints_login": fints_login,
+        }
+
+    def _seed_client_state_from_sibling(self):
+        """If this login has no stored FinTS client state, borrow the freshest
+        one from a sibling login of the same bank so a single TAN authorises
+        every account of that bank. The encrypted blob is portable because it is
+        sealed with the site key, not a per-record salt. In-memory only; it is
+        persisted on the next successful __persist_fints_state(). Best-effort --
+        on any problem we simply fall back to the normal (per-login) TAN flow."""
+        try:
+            if self.kefiya_login.stored_client_state:
+                return
+            filters = self._sibling_login_filters()
+            if not filters:
+                return
+            filters["stored_client_state"] = ("is", "set")
+            rows = frappe.get_all(
+                "Kefiya Login",
+                filters=filters,
+                fields=["stored_client_state"],
+                order_by="client_state_updated desc",
+                limit=1,
+            )
+            if rows and rows[0].stored_client_state:
+                self.kefiya_login.stored_client_state = rows[0].stored_client_state
+        except Exception:
+            frappe.log_error(
+                title="Kefiya: seed client state from sibling failed",
+                message=frappe.get_traceback(),
+            )
+
+    def _propagate_client_state_to_siblings(self):
+        """Share this login's freshly authenticated FinTS client state with the
+        sibling logins of the same bank that have no state yet (or an older one),
+        so one TAN unlocks every account. Best-effort; never raises."""
+        try:
+            filters = self._sibling_login_filters()
+            state = self.kefiya_login.stored_client_state
+            mine = self.kefiya_login.client_state_updated
+            if not (filters and state):
+                return
+            siblings = frappe.get_all(
+                "Kefiya Login",
+                filters=filters,
+                fields=["name", "stored_client_state", "client_state_updated"],
+            )
+            for s in siblings:
+                # keep a sibling's own session if it is at least as fresh
+                if s.stored_client_state and mine and s.client_state_updated and s.client_state_updated >= mine:
+                    continue
+                frappe.db.set_value(
+                    "Kefiya Login",
+                    s.name,
+                    {"stored_client_state": state, "client_state_updated": mine},
+                    update_modified=False,
+                )
+        except Exception:
+            frappe.log_error(
+                title="Kefiya: propagate client state to siblings failed",
+                message=frappe.get_traceback(),
+            )
 
     def __init_tan_mode(self, tan_mode:str=None, tan_medium:str=None, tan:str=...) -> bool:
         """
