@@ -473,6 +473,48 @@ class FinTSController:
                 )
                 return conn._send_with_possible_retry(dialog, seg, _extract)
 
+    def get_fints_information(self):
+        """Bank + account capabilities, limits and supported operations
+        (FinTS get_information). Returns a nested dict."""
+        with self.fints_connection:
+            return self.fints_connection.get_information()
+
+    def get_fints_scheduled_debits(self, multiple=False):
+        """Standing orders / scheduled debits (Dauerauftraege /
+        Termin-Ueberweisungen) for the login's account."""
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_scheduled_debits(account, multiple)
+
+    def get_fints_statements(self):
+        """List available electronic account statements
+        (elektronische Kontoauszuege / Dokumente)."""
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_statements(account)
+
+    def get_fints_statement(self, number=None, year=None, file_format=None):
+        """Fetch one specific electronic account statement document (HIEKA).
+
+        May return binary content (e.g. PDF); the caller decides how to store it.
+        """
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_statement(
+                account, number, year, file_format)
+
+    def get_fints_credit_card_transactions(self, credit_card_number=None,
+                                           start_date=None, end_date=None):
+        """Credit card transactions (Kreditkartenumsaetze) for the account."""
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_credit_card_transactions(
+                account, credit_card_number, start_date, end_date)
+
     def submit_sepa_transfer(self, pain_xml):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
@@ -727,3 +769,48 @@ def get_account_balance(kefiya_login):
     """
     controller = FinTSController(kefiya_login)
     return controller.get_fints_balance()
+
+
+def _to_jsonable(value):
+    """Best-effort convert a FinTS-lib result into JSON-serialisable data.
+
+    FinTS objects (accounts, statements, standing orders, ...) vary per bank and
+    library version and are not always JSON-serialisable; unknown objects are
+    stringified so the caller can at least inspect the payload.
+    """
+    return json.loads(json.dumps(value, default=str))
+
+
+@frappe.whitelist()
+def get_bank_information(kefiya_login):
+    """FinTS get_information: bank name, supported operations, accounts, limits."""
+    return _to_jsonable(FinTSController(kefiya_login).get_fints_information())
+
+
+@frappe.whitelist()
+def get_scheduled_debits(kefiya_login):
+    """Standing orders / scheduled debits (Dauerauftraege / Termin-Ueberweisungen)."""
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_scheduled_debits())
+
+
+@frappe.whitelist()
+def get_statements(kefiya_login):
+    """List of available electronic account statements (Kontoauszuege / Dokumente)."""
+    return _to_jsonable(FinTSController(kefiya_login).get_fints_statements())
+
+
+@frappe.whitelist()
+def get_statement(kefiya_login, number=None, year=None, file_format=None):
+    """Fetch one electronic account statement document (HIEKA). May be binary."""
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_statement(
+            number, year, file_format))
+
+
+@frappe.whitelist()
+def get_credit_card_transactions(kefiya_login, credit_card_number=None):
+    """Credit card transactions (Kreditkartenumsaetze)."""
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_credit_card_transactions(
+            credit_card_number))
