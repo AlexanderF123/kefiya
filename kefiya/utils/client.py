@@ -81,11 +81,24 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
             " confirmation."
         )}
 
+    # Permission gate: whitelisted endpoints are callable by any logged-in user,
+    # so a money-moving transfer must require submit rights on the Payment
+    # Request (and read rights on the paying Kefiya Login below).
+    frappe.has_permission(
+        "Payment Request", ptype="submit",
+        doc=payment_request_name, throw=True)
+
     from kefiya.events.hammer_script.payment_request_on_submit import (
         _build_sepa_xml,
     )
 
     pr = frappe.get_doc("Payment Request", payment_request_name)
+    if pr.payment_request_type != "Outward":
+        return {"status": "error",
+                "message": _("Only Outward Payment Requests can be paid out.")}
+    if pr.docstatus != 1:
+        return {"status": "error",
+                "message": _("Payment Request must be submitted before payout.")}
     if not pr.company_bank_account:
         return {"status": "error",
                 "message": _("Payment Request has no company bank account.")}
@@ -147,6 +160,12 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     the TAN without asking for a further challenge, so a money movement is never
     reported as done on a guess.
     """
+    # Permission gate: continuing a money transfer with a TAN requires write
+    # rights on the paying Kefiya Login (whitelisted endpoint would otherwise be
+    # callable by any logged-in user).
+    frappe.has_permission(
+        "Kefiya Login", ptype="write", doc=kefiya_login, throw=True)
+
     from kefiya.utils.fints_controller import (
         FinTSController,
         TanInteractionRequired,
@@ -253,6 +272,9 @@ def add_payment_reference(payment_entry, sales_invoice):
     :type sales_invoice: str
     :return: Payment reference name
     """
+    # Permission gate: creating/attaching Payment Entries requires write rights.
+    frappe.has_permission("Payment Entry", ptype="write", throw=True)
+
     from kefiya.utils.assign_payment_controller import \
         AssignmentController
 
@@ -273,6 +295,9 @@ def auto_assign_payments():
 
     :return: List of assigned payments
     """
+    # Permission gate: bulk-creating Payment Entries requires write rights.
+    frappe.has_permission("Payment Entry", ptype="write", throw=True)
+
     from kefiya.utils.assign_payment_controller import \
         AssignmentController
 
@@ -355,6 +380,12 @@ def create_mastercard_journal_entry_from_purchase_invoice(invoice_doc, bank_tran
 def create_payment_entry(bank_transaction_name, invoice_name, match_against):
     """Create payment entry document from sales or purchase invoice doctype.
     """
+    # Permission gate: reconciling a Bank Transaction into a Payment Entry
+    # requires write rights on that Bank Transaction.
+    frappe.has_permission(
+        "Bank Transaction", ptype="write",
+        doc=bank_transaction_name, throw=True)
+
     if match_against == "Mastercard":
         invoice_doc = frappe.get_doc("Purchase Invoice", invoice_name)
         bank_transaction = frappe.get_doc("Bank Transaction", bank_transaction_name)
@@ -578,6 +609,10 @@ def get_bank_transaction_wizard_list(doctype, fields, filters, order_by, start, 
 
 @frappe.whitelist()
 def change_match_against(selected_match):
+    # Permission gate: changing the global match strategy requires write rights
+    # on Kefiya Settings.
+    frappe.has_permission("Kefiya Settings", ptype="write", throw=True)
+
     kefiya_setting = frappe.get_single("Kefiya Settings")
     kefiya_setting.assign_against = selected_match
     kefiya_setting.save()
