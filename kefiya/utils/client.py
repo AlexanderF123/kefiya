@@ -108,7 +108,24 @@ def fetch_all(kefiya_login, user_scope=None):
         "to_date": now_datetime().date(),
     })
     kefiya_import.save()
-    new_txns = import_fints_transactions(kefiya_import.name, kefiya_login, scope)
+    try:
+        new_txns = import_fints_transactions(
+            kefiya_import.name, kefiya_login, scope)
+    except Exception as e:
+        # A TAN/SCA request raises TanInteractionRequired after the interactive
+        # socket event was already published, so the caller (form or cockpit)
+        # can prompt for the TAN. Report it as a status instead of a raw error
+        # and stop here: nothing else can be fetched until the session is
+        # authenticated. Any other error is surfaced truthfully.
+        try:
+            from kefiya.utils.fints_controller import TanInteractionRequired
+        except Exception:
+            TanInteractionRequired = ()
+        if TanInteractionRequired and isinstance(e, TanInteractionRequired):
+            summary["transactions"] = {"status": "tan_required"}
+            summary["tan_required"] = True
+            return summary
+        raise
     summary["transactions"] = {
         "import": kefiya_import.name,
         "new_count": len(new_txns) if new_txns else 0,
