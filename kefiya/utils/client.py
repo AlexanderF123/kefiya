@@ -141,12 +141,28 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     """Continue a pending SEPA transfer by sending the user's TAN.
 
     Reuses the controller's stored-TAN resume mechanism (the pending transfer
-    dialog was persisted when the TAN was requested).
+    dialog was persisted when the TAN was requested). The bank response is
+    reported truthfully: the transfer is only "submitted" when the bank accepted
+    the TAN without asking for a further challenge, so a money movement is never
+    reported as done on a guess.
     """
-    from kefiya.utils.fints_controller import FinTSController
+    from kefiya.utils.fints_controller import (
+        FinTSController,
+        TanInteractionRequired,
+    )
     interactive = {"docname": user_scope, "enabled": True}
-    # Re-instantiating with the TAN resumes the stored dialog and sends it.
-    FinTSController(kefiya_login, interactive, tan=tan)
+    try:
+        # Re-instantiating with the TAN resumes the stored dialog and sends it.
+        FinTSController(kefiya_login, interactive, tan=tan)
+    except TanInteractionRequired:
+        # The bank requested a further/renewed challenge; the UI re-prompts.
+        return {"status": "tan_required", "docname": kefiya_login}
+    except Exception as e:
+        frappe.log_error(
+            title="Kefiya SEPA transfer TAN submission failed",
+            message=frappe.get_traceback(),
+        )
+        return {"status": "error", "message": str(e)}
     return {"status": "submitted"}
 
 
