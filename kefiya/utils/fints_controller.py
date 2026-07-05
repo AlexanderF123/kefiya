@@ -500,6 +500,108 @@ class FinTSController:
                 })
             return result
 
+    @staticmethod
+    def _amount_from(amount_field):
+        """Read the numeric value of an HISAL Amount1 field group (or None)."""
+        if not amount_field:
+            return None
+        try:
+            return amount_field.amount
+        except Exception:
+            return None
+
+    def get_fints_balance(self):
+        """Fetch the current account balance INCLUDING the credit line
+        (Kreditlinie) and the available amount.
+
+        python-fints' high-level ``get_balance()`` only surfaces the booked
+        balance; the credit line and available amount live on the HISAL response
+        segment (fields ``line_of_credit`` / ``available_amount``). We therefore
+        send HKSAL ourselves -- mirroring python-fints' own ``get_balance``
+        internals -- and read those extra fields. TAN handling is delegated to
+        the client's ``_send_with_possible_retry`` just like a statement fetch.
+
+        :return: list of dicts, one per HISAL segment:
+            {iban, currency, balance, line_of_credit, available_amount}
+        """
+        from fints.segments.saldo import HKSAL5, HKSAL6, HKSAL7
+
+        conn = self.fints_connection
+        iban = self.kefiya_login.account_iban
+
+        def _extract(command_seg, response):
+            rows = []
+            for hisal in response.response_segments(command_seg, "HISAL"):
+                balance = None
+                try:
+                    balance = hisal.balance_booked.as_mt940_Balance().amount.amount
+                except Exception:
+                    balance = None
+                rows.append({
+                    "iban": iban,
+                    "currency": getattr(hisal, "currency", None),
+                    "balance": balance,
+                    "line_of_credit": self._amount_from(
+                        getattr(hisal, "line_of_credit", None)),
+                    "available_amount": self._amount_from(
+                        getattr(hisal, "available_amount", None)),
+                })
+            return rows
+
+        with conn:
+            account = self.get_fints_account_by_iban(iban)
+            with conn._get_dialog() as dialog:
+                hksal = conn._find_highest_supported_command(
+                    HKSAL5, HKSAL6, HKSAL7)
+                seg = hksal(
+                    account=hksal._fields["account"].type.from_sepa_account(
+                        account),
+                    all_accounts=False,
+                )
+                return conn._send_with_possible_retry(dialog, seg, _extract)
+
+    def get_fints_information(self):
+        """Bank + account capabilities, limits and supported operations
+        (FinTS get_information). Returns a nested dict."""
+        with self.fints_connection:
+            return self.fints_connection.get_information()
+
+    def get_fints_scheduled_debits(self, multiple=False):
+        """Standing orders / scheduled debits (Dauerauftraege /
+        Termin-Ueberweisungen) for the login's account."""
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_scheduled_debits(account, multiple)
+
+    def get_fints_statements(self):
+        """List available electronic account statements
+        (elektronische Kontoauszuege / Dokumente)."""
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_statements(account)
+
+    def get_fints_statement(self, number=None, year=None, file_format=None):
+        """Fetch one specific electronic account statement document (HIEKA).
+
+        May return binary content (e.g. PDF); the caller decides how to store it.
+        """
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_statement(
+                account, number, year, file_format)
+
+    def get_fints_credit_card_transactions(self, credit_card_number=None,
+                                           start_date=None, end_date=None):
+        """Credit card transactions (Kreditkartenumsaetze) for the account."""
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_credit_card_transactions(
+                account, credit_card_number, start_date, end_date)
+
     def submit_sepa_transfer(self, pain_xml):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
@@ -740,3 +842,62 @@ class FinTSInteractive:
                 params["mfa_required"] = True
 
             frappe.publish_realtime("fints_tan_interaction_required", params, user=frappe.session.user)
+
+
+@frappe.whitelist()
+def get_account_balance(kefiya_login):
+    """Fetch the current balance, credit line (Kreditlinie) and available amount
+    for a Kefiya Login's account via FinTS (HKSAL).
+
+    Returns a list of dicts (iban, currency, balance, line_of_credit,
+    available_amount); persisting/displaying the values is left to the caller.
+    Like every FinTS call this may trigger a TAN interaction, which the
+    controller handles the same way as a statement fetch.
+    """
+    controller = FinTSController(kefiya_login)
+    return controller.get_fints_balance()
+
+
+def _to_jsonable(value):
+    """Best-effort convert a FinTS-lib result into JSON-serialisable data.
+
+    FinTS objects (accounts, statements, standing orders, ...) vary per bank and
+    library version and are not always JSON-serialisable; unknown objects are
+    stringified so the caller can at least inspect the payload.
+    """
+    return json.loads(json.dumps(value, default=str))
+
+
+@frappe.whitelist()
+def get_bank_information(kefiya_login):
+    """FinTS get_information: bank name, supported operations, accounts, limits."""
+    return _to_jsonable(FinTSController(kefiya_login).get_fints_information())
+
+
+@frappe.whitelist()
+def get_scheduled_debits(kefiya_login):
+    """Standing orders / scheduled debits (Dauerauftraege / Termin-Ueberweisungen)."""
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_scheduled_debits())
+
+
+@frappe.whitelist()
+def get_statements(kefiya_login):
+    """List of available electronic account statements (Kontoauszuege / Dokumente)."""
+    return _to_jsonable(FinTSController(kefiya_login).get_fints_statements())
+
+
+@frappe.whitelist()
+def get_statement(kefiya_login, number=None, year=None, file_format=None):
+    """Fetch one electronic account statement document (HIEKA). May be binary."""
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_statement(
+            number, year, file_format))
+
+
+@frappe.whitelist()
+def get_credit_card_transactions(kefiya_login, credit_card_number=None):
+    """Credit card transactions (Kreditkartenumsaetze)."""
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_credit_card_transactions(
+            credit_card_number))
