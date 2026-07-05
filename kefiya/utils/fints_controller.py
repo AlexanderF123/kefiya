@@ -602,6 +602,58 @@ class FinTSController:
             return self.fints_connection.get_credit_card_transactions(
                 account, credit_card_number, start_date, end_date)
 
+    def get_fints_transactions_xml(self, start_date=None, end_date=None):
+        """Fetch transactions as camt XML (richer than MT940: full structured
+        remittance info / references). Returns the raw camt document streams."""
+        allowed_days = cint(self.kefiya_login.allowed_sync_days_in_past) or 90
+        if start_date is None:
+            start_date = now_datetime().date() - relativedelta(days=allowed_days)
+        if end_date is None:
+            end_date = now_datetime().date() - relativedelta(days=1)
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            return self.fints_connection.get_transactions_xml(
+                account, start_date, end_date)
+
+    def get_fints_status_protocol(self):
+        """Bank status protocol messages (Statusprotokoll / diagnostics)."""
+        with self.fints_connection:
+            return self.fints_connection.get_status_protocol()
+
+    def get_fints_communication_endpoints(self):
+        """Available bank communication endpoints (diagnostics)."""
+        with self.fints_connection:
+            return self.fints_connection.get_communication_endpoints()
+
+    def submit_sepa_debit(self, pain008_xml):
+        """Collect a SEPA direct debit (Lastschrift, pain.008) via FinTS.
+
+        Mirrors submit_sepa_transfer: requires a TAN, never pulls money without
+        the user's TAN. The caller must supply a valid pain.008 message backed by
+        a SEPA mandate. INTENTIONALLY NOT whitelisted -- money collection must be
+        driven by a guarded flow (explicit confirmation + write permission +
+        mandate check), analogous to submit_payment_request_via_fints. VoP
+        (Verification of Payee) mismatches must be resolved by a human, never
+        auto-approved.
+        """
+        with self.fints_connection:
+            account = self.get_fints_account_by_iban(
+                self.kefiya_login.account_iban)
+            response = self.fints_connection.sepa_debit(account, pain008_xml)
+            if self.is_tan_required_and_requested(response):
+                return {
+                    "status": "tan_required",
+                    "docname": self.kefiya_login.name,
+                }
+            frappe.log_error(
+                title="Kefiya SEPA debit completed without TAN challenge",
+                message="login={0}: the bank did not request a TAN".format(
+                    self.kefiya_login.name
+                ),
+            )
+            return {"status": "submitted"}
+
     def submit_sepa_transfer(self, pain_xml, instant_payment=False):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
@@ -921,3 +973,28 @@ def get_credit_card_transactions(kefiya_login, credit_card_number=None):
     return _to_jsonable(
         FinTSController(kefiya_login).get_fints_credit_card_transactions(
             credit_card_number))
+
+
+@frappe.whitelist()
+def get_transactions_camt_xml(kefiya_login, start_date=None, end_date=None):
+    """Transactions as camt XML (richer than MT940)."""
+    _require_login_read(kefiya_login)
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_transactions_xml(
+            start_date, end_date))
+
+
+@frappe.whitelist()
+def get_status_protocol(kefiya_login):
+    """Bank status protocol messages (diagnostics)."""
+    _require_login_read(kefiya_login)
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_status_protocol())
+
+
+@frappe.whitelist()
+def get_communication_endpoints(kefiya_login):
+    """Available bank communication endpoints (diagnostics)."""
+    _require_login_read(kefiya_login)
+    return _to_jsonable(
+        FinTSController(kefiya_login).get_fints_communication_endpoints())
