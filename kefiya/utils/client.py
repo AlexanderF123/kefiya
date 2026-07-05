@@ -60,6 +60,115 @@ def import_fints_holdings(kefiya_login, user_scope):
 
 
 @frappe.whitelist()
+def fetch_all(kefiya_login, user_scope=None):
+    """Fetch everything the bank offers for one login in a single action.
+
+    Runs the real transaction import first (the "Umsaetze"), then best-effort
+    fetches balance, standing orders / scheduled debits, the statement/document
+    list and credit-card transactions. Every extra fetch is wrapped so that a
+    failure of one (or a bank that does not support it) never aborts the others
+    or the transaction import. Standing orders are additionally fed into the
+    Kefiya Planned Payment forecast table.
+
+    A single confirmation/TAN covers the session because the login's stored
+    client state is shared across the calls.
+
+    :return: dict summary {transactions, balance, planned, statements,
+        credit_card, errors}
+    """
+    from frappe.utils import now_datetime
+    from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
+
+    # Permission gate: a user-triggered bank fetch that creates Bank
+    # Transactions / Payment Entries must hold write rights on the login.
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=kefiya_login, throw=True)
+
+    scope = user_scope or kefiya_login
+    summary = {
+        "transactions": None,
+        "balance": None,
+        "planned": None,
+        "statements": None,
+        "credit_card": None,
+        "errors": [],
+    }
+
+    bank_account, allowed_days = (frappe.db.get_value(
+        "Kefiya Login", kefiya_login,
+        ["bank_account", "allowed_sync_days_in_past"]
+    ) or (None, None))
+
+    # 1) Transactions (the primary purpose: "aktuelle Umsaetze abrufen").
+    #    A failure here IS reported to the user (unlike the best-effort extras).
+    kefiya_import = frappe.get_doc({
+        "doctype": "Kefiya Import",
+        "kefiya_login": kefiya_login,
+        "from_date": resolve_incremental_from_date(bank_account, allowed_days),
+        "to_date": now_datetime().date(),
+    })
+    kefiya_import.save()
+    new_txns = import_fints_transactions(kefiya_import.name, kefiya_login, scope)
+    summary["transactions"] = {
+        "import": kefiya_import.name,
+        "new_count": len(new_txns) if new_txns else 0,
+    }
+
+    # The FinTS-capability reads (balance, scheduled debits, statements, credit
+    # card) live on the new FinTSController regardless of the TAN toggle.
+    from kefiya.utils.fints_controller import FinTSController as FetchCtl
+    from kefiya.utils.fints_controller import _to_jsonable
+
+    # 2) Balance incl. credit line (best effort).
+    try:
+        summary["balance"] = FetchCtl(kefiya_login).get_fints_balance()
+    except Exception:
+        summary["errors"].append("balance")
+        frappe.log_error(title="Kefiya fetch_all: balance failed",
+                         message=frappe.get_traceback())
+
+    # 3) Standing orders / scheduled debits -> forecast table (best effort).
+    try:
+        from kefiya.utils.planned_payment import (
+            normalize_scheduled_debits, refresh_planned_payments,
+        )
+        raw = _to_jsonable(FetchCtl(kefiya_login).get_fints_scheduled_debits())
+        norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
+        planned = refresh_planned_payments(kefiya_login, norm["items"])
+        planned["skipped"] = norm["skipped"]
+        summary["planned"] = planned
+    except Exception:
+        summary["errors"].append("scheduled_debits")
+        frappe.log_error(title="Kefiya fetch_all: scheduled debits failed",
+                         message=frappe.get_traceback())
+
+    # 4) Electronic statement / document list (best effort).
+    try:
+        stmts = _to_jsonable(FetchCtl(kefiya_login).get_fints_statements())
+        summary["statements"] = {
+            "count": len(stmts) if isinstance(stmts, list) else 0,
+        }
+    except Exception:
+        summary["errors"].append("statements")
+        frappe.log_error(title="Kefiya fetch_all: statements failed",
+                         message=frappe.get_traceback())
+
+    # 5) Credit-card transactions (best effort).
+    try:
+        cc = _to_jsonable(
+            FetchCtl(kefiya_login).get_fints_credit_card_transactions())
+        summary["credit_card"] = {
+            "count": len(cc) if isinstance(cc, list) else 0,
+        }
+    except Exception:
+        summary["errors"].append("credit_card")
+        frappe.log_error(title="Kefiya fetch_all: credit card failed",
+                         message=frappe.get_traceback())
+
+    return summary
+
+
+@frappe.whitelist()
 def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed=0, instant_payment=0):
     """Prepare a SEPA credit transfer (pain.001) for an Outward Payment Request
     and submit it directly via FinTS -- no manual file upload.

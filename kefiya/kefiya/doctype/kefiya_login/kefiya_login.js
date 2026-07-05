@@ -47,6 +47,45 @@ frappe.ui.form.on('Kefiya Login', {
 		}
 
 		if (frm.doc.account_iban) {
+			// Primary action: pull current transactions + everything else the
+			// bank offers. The button greys out while the fetch runs so it
+			// cannot be triggered twice (a second FinTS dialog / TAN in
+			// parallel).
+			const fetch_btn = frm.add_custom_button(__("Aktuelle Umsätze abrufen"), function() {
+				const $btn = fetch_btn;
+				$btn.prop("disabled", true).addClass("disabled");
+				frappe.call({
+					method: "kefiya.utils.client.fetch_all",
+					args: { kefiya_login: frm.doc.name, user_scope: frm.doc.name },
+					freeze: true,
+					freeze_message: __("Rufe Umsätze und alle weiteren Bankdaten ab ..."),
+					callback: function(r) {
+						const s = (r && r.message) || {};
+						const t = (s.transactions && s.transactions.new_count) || 0;
+						const parts = [__("New transactions: {0}", [t])];
+						if (s.planned) {
+							parts.push(__("Forecast: {0} new / {1} updated / {2} cancelled",
+								[s.planned.created || 0, s.planned.updated || 0, s.planned.cancelled || 0]));
+						}
+						if (s.statements) parts.push(__("Documents: {0}", [s.statements.count || 0]));
+						if (s.credit_card) parts.push(__("Credit-card txns: {0}", [s.credit_card.count || 0]));
+						if (s.errors && s.errors.length) {
+							parts.push(__("Not available from this bank: {0}", [s.errors.join(", ")]));
+						}
+						frappe.msgprint({
+							title: __("Abruf abgeschlossen"),
+							indicator: (s.errors && s.errors.length) ? "orange" : "green",
+							message: parts.join("<br>")
+						});
+						frm.reload_doc();
+					},
+					always: function() {
+						// Re-enable even on error/TAN-abort so the user can retry.
+						$btn.prop("disabled", false).removeClass("disabled");
+					}
+				});
+			});
+
 			frm.add_custom_button(__("Kontoauszüge / Dokumente"), function() {
 				frappe.call({
 					method: "kefiya.utils.fints_controller.get_statements",

@@ -102,6 +102,104 @@ def expand_standing_order_occurrences(next_date, frequency):
     return occurrences
 
 
+def _first(mapping, keys):
+    """Return the first non-empty value among ``keys`` in ``mapping``."""
+    for k in keys:
+        v = mapping.get(k)
+        if v not in (None, "", []):
+            return v
+    return None
+
+
+def _coerce_amount(value):
+    """Best-effort extract a positive float amount from varied shapes.
+
+    Banks/libraries report the amount as a bare number, a string, or a nested
+    ``{"amount": .., "currency": ..}`` object. Returns ``None`` if nothing
+    numeric can be found (the item is then skipped rather than guessed).
+    """
+    if isinstance(value, dict):
+        value = _first(value, ["amount", "value"])
+    if value in (None, ""):
+        return None
+    try:
+        return abs(flt(value))
+    except Exception:
+        return None
+
+
+def normalize_scheduled_debits(raw_items):
+    """Map raw FinTS standing-order / scheduled-debit data to planned-payment
+    items that :func:`refresh_planned_payments` understands.
+
+    The shape returned by python-fints is bank- and version-dependent, so this
+    reads a set of plausible key aliases defensively and SKIPS anything it
+    cannot parse (a missing date or amount) instead of inserting a guessed row.
+    Standing orders with a recurrence are expanded into their occurrences over
+    the next month so the forecast shows the rolling preview.
+
+    :param raw_items: list of jsonable dicts (already run through _to_jsonable)
+    :return: dict with ``items`` (list) and ``skipped`` (int)
+    """
+    items = []
+    skipped = 0
+    for raw in raw_items or []:
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+
+        amount = _coerce_amount(
+            _first(raw, ["amount", "value", "instructed_amount"]))
+        base_date = _first(raw, [
+            "next_execution_date", "next_date", "execution_date",
+            "first_execution_date", "due_date", "date", "planned_date",
+        ])
+        if amount is None or not base_date:
+            skipped += 1
+            continue
+
+        name = _first(raw, [
+            "counterparty_name", "recipient_name", "creditor_name",
+            "recipient", "name", "creditor",
+        ])
+        iban = _first(raw, [
+            "counterparty_iban", "recipient_iban", "creditor_iban", "iban",
+        ])
+        purpose = _first(raw, [
+            "purpose", "remittance_info", "reference", "usage", "description",
+        ])
+        frequency = _first(raw, [
+            "frequency", "time_unit", "interval", "cycle",
+        ])
+        kind = _first(raw, ["payment_kind", "type"]) or "Standing Order"
+
+        # A recurrence expands to its occurrences in the next month; a one-off
+        # (no frequency) yields a single dated item.
+        if frequency:
+            dates = expand_standing_order_occurrences(base_date, frequency)
+        else:
+            try:
+                dates = [getdate(base_date)]
+            except Exception:
+                dates = []
+        if not dates:
+            skipped += 1
+            continue
+
+        for d in dates:
+            items.append({
+                "planned_date": d,
+                "amount": amount,
+                "direction": "Outgoing",
+                "payment_kind": kind,
+                "counterparty_name": name,
+                "counterparty_iban": iban,
+                "purpose": purpose,
+            })
+
+    return {"items": items, "skipped": skipped}
+
+
 def refresh_planned_payments(kefiya_login, items):
     """Idempotently upsert the planned payments reported for a login.
 

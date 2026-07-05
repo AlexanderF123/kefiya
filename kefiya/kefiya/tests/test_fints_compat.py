@@ -108,3 +108,44 @@ class TestMoneyEndpointPermissions(unittest.TestCase):
         )
         self.assertEqual(res.get("status"), "error")
         self.assertIn("confirm", (res.get("message") or "").lower())
+
+
+class TestScheduledDebitNormalizer(unittest.TestCase):
+    """The forecast table (Kefiya Planned Payment) is fed from the bank's
+    standing orders via normalize_scheduled_debits. The bank/library shape is
+    variable, so the normalizer must extract dated+amounted items and skip
+    anything it cannot parse rather than insert a guessed row."""
+
+    def test_parses_common_shape_and_skips_incomplete(self):
+        from kefiya.utils.planned_payment import normalize_scheduled_debits
+
+        raw = [
+            {  # a well-formed one-off scheduled transfer
+                "execution_date": "2999-01-15",
+                "amount": -750.0,
+                "recipient_name": "Landlord GmbH",
+                "recipient_iban": "DE02120300000000202051",
+                "purpose": "Rent",
+            },
+            {  # nested amount object + no frequency -> single item
+                "date": "2999-02-01",
+                "amount": {"amount": 42.5, "currency": "EUR"},
+                "creditor_name": "Insurance",
+            },
+            {"recipient_name": "no date, no amount"},  # -> skipped
+            "not-a-dict",  # -> skipped
+        ]
+        out = normalize_scheduled_debits(raw)
+        self.assertEqual(out["skipped"], 2)
+        self.assertEqual(len(out["items"]), 2)
+        first = out["items"][0]
+        # amount is always stored positive; direction defaults to Outgoing
+        self.assertEqual(first["amount"], 750.0)
+        self.assertEqual(first["direction"], "Outgoing")
+        self.assertEqual(first["counterparty_name"], "Landlord GmbH")
+
+    def test_empty_input_is_safe(self):
+        from kefiya.utils.planned_payment import normalize_scheduled_debits
+
+        out = normalize_scheduled_debits(None)
+        self.assertEqual(out, {"items": [], "skipped": 0})
