@@ -164,6 +164,15 @@ function kefiya_handle_transfer_response(frm, msg) {
         frm.reload_doc();
     } else if (msg.status === "tan_required") {
         kefiya_prompt_transfer_tan(frm, msg.docname);
+    } else if (msg.status === "vop_mismatch") {
+        frappe.msgprint({
+            title: __("Verification of Payee — mismatch"),
+            indicator: "orange",
+            message: __("The bank could not confirm the payee name matches the IBAN. No money was sent. Please have a clerk verify and correct the recipient name, then retry.")
+                + "<pre style=\"white-space:pre-wrap\">"
+                + frappe.utils.escape_html(JSON.stringify(msg.vop_result || {}, null, 2))
+                + "</pre>"
+        });
     } else {
         frappe.msgprint({
             title: __("Transfer failed"),

@@ -654,6 +654,25 @@ class FinTSController:
             )
             return {"status": "submitted"}
 
+    def _vop_mismatch(self, response):
+        """Return VoP (Verification of Payee) result details if the bank flagged
+        a payee name/IBAN mismatch on this response, else None.
+
+        Defensive: python-fints versions without VoP support have no
+        NeedVOPResponse class, so this is a safe no-op there and the transfer
+        proceeds exactly as before.
+        """
+        try:
+            from fints.client import NeedVOPResponse
+        except Exception:
+            return None
+        if isinstance(response, NeedVOPResponse):
+            try:
+                return _to_jsonable(getattr(response, "vop_result", None))
+            except Exception:
+                return {"vop": "mismatch"}
+        return None
+
     def submit_sepa_transfer(self, pain_xml, instant_payment=False):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
@@ -674,6 +693,16 @@ class FinTSController:
                 self.kefiya_login.account_iban)
             response = self.fints_connection.sepa_transfer(
                 account, pain_xml, instant_payment=instant_payment)
+            vop = self._vop_mismatch(response)
+            if vop is not None:
+                # Verification of Payee mismatch: the bank could not confirm the
+                # payee name matches the IBAN. NEVER auto-approve this -- money is
+                # not sent; a Sachbearbeiter must review/correct the payee name.
+                return {
+                    "status": "vop_mismatch",
+                    "docname": self.kefiya_login.name,
+                    "vop_result": vop,
+                }
             if self.is_tan_required_and_requested(response):
                 return {
                     "status": "tan_required",
