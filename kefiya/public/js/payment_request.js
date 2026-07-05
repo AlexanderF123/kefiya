@@ -113,19 +113,35 @@ frappe.ui.form.on('Payment Request', {
 // --- FinTS outgoing transfer (human-in-the-loop: confirm + TAN) ---------------
 
 function kefiya_submit_transfer_via_fints(frm) {
-    frappe.confirm(
-        __("Send a SEPA transfer of {0} to {1} ({2}) via FinTS? The amount is capped at the outstanding amount and you will be asked for a TAN.", [
-            format_currency(frm.doc.grand_total, frm.doc.currency),
-            frm.doc.party || "",
-            frm.doc.bank_account || ""
-        ]),
-        function () {
+    const d = new frappe.ui.Dialog({
+        title: __("SEPA transfer via FinTS"),
+        fields: [
+            {
+                fieldtype: "HTML",
+                options: __("Send a SEPA transfer of {0} to {1} ({2}) via FinTS? The amount is capped at the outstanding amount and you will be asked for a TAN.", [
+                    frappe.utils.escape_html(format_currency(frm.doc.grand_total, frm.doc.currency)),
+                    frappe.utils.escape_html(frm.doc.party || ""),
+                    frappe.utils.escape_html(frm.doc.bank_account || "")
+                ])
+            },
+            {
+                fieldtype: "Check",
+                fieldname: "instant_payment",
+                label: __("Echtzeitüberweisung (SEPA Instant)"),
+                default: 1,
+                description: __("Real-time credit transfer (HKIPZ). The debtor bank and account must support instant payments, otherwise the bank rejects the order.")
+            }
+        ],
+        primary_action_label: __("Send"),
+        primary_action(values) {
+            d.hide();
             frappe.call({
                 method: "kefiya.utils.client.submit_payment_request_via_fints",
                 args: {
                     payment_request_name: frm.doc.name,
                     user_scope: frm.docname,
-                    confirmed: 1
+                    confirmed: 1,
+                    instant_payment: values.instant_payment ? 1 : 0
                 },
                 freeze: true,
                 freeze_message: __("Submitting transfer via FinTS..."),
@@ -134,7 +150,8 @@ function kefiya_submit_transfer_via_fints(frm) {
                 }
             });
         }
-    );
+    });
+    d.show();
 }
 
 function kefiya_handle_transfer_response(frm, msg) {
