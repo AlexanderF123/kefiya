@@ -850,20 +850,6 @@ class FinTSInteractive:
             frappe.publish_realtime("fints_tan_interaction_required", params, user=frappe.session.user)
 
 
-@frappe.whitelist()
-def get_account_balance(kefiya_login):
-    """Fetch the current balance, credit line (Kreditlinie) and available amount
-    for a Kefiya Login's account via FinTS (HKSAL).
-
-    Returns a list of dicts (iban, currency, balance, line_of_credit,
-    available_amount); persisting/displaying the values is left to the caller.
-    Like every FinTS call this may trigger a TAN interaction, which the
-    controller handles the same way as a statement fetch.
-    """
-    controller = FinTSController(kefiya_login)
-    return controller.get_fints_balance()
-
-
 def _to_jsonable(value):
     """Best-effort convert a FinTS-lib result into JSON-serialisable data.
 
@@ -874,15 +860,40 @@ def _to_jsonable(value):
     return json.loads(json.dumps(value, default=str))
 
 
+def _require_login_read(kefiya_login):
+    """Ensure the caller may read this Kefiya Login before any bank data is
+    fetched. These endpoints expose sensitive account data (balances,
+    statements, ...), so a logged-in user must never read a login they cannot
+    access. Raises frappe.PermissionError otherwise."""
+    frappe.has_permission(
+        "Kefiya Login", ptype="read", doc=kefiya_login, throw=True)
+
+
+@frappe.whitelist()
+def get_account_balance(kefiya_login):
+    """Fetch the current balance, credit line (Kreditlinie) and available amount
+    for a Kefiya Login's account via FinTS (HKSAL).
+
+    Returns a list of dicts (iban, currency, balance, line_of_credit,
+    available_amount); persisting/displaying the values is left to the caller.
+    Like every FinTS call this may trigger a TAN interaction, which the
+    controller handles the same way as a statement fetch.
+    """
+    _require_login_read(kefiya_login)
+    return FinTSController(kefiya_login).get_fints_balance()
+
+
 @frappe.whitelist()
 def get_bank_information(kefiya_login):
     """FinTS get_information: bank name, supported operations, accounts, limits."""
+    _require_login_read(kefiya_login)
     return _to_jsonable(FinTSController(kefiya_login).get_fints_information())
 
 
 @frappe.whitelist()
 def get_scheduled_debits(kefiya_login):
     """Standing orders / scheduled debits (Dauerauftraege / Termin-Ueberweisungen)."""
+    _require_login_read(kefiya_login)
     return _to_jsonable(
         FinTSController(kefiya_login).get_fints_scheduled_debits())
 
@@ -890,12 +901,14 @@ def get_scheduled_debits(kefiya_login):
 @frappe.whitelist()
 def get_statements(kefiya_login):
     """List of available electronic account statements (Kontoauszuege / Dokumente)."""
+    _require_login_read(kefiya_login)
     return _to_jsonable(FinTSController(kefiya_login).get_fints_statements())
 
 
 @frappe.whitelist()
 def get_statement(kefiya_login, number=None, year=None, file_format=None):
     """Fetch one electronic account statement document (HIEKA). May be binary."""
+    _require_login_read(kefiya_login)
     return _to_jsonable(
         FinTSController(kefiya_login).get_fints_statement(
             number, year, file_format))
@@ -904,6 +917,7 @@ def get_statement(kefiya_login, number=None, year=None, file_format=None):
 @frappe.whitelist()
 def get_credit_card_transactions(kefiya_login, credit_card_number=None):
     """Credit card transactions (Kreditkartenumsaetze)."""
+    _require_login_read(kefiya_login)
     return _to_jsonable(
         FinTSController(kefiya_login).get_fints_credit_card_transactions(
             credit_card_number))
