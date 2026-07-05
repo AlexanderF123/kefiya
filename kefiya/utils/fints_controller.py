@@ -602,7 +602,7 @@ class FinTSController:
             return self.fints_connection.get_credit_card_transactions(
                 account, credit_card_number, start_date, end_date)
 
-    def submit_sepa_transfer(self, pain_xml):
+    def submit_sepa_transfer(self, pain_xml, instant_payment=False):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
         Requires a TAN: if the bank asks for one, the request is persisted and
@@ -610,12 +610,18 @@ class FinTSController:
         money without the user's TAN.
 
         :param pain_xml: pain.001 credit-transfer message
+        :param instant_payment: if truthy, send as SEPA Instant / real-time
+            credit transfer (Echtzeitueberweisung, FinTS HKIPZ) instead of a
+            regular transfer (HKCCS). The debtor bank + account must support
+            instant payments, otherwise the bank rejects the order.
         :return: {"status": "submitted" | "tan_required", ...}
         """
+        instant_payment = bool(cint(instant_payment))
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
                 self.kefiya_login.account_iban)
-            response = self.fints_connection.sepa_transfer(account, pain_xml)
+            response = self.fints_connection.sepa_transfer(
+                account, pain_xml, instant_payment=instant_payment)
             if self.is_tan_required_and_requested(response):
                 return {
                     "status": "tan_required",

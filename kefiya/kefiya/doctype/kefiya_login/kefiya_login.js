@@ -46,6 +46,41 @@ frappe.ui.form.on('Kefiya Login', {
 			});
 		}
 
+		if (frm.doc.account_iban) {
+			frm.add_custom_button(__("Kontoauszüge / Dokumente"), function() {
+				frappe.call({
+					method: "kefiya.utils.fints_controller.get_statements",
+					args: { kefiya_login: frm.doc.name },
+					freeze: true,
+					freeze_message: __("Fetching document list via FinTS ..."),
+					callback: function(r) {
+						const items = (r && r.message) || [];
+						let body;
+						if (!items.length) {
+							body = `<p>${__("No documents / statements available for this account.")}</p>`;
+						} else {
+							const keys = Object.keys(items[0] || {});
+							const head = keys.map(k => `<th>${frappe.utils.escape_html(k)}</th>`).join("");
+							const rows = items.map(it => {
+								const tds = keys.map(k => {
+									const v = it[k] == null ? "" : String(it[k]);
+									return `<td>${frappe.utils.escape_html(v)}</td>`;
+								}).join("");
+								return `<tr>${tds}</tr>`;
+							}).join("");
+							body = `<div style="overflow-x:auto"><table class="table table-bordered">`
+								+ `<thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+						}
+						new frappe.ui.Dialog({
+							title: __("Kontoauszüge / Dokumente"),
+							size: "large",
+							fields: [{ fieldtype: "HTML", fieldname: "doc_list", options: body }],
+						}).show();
+					}
+				});
+			}, __("FinTS"));
+		}
+
 		// TODO
 		// if (frm.doc.stored_tan_state) {
 		// 	frm.add_custom_button(__("Solve TAN Challenge"), function() {

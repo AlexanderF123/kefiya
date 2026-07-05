@@ -60,7 +60,7 @@ def import_fints_holdings(kefiya_login, user_scope):
 
 
 @frappe.whitelist()
-def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed=0):
+def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed=0, instant_payment=0):
     """Prepare a SEPA credit transfer (pain.001) for an Outward Payment Request
     and submit it directly via FinTS -- no manual file upload.
 
@@ -128,7 +128,8 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
     interactive = {"docname": user_scope, "enabled": True}
     try:
         controller = FinTSController(kefiya_login, interactive)
-        return controller.submit_sepa_transfer(xml_content)
+        return controller.submit_sepa_transfer(
+            xml_content, instant_payment=instant_payment)
     except Exception:
         # release the lock on hard failure so the user can retry deliberately;
         # the audit log + bank statement remain the source of truth.
