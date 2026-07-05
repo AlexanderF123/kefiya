@@ -413,6 +413,66 @@ class FinTSController:
                 })
             return result
 
+    @staticmethod
+    def _amount_from(amount_field):
+        """Read the numeric value of an HISAL Amount1 field group (or None)."""
+        if not amount_field:
+            return None
+        try:
+            return amount_field.amount
+        except Exception:
+            return None
+
+    def get_fints_balance(self):
+        """Fetch the current account balance INCLUDING the credit line
+        (Kreditlinie) and the available amount.
+
+        python-fints' high-level ``get_balance()`` only surfaces the booked
+        balance; the credit line and available amount live on the HISAL response
+        segment (fields ``line_of_credit`` / ``available_amount``). We therefore
+        send HKSAL ourselves -- mirroring python-fints' own ``get_balance``
+        internals -- and read those extra fields. TAN handling is delegated to
+        the client's ``_send_with_possible_retry`` just like a statement fetch.
+
+        :return: list of dicts, one per HISAL segment:
+            {iban, currency, balance, line_of_credit, available_amount}
+        """
+        from fints.segments.saldo import HKSAL5, HKSAL6, HKSAL7
+
+        conn = self.fints_connection
+        iban = self.kefiya_login.account_iban
+
+        def _extract(command_seg, response):
+            rows = []
+            for hisal in response.response_segments(command_seg, "HISAL"):
+                balance = None
+                try:
+                    balance = hisal.balance_booked.as_mt940_Balance().amount.amount
+                except Exception:
+                    balance = None
+                rows.append({
+                    "iban": iban,
+                    "currency": getattr(hisal, "currency", None),
+                    "balance": balance,
+                    "line_of_credit": self._amount_from(
+                        getattr(hisal, "line_of_credit", None)),
+                    "available_amount": self._amount_from(
+                        getattr(hisal, "available_amount", None)),
+                })
+            return rows
+
+        with conn:
+            account = self.get_fints_account_by_iban(iban)
+            with conn._get_dialog() as dialog:
+                hksal = conn._find_highest_supported_command(
+                    HKSAL5, HKSAL6, HKSAL7)
+                seg = hksal(
+                    account=hksal._fields["account"].type.from_sepa_account(
+                        account),
+                    all_accounts=False,
+                )
+                return conn._send_with_possible_retry(dialog, seg, _extract)
+
     def submit_sepa_transfer(self, pain_xml):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
@@ -653,3 +713,17 @@ class FinTSInteractive:
                 params["mfa_required"] = True
 
             frappe.publish_realtime("fints_tan_interaction_required", params, user=frappe.session.user)
+
+
+@frappe.whitelist()
+def get_account_balance(kefiya_login):
+    """Fetch the current balance, credit line (Kreditlinie) and available amount
+    for a Kefiya Login's account via FinTS (HKSAL).
+
+    Returns a list of dicts (iban, currency, balance, line_of_credit,
+    available_amount); persisting/displaying the values is left to the caller.
+    Like every FinTS call this may trigger a TAN interaction, which the
+    controller handles the same way as a statement fetch.
+    """
+    controller = FinTSController(kefiya_login)
+    return controller.get_fints_balance()
