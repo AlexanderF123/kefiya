@@ -112,3 +112,9 @@ msgstr "TAN fehlgeschlagen"
 
 msgid "Unknown error"
 msgstr "Unbekannter Fehler"
+
+msgid "Private Account (hide)"
+msgstr "Privatkonto (ausblenden)"
+
+msgid "Hides this bank account and all of its bank transactions from everyone except the allowed users (kefiya/permissions/bank.py)."
+msgstr "Blendet dieses Bankkonto und alle zugehörigen Banktransaktionen für alle außer den freigegebenen Nutzern aus (kefiya/permissions/bank.py)."

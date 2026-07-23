@@ -1,0 +1,3 @@
+language,source_text,translated_text
+de,Private Account (hide),Privatkonto (ausblenden)
+de,"Hides this bank account and all of its bank transactions from everyone except the allowed users (kefiya/permissions/bank.py).","Blendet dieses Bankkonto und alle zugehörigen Banktransaktionen für alle außer den freigegebenen Nutzern aus (kefiya/permissions/bank.py)."

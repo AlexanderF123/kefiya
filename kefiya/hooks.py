@@ -83,13 +83,17 @@ before_install = "kefiya.utils.install.before_install"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-#     "Event": "frappe.desk.doctype.event.event.get_permission_query_conditions", # noqa: E501
-# }
-#
-# has_permission = {
-#     "Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+# Hide bank accounts flagged custom_is_private (and their transactions)
+# from everyone outside the allowlist in kefiya/permissions/bank.py.
+permission_query_conditions = {
+    "Bank Account": "kefiya.permissions.bank.bank_account_query_conditions",  # noqa: E501
+    "Bank Transaction": "kefiya.permissions.bank.bank_transaction_query_conditions",  # noqa: E501
+}
+
+has_permission = {
+    "Bank Account": "kefiya.permissions.bank.bank_account_has_permission",
+    "Bank Transaction": "kefiya.permissions.bank.bank_transaction_has_permission",  # noqa: E501
+}
 
 # DocType Class
 # ---------------

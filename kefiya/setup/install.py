@@ -45,6 +45,21 @@ def get_custom_fields():
 		}
 	]
 
+	custom_fields_bank_account = [
+		{
+			"label": "Private Account (hide)",
+			"fieldname": "custom_is_private",
+			"fieldtype": "Check",
+			"insert_after": "is_company_account",
+			"description": (
+				"Hides this bank account and all of its bank transactions "
+				"from everyone except the allowed users "
+				"(kefiya/permissions/bank.py)."
+			),
+		},
+	]
+
 	return {
-		"Payment Request": custom_fields_payment_request
+		"Payment Request": custom_fields_payment_request,
+		"Bank Account": custom_fields_bank_account,
 	}
