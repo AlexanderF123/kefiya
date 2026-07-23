@@ -117,6 +117,9 @@ doc_events = {
     },
     "Bank Transaction": {
         "after_insert": "kefiya.utils.planned_payment.match_on_bank_transaction"  # noqa: E501
+    },
+    "Communication": {
+        "after_insert": "kefiya.utils.autoreply.on_communication_after_insert"  # noqa: E501
     }
 }
 

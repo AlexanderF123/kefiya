@@ -1,0 +1,150 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "naming_rule": "Random",
+ "creation": "2026-07-23 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "rule",
+  "email_account",
+  "column_break_head",
+  "sender",
+  "case_key",
+  "section_break_refs",
+  "reference_doctype",
+  "reference_name",
+  "column_break_refs",
+  "communication",
+  "reply_communication",
+  "section_break_result",
+  "action",
+  "autonomy_level",
+  "column_break_result",
+  "detail"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Regel",
+   "options": "Kefiya AutoReply Rule",
+   "search_index": 1
+  },
+  {
+   "fieldname": "email_account",
+   "fieldtype": "Link",
+   "label": "E-Mail-Postfach",
+   "options": "Email Account"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sender",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Absender",
+   "search_index": 1
+  },
+  {
+   "description": "Duplikatsschlüssel: Absender + Vorgang (bzw. nur Absender bei Mails ohne Vorgangsbezug).",
+   "fieldname": "case_key",
+   "fieldtype": "Data",
+   "label": "Vorgangsschlüssel",
+   "search_index": 1
+  },
+  {
+   "fieldname": "section_break_refs",
+   "fieldtype": "Section Break",
+   "label": "Bezüge"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Vorgangstyp",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Vorgang",
+   "options": "reference_doctype"
+  },
+  {
+   "fieldname": "column_break_refs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "communication",
+   "fieldtype": "Link",
+   "label": "Eingehende Nachricht",
+   "options": "Communication"
+  },
+  {
+   "fieldname": "reply_communication",
+   "fieldtype": "Link",
+   "label": "Antwort (Communication)",
+   "options": "Communication"
+  },
+  {
+   "fieldname": "section_break_result",
+   "fieldtype": "Section Break",
+   "label": "Ergebnis"
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Aktion",
+   "options": "Would Send\nSent\nDraft Created\nSkipped Duplicate\nBlocked\nError"
+  },
+  {
+   "fieldname": "autonomy_level",
+   "fieldtype": "Data",
+   "label": "Autonomiestufe"
+  },
+  {
+   "fieldname": "column_break_result",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "detail",
+   "fieldtype": "Text",
+   "label": "Detail"
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kefiya",
+ "name": "Kefiya AutoReply Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

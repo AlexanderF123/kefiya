@@ -1,0 +1,158 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:KAR-{####}",
+ "naming_rule": "Expression",
+ "creation": "2026-07-23 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "kill_switch",
+  "column_break_head",
+  "email_account",
+  "reference_doctype",
+  "section_break_autonomy",
+  "autonomy_level",
+  "column_break_autonomy",
+  "daily_limit",
+  "cooldown_days",
+  "section_break_content",
+  "email_template",
+  "column_break_content",
+  "response_time_days",
+  "section_break_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "Nur aktivierte Regeln versenden bzw. protokollieren Eingangsbestätigungen.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Aktiviert"
+  },
+  {
+   "default": "0",
+   "description": "Not-Aus: Bei gesetztem Kill-Switch tut die Regel nichts mehr (auch kein Shadow Mode).",
+   "fieldname": "kill_switch",
+   "fieldtype": "Check",
+   "label": "Kill-Switch"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "email_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "E-Mail-Postfach",
+   "options": "Email Account",
+   "reqd": 1
+  },
+  {
+   "description": "Optional: Regel gilt nur für eingehende Mails, die diesem Vorgangstyp (Referenz-DocType der Communication) zugeordnet sind. Leer = alle.",
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Vorgangstyp (optional)",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "section_break_autonomy",
+   "fieldtype": "Section Break",
+   "label": "Autonomie und Leitplanken"
+  },
+  {
+   "default": "0 - Shadow Mode",
+   "description": "0 = nur protokollieren, was gesendet worden wäre. 1 = Antwortentwurf anlegen, Mensch sendet. Ab 2 = automatischer Versand über die E-Mail-Queue (mit Tageslimit).",
+   "fieldname": "autonomy_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Autonomiestufe",
+   "options": "0 - Shadow Mode\n1 - Vorschlagen (Entwurf)\n2 - Versand mit Leitplanken\n3 - Autonom mit Leitplanken",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_autonomy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "200",
+   "description": "Maximale Anzahl Eingangsbestätigungen pro Tag für diese Regel (Anomalie-Leitplanke).",
+   "fieldname": "daily_limit",
+   "fieldtype": "Int",
+   "label": "Tageslimit"
+  },
+  {
+   "default": "7",
+   "description": "Gilt nur für Mails OHNE Vorgangsbezug: innerhalb dieses Zeitraums erhält derselbe Absender keine erneute Bestätigung. Bei Mails MIT Vorgangsbezug gilt: genau eine Bestätigung je Absender und Vorgang.",
+   "fieldname": "cooldown_days",
+   "fieldtype": "Int",
+   "label": "Cooldown ohne Vorgang (Tage)"
+  },
+  {
+   "fieldname": "section_break_content",
+   "fieldtype": "Section Break",
+   "label": "Inhalt"
+  },
+  {
+   "description": "Mustertext für die Eingangsbestätigung. Platzhalter: {{ vorgangsnummer }}, {{ frist }}, {{ sender_name }}, {{ original_subject }}. Leer = eingebauter Standardtext.",
+   "fieldname": "email_template",
+   "fieldtype": "Link",
+   "label": "Mustertext (E-Mail-Vorlage)",
+   "options": "Email Template"
+  },
+  {
+   "fieldname": "column_break_content",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "2",
+   "description": "„Wir melden uns bis …“ – zugesagte Reaktionszeit in Tagen ab Eingang.",
+   "fieldname": "response_time_days",
+   "fieldtype": "Int",
+   "label": "Reaktionszeit (Tage)"
+  },
+  {
+   "fieldname": "section_break_notes",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notizen"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kefiya",
+ "name": "Kefiya AutoReply Rule",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
