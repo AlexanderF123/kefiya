@@ -1,0 +1,102 @@
+{
+  "name": "Dokumenten-Inventar (SharePoint → ERPNext)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Dokumenten-Inventar\nPhase 1: Metadaten aller Dateien aus SharePoint/OneDrive nach ERPNext (AX Dokument).\n\nVor Aktivierung:\n1. Credentials setzen: Microsoft Graph (OAuth2), ERPNext API-User (Header `Authorization: token key:secret`).\n2. DRIVES-Liste im Code-Node füllen (Drive-IDs der Bibliotheken: Hausverwaltung 'Freigegebene Dokumente', 'Dokumentvorlagen', OneDrive 'Email attachments from Flow').\n3. Erstlauf mit `?dry=1&limit=100` am ERPNext-Node testen, dann Parameter entfernen.\n4. Antwort `status=blocked` (Kill-Switch) bricht den Lauf ab.\n\nDelta-Tokens werden im Workflow Static Data gehalten → Folgeläufe übertragen nur Änderungen.",
+        "height": 360,
+        "width": 420
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-780, -140],
+      "name": "Anleitung"
+    },
+    {
+      "parameters": {"rule": {"interval": [{"field": "hours", "hoursInterval": 1}]}},
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-320, 0],
+      "name": "Stündlich"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Drive-IDs der zu indexierenden Bibliotheken (Graph: /sites/{site}/drives)\nconst DRIVES = [\n  // { driveId: 'b!....', label: 'HV Freigegebene Dokumente', source: 'SharePoint' },\n  // { driveId: 'b!....', label: 'HV Dokumentvorlagen', source: 'SharePoint' },\n  // { driveId: 'b!....', label: 'OneDrive Email attachments from Flow', source: 'OneDrive' },\n];\nconst staticData = $getWorkflowStaticData('global');\nreturn DRIVES.map(d => ({ json: { ...d, deltaLink: staticData['delta_' + d.driveId] || null } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-100, 0],
+      "name": "Drives + Delta-Token"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.deltaLink || 'https://graph.microsoft.com/v1.0/drives/' + $json.driveId + '/root/delta?$top=500' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOAuth2Api",
+        "options": {"pagination": {"paginationMode": "responseContainsNextURL", "nextURL": "={{ $response.body['@odata.nextLink'] }}"}}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, 0],
+      "name": "Graph Delta-Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Graph-Items → AX-Dokument-Payload; Ordner und Gelöschtes überspringen.\n// Neues deltaLink für den nächsten Lauf sichern.\nconst staticData = $getWorkflowStaticData('global');\nconst out = [];\nfor (const item of $input.all()) {\n  const body = item.json;\n  if (body['@odata.deltaLink']) staticData['delta_' + $('Drives + Delta-Token').item.json.driveId] = body['@odata.deltaLink'];\n  for (const f of body.value || []) {\n    if (f.folder || f.deleted) continue;\n    const path = (f.parentReference?.path || '').replace(/^\\/drives\\/[^/]+\\/root:?/, '');\n    const unit = (path + '/' + f.name).match(/\\b(\\d{3}-\\d{3}(-\\d{2})?|[A-Z]-\\d{3}-\\d{3}-\\d{2})\\b/);\n    out.push({ json: {\n      drive_id: f.parentReference?.driveId,\n      item_id: f.id,\n      source: $('Drives + Delta-Token').item.json.source,\n      file_name: f.name,\n      file_type: (f.name.split('.').pop() || '').toLowerCase(),\n      file_size: f.size,\n      web_url: f.webUrl,\n      folder_path: path,\n      modified_on_source: f.lastModifiedDateTime,\n      etag: f.eTag,\n      unit_code: unit ? unit[1] : undefined,\n    }});\n  }\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [340, 0],
+      "name": "Mapping"
+    },
+    {
+      "parameters": {"batchSize": 200},
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [560, 0],
+      "name": "Batches à 200"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://axessio.de/api/method/upsert_ax_dokument",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "Authorization", "value": "token {{API_KEY}}:{{API_SECRET}}"}]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { action: 'inventory', docs: $items().map(i => i.json) } }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 0],
+      "name": "ERPNext Upsert"
+    },
+    {
+      "parameters": {
+        "conditions": {"string": [{"value1": "={{ $json.message?.status }}", "operation": "equals", "value2": "blocked"}]}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 0],
+      "name": "Kill-Switch?"
+    },
+    {
+      "parameters": {"message": "Dokumenten-Inventar: ERPNext meldet 'blocked' (Kill-Switch/Regel fehlt) – Lauf abgebrochen.", "options": {}},
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1220, -100],
+      "name": "Abbruch"
+    }
+  ],
+  "connections": {
+    "Stündlich": {"main": [[{"node": "Drives + Delta-Token", "type": "main", "index": 0}]]},
+    "Drives + Delta-Token": {"main": [[{"node": "Graph Delta-Query", "type": "main", "index": 0}]]},
+    "Graph Delta-Query": {"main": [[{"node": "Mapping", "type": "main", "index": 0}]]},
+    "Mapping": {"main": [[{"node": "Batches à 200", "type": "main", "index": 0}]]},
+    "Batches à 200": {"main": [[{"node": "ERPNext Upsert", "type": "main", "index": 0}]]},
+    "ERPNext Upsert": {"main": [[{"node": "Kill-Switch?", "type": "main", "index": 0}]]},
+    "Kill-Switch?": {"main": [[{"node": "Abbruch", "type": "main", "index": 0}], [{"node": "Batches à 200", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "pinData": {}
+}

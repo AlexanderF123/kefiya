@@ -1,0 +1,51 @@
+{
+  "doctype": "DocType",
+  "name": "AX Dokument",
+  "module": "Custom",
+  "custom": 1,
+  "naming_rule": "Autoincrement",
+  "autoname": "autoincrement",
+  "title_field": "file_name",
+  "search_fields": "file_name,document_category,summary",
+  "track_changes": 1,
+  "engine": "InnoDB",
+  "fields": [
+    {"fieldname": "sec_identity", "fieldtype": "Section Break", "label": "Quelle"},
+    {"fieldname": "source", "fieldtype": "Select", "label": "Quellsystem", "options": "SharePoint\nOneDrive\nERPNext", "reqd": 1, "in_list_view": 0, "in_standard_filter": 1},
+    {"fieldname": "file_name", "fieldtype": "Data", "label": "Dateiname", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "file_type", "fieldtype": "Data", "label": "Dateityp", "in_standard_filter": 1},
+    {"fieldname": "file_size", "fieldtype": "Int", "label": "Größe (Bytes)"},
+    {"fieldname": "cb_identity", "fieldtype": "Column Break"},
+    {"fieldname": "drive_id", "fieldtype": "Data", "label": "Drive-ID", "reqd": 1, "read_only": 1},
+    {"fieldname": "item_id", "fieldtype": "Data", "label": "Item-ID", "reqd": 1, "read_only": 1, "unique": 0},
+    {"fieldname": "web_url", "fieldtype": "Data", "label": "Link zum Original", "options": "URL", "in_list_view": 1},
+    {"fieldname": "folder_path", "fieldtype": "Small Text", "label": "Ordnerpfad"},
+    {"fieldname": "modified_on_source", "fieldtype": "Datetime", "label": "Geändert (Quelle)"},
+    {"fieldname": "etag", "fieldtype": "Data", "label": "ETag", "read_only": 1},
+
+    {"fieldname": "sec_content", "fieldtype": "Section Break", "label": "Inhalt"},
+    {"fieldname": "document_category", "fieldtype": "Select", "label": "Kategorie", "options": "\nMietvertrag\nNachtrag\nKündigung\nRechnung\nAngebot\nSchreiben\nProtokoll\nÜbergabeprotokoll\nVollmacht\nVersicherung\nBehörde\nFoto\nPlan/Zeichnung\nVorlage\nSonstiges", "in_list_view": 1, "in_standard_filter": 1},
+    {"fieldname": "summary", "fieldtype": "Small Text", "label": "Kurzzusammenfassung", "in_list_view": 1},
+    {"fieldname": "language", "fieldtype": "Data", "label": "Sprache"},
+    {"fieldname": "full_text", "fieldtype": "Long Text", "label": "Volltext / OCR"},
+
+    {"fieldname": "sec_links", "fieldtype": "Section Break", "label": "Verknüpfung"},
+    {"fieldname": "property", "fieldtype": "Link", "label": "Objekt", "options": "Property", "in_standard_filter": 1},
+    {"fieldname": "unit_code", "fieldtype": "Data", "label": "Einheiten-Code (aus Pfad)"},
+    {"fieldname": "cb_links", "fieldtype": "Column Break"},
+    {"fieldname": "lease", "fieldtype": "Link", "label": "Mietvertrag (Lease)", "options": "Lease"},
+    {"fieldname": "customer", "fieldtype": "Link", "label": "Kunde/Mieter", "options": "Customer"},
+
+    {"fieldname": "sec_pipeline", "fieldtype": "Section Break", "label": "Verarbeitung", "collapsible": 1},
+    {"fieldname": "processing_status", "fieldtype": "Select", "label": "Verarbeitungsstatus", "options": "Neu\nText extrahiert\nZusammengefasst\nFehler", "default": "Neu", "in_standard_filter": 1},
+    {"fieldname": "error_message", "fieldtype": "Small Text", "label": "Fehlermeldung", "read_only": 1},
+    {"fieldname": "cb_pipeline", "fieldtype": "Column Break"},
+    {"fieldname": "last_synced", "fieldtype": "Datetime", "label": "Zuletzt synchronisiert", "read_only": 1}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "share": 1, "print": 1, "email": 1},
+    {"role": "axessio Hausverwalter", "read": 1, "write": 1, "create": 0, "delete": 0, "report": 1, "export": 1, "share": 1, "print": 1, "email": 1},
+    {"role": "axessio Buchhalter", "read": 1, "report": 1, "export": 1},
+    {"role": "axessio Technikverwalter", "read": 1, "report": 1, "export": 1}
+  ]
+}
