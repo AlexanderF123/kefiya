@@ -95,7 +95,18 @@ def _build_sepa_xml(payment_request_name):
 	try:
 		sepa = SepaTransfer(config, schema="pain.001.001.03", clean=False)
 		sepa.add_payment(payment)
-		xml_content = sepa.export(validate=False)
+		# Validate the generated document against the pain.001.001.03 XSD
+		# (FEAT-7937). ``clean=False`` above means input text is not sanitised,
+		# so an out-of-spec name/IBAN/charset would otherwise silently produce a
+		# malformed bank instruction. Fail closed instead: a schema violation
+		# returns an error and blocks the export rather than handing out an
+		# invalid SEPA file the bank would reject (or mis-process).
+		try:
+			xml_content = sepa.export(validate=True)
+		except Exception as validation_error:
+			return None, _(
+				"Generated SEPA XML (pain.001) failed schema validation: {0}"
+			).format(validation_error)
 
 		if isinstance(xml_content, bytes):
 			xml_content = xml_content.decode("utf-8")

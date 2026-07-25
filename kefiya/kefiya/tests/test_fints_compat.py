@@ -166,6 +166,24 @@ class TestSepaExportGate(unittest.TestCase):
             "_build_sepa_xml must check the approval (docstatus) state",
         )
 
+    def test_builder_validates_against_xsd(self):
+        """FEAT-7937: the pain.001 must be validated against the SEPA XSD before
+        it leaves the system, so a malformed instruction is blocked rather than
+        sent to the bank."""
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        src = inspect.getsource(m._build_sepa_xml)
+        self.assertIn(
+            "validate=True",
+            src,
+            "_build_sepa_xml must export with XSD validation enabled",
+        )
+        self.assertNotIn(
+            "validate=False",
+            src,
+            "_build_sepa_xml must not export without validation",
+        )
+
 
 class TestScheduledDebitNormalizer(unittest.TestCase):
     """The forecast table (Kefiya Planned Payment) is fed from the bank's
