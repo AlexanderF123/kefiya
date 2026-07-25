@@ -110,6 +110,63 @@ class TestMoneyEndpointPermissions(unittest.TestCase):
         self.assertIn("confirm", (res.get("message") or "").lower())
 
 
+class TestSepaExportGate(unittest.TestCase):
+    """Regression for FEAT-7931: the SEPA pain.001 export must not bypass the
+    outgoing-payment approval workflow.
+
+    ``export_request`` / ``send_sepa_xml_via_email`` are ``@frappe.whitelist()``
+    endpoints, so without an explicit gate any logged-in user could call them on
+    an *unapproved draft* Outward Payment Request and receive a ready-to-execute
+    SEPA file -- defeating the 4-eyes "Payment Request Freigabe (Ausgang)"
+    workflow that only gates the submit. So the export path must (a) require
+    submit permission and (b) refuse anything that is not a submitted request.
+    """
+
+    def test_export_endpoints_are_whitelisted(self):
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        for name in ("export_request", "send_sepa_xml_via_email"):
+            fn = getattr(m, name)
+            self.assertTrue(
+                getattr(fn, "__func__", fn) in frappe.whitelisted
+                or fn in frappe.whitelisted,
+                f"{name} is expected to be a whitelisted endpoint",
+            )
+
+    def test_export_endpoints_have_permission_gate(self):
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        for name in ("export_request", "send_sepa_xml_via_email"):
+            src = inspect.getsource(getattr(m, name))
+            self.assertIn(
+                "has_permission",
+                src,
+                f"{name} must call frappe.has_permission before acting",
+            )
+            self.assertIn(
+                "throw=True",
+                src,
+                f"{name}'s permission check must throw (deny) on failure",
+            )
+            self.assertIn(
+                "Payment Request",
+                src,
+                f"{name} must guard the Payment Request DocType",
+            )
+
+    def test_builder_gates_on_submitted_state(self):
+        """The pain.001 builder must refuse a non-submitted (unapproved) doc, so
+        the approval workflow that gates the submit cannot be side-stepped."""
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        src = inspect.getsource(m._build_sepa_xml)
+        self.assertIn(
+            "docstatus",
+            src,
+            "_build_sepa_xml must check the approval (docstatus) state",
+        )
+
+
 class TestScheduledDebitNormalizer(unittest.TestCase):
     """The forecast table (Kefiya Planned Payment) is fed from the bank's
     standing orders via normalize_scheduled_debits. The bank/library shape is

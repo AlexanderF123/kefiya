@@ -17,6 +17,18 @@ def _build_sepa_xml(payment_request_name):
 	if doc.payment_request_type != "Outward":
 		return None, _("SEPA XML (pain.001) is only supported for Outward payment requests.")
 
+	# Approval gate (FEAT-7931): a pain.001 file is a ready-to-execute payment
+	# instruction. It must only be produced for a submitted -- i.e. GF-approved
+	# via the "Payment Request Freigabe (Ausgang)" 4-eyes workflow -- request.
+	# Refusing drafts here is what makes the submit/approval gate meaningful:
+	# without it, calling the whitelisted export endpoint on an unapproved draft
+	# would hand out an executable SEPA file and bypass the approval entirely.
+	if doc.docstatus != 1:
+		return None, _(
+			"SEPA XML (pain.001) can only be generated for a submitted "
+			"(approved) Payment Request."
+		)
+
 	company_bank = frappe.get_doc("Bank Account", doc.company_bank_account)
 	party_bank = frappe.get_doc("Bank Account", doc.bank_account)
 	invoicedoc = frappe.get_doc(doc.reference_doctype, doc.reference_name)
@@ -94,6 +106,14 @@ def _build_sepa_xml(payment_request_name):
 
 @frappe.whitelist()
 def export_request(payment_request_name):
+	# Permission gate: @frappe.whitelist() makes this callable by any logged-in
+	# user regardless of DocType permissions, so producing an executable SEPA
+	# payment file must require submit rights on the Payment Request (mirrors
+	# kefiya.utils.client.submit_payment_request_via_fints). The approval-state
+	# gate lives in _build_sepa_xml (docstatus == 1).
+	frappe.has_permission(
+		"Payment Request", ptype="submit",
+		doc=payment_request_name, throw=True)
 	try:
 		settings = frappe.get_single("Kefiya Settings")
 
@@ -122,6 +142,10 @@ def export_request(payment_request_name):
 
 @frappe.whitelist()
 def send_sepa_xml_via_email(recipient_email, xml_content):
+	# Permission gate: this mails an executable SEPA payment file to the
+	# configured recipient, so it must require submit rights on Payment Request
+	# rather than being callable by any logged-in user.
+	frappe.has_permission("Payment Request", ptype="submit", throw=True)
 	try:
 		subject = _("Moneyplex SEPA File")
 		message = _("Please find the attached SEPA XML payment file.")

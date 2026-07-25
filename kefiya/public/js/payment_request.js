@@ -7,9 +7,16 @@ frappe.ui.form.on('Payment Request', {
 
         // FinTS direct transfer (no manual upload) -- only for a submitted
         // Outward request, and always behind an explicit confirmation + TAN.
+        // The SEPA-XML export is offered on the same terms: only after the
+        // request has been GF-approved and submitted (FEAT-7931). The server
+        // refuses to build a pain.001 for a draft, so exporting before approval
+        // is impossible -- the button just mirrors that gate in the UI.
         if (frm.doc.docstatus === 1 && frm.doc.payment_request_type === "Outward") {
             frm.add_custom_button(__("Send via FinTS"), function() {
                 kefiya_submit_transfer_via_fints(frm);
+            });
+            frm.add_custom_button(__("Export SEPA XML"), function() {
+                kefiya_export_sepa_xml(frm);
             });
         }
     },
@@ -35,79 +42,89 @@ frappe.ui.form.on('Payment Request', {
         });
     },
 
-    before_submit: function(frm) {
+});
 
-        frappe.call({
-            method: "kefiya.events.hammer_script.payment_request_on_submit.export_request",
-            args: {
-                payment_request_name: frm.doc.name
-            },
-            callback: function(r) {
-                if (r.message.status == "success") {
-                    var export_action = r.message.export_action;
-                    var is_download = export_action == "Download SEPA XML";
-                    var is_email = export_action == "Send SEPA XML via Email";
 
-                    if (is_download) {
-                        var content = r.message.data;
-                        var blob = new Blob([content], { type: "application/xml;charset=utf-8;" });
+// --- SEPA pain.001 export (only for submitted / GF-approved Outward PRs) ------
+//
+// Moved off `before_submit` on purpose: the server now refuses to build a
+// pain.001 for a draft (FEAT-7931), so an auto-export at submit time would fail
+// the very transition it runs in. Instead the file is produced on demand once
+// the request is submitted -- the approval workflow gates the submit, the
+// server gates the build, and this button gates the UI.
 
-                        var link = document.createElement("a");
-                        if (link.download !== undefined) {
-                            var url = URL.createObjectURL(blob);
-                            link.setAttribute("href", url);
-                            link.setAttribute("download", "moneyplex_" + frm.doc.name + ".xml");
-                            link.style.visibility = 'hidden';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                        }
-                    }
-                    else if (is_email) {
+function kefiya_export_sepa_xml(frm) {
+    frappe.call({
+        method: "kefiya.events.hammer_script.payment_request_on_submit.export_request",
+        args: {
+            payment_request_name: frm.doc.name
+        },
+        freeze: true,
+        freeze_message: __("Generating SEPA XML..."),
+        callback: function(r) {
+            if (!r.message || r.message.status != "success") {
+                frappe.msgprint(__('Error during export: {0}', [(r.message && r.message.message) || __("Unknown error")]));
+                return;
+            }
 
-                        var recipient_email = r.message.recipient_email;
-                        var file_content = r.message.data;
+            var export_action = r.message.export_action;
+            var is_download = export_action == "Download SEPA XML";
+            var is_email = export_action == "Send SEPA XML via Email";
 
-                        frappe.msgprint({
-                            title: __('Sending Email'),
-                            indicator: 'blue',
-                            message: __('Email is being sent to {0}. Please wait...', [recipient_email])
-                        });
+            if (is_download) {
+                var content = r.message.data;
+                var blob = new Blob([content], { type: "application/xml;charset=utf-8;" });
 
-                        frappe.call({
-                            method: "kefiya.events.hammer_script.payment_request_on_submit.send_sepa_xml_via_email",
-                            args: {
-                                recipient_email: recipient_email,
-                                xml_content: file_content
-                            },
-                            callback: function (r) {
-
-                                if (r.message) {
-                                    if (r.message.status === "success") {
-                                        frappe.show_alert({
-                                            message: __('Email sent successfully to {0}', [recipient_email]),
-                                            indicator: 'green'
-                                        });
-                                    } else {
-                                        frappe.msgprint({
-                                            title: __('Error'),
-                                            indicator: 'red',
-                                            message: r.message.message
-                                        });
-                                        frappe.validated = false;
-                                    }
-                                }
-                            }
-                        });
-                    }
-                } else {
-                    frappe.msgprint(__('Error during export: {0}', [r.message.message]));
-                    frappe.validated = false;
+                var link = document.createElement("a");
+                if (link.download !== undefined) {
+                    var url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", "moneyplex_" + frm.doc.name + ".xml");
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
                 }
             }
-        });
-    }
-});
+            else if (is_email) {
+
+                var recipient_email = r.message.recipient_email;
+                var file_content = r.message.data;
+
+                frappe.msgprint({
+                    title: __('Sending Email'),
+                    indicator: 'blue',
+                    message: __('Email is being sent to {0}. Please wait...', [recipient_email])
+                });
+
+                frappe.call({
+                    method: "kefiya.events.hammer_script.payment_request_on_submit.send_sepa_xml_via_email",
+                    args: {
+                        recipient_email: recipient_email,
+                        xml_content: file_content
+                    },
+                    callback: function (r) {
+
+                        if (r.message) {
+                            if (r.message.status === "success") {
+                                frappe.show_alert({
+                                    message: __('Email sent successfully to {0}', [recipient_email]),
+                                    indicator: 'green'
+                                });
+                            } else {
+                                frappe.msgprint({
+                                    title: __('Error'),
+                                    indicator: 'red',
+                                    message: r.message.message
+                                });
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    });
+}
 
 
 // --- FinTS outgoing transfer (human-in-the-loop: confirm + TAN) ---------------
