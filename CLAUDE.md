@@ -44,3 +44,12 @@ Custom-HTML-Block-`script` oder sonstiger serverseitiger Code — MÜSSEN **beid
 
 **Erst wenn 1 UND 2 grün sind → deployen.** Gilt zusätzlich zum Skill `axessio-dev-process`
 (Risikoklassen, Autonomiestufen, Definition of Done, Run-Log-Pflicht), nicht statt ihm.
+
+## Produktions-Deploy — Freigabe-Grenze
+
+- **Verifizierte Compute-/Korrektheits-Fixes** an Rechen-Skripten (z. B. `bka_live_compute`) dürfen nach
+  grünem Test-first + Thermonuclear **autonom** deployt werden.
+- **Nach außen wirkende Änderungen** — Versand, echter Mailversand, alles, was Daten an Mieter/Dritte
+  schickt oder schwer reversibel ist (z. B. `bka_versand`, tatsächliche E-Rechnungen) — brauchen **immer
+  eine ausdrückliche Freigabe** des Users vor dem Produktions-Deploy. Der validierte Kandidat wird zur
+  Freigabe vorgelegt (Staging-Test + Vorschau), nicht einfach live geschaltet.
