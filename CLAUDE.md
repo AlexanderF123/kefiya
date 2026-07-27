@@ -31,5 +31,16 @@ Custom-HTML-Block-`script` oder sonstiger serverseitiger Code — MÜSSEN **beid
      `custom_thermonuclear_tested_on` (Datum) und `custom_thermonuclear_test_result`.
    - Erst nach grünem Test veröffentlichen.
 
+**Reihenfolge ist verbindlich: TEST VOR DEM SCHREIBEN.** Beide Prüfungen (1 UND 2) laufen gegen den
+**Kandidaten** (die neue Fassung), BEVOR die produktive Fassung überschrieben wird. Niemals
+„deploy-then-test". Mechanik unter den Sandbox-Einschränkungen (kein Datei-/Netzzugriff in
+`run_python_code`):
+- Kandidaten in einem **deaktivierten Staging-Server-Script** ablegen (z. B. `*_staging`,
+  `disabled=1`, unwirksame `api_method`) und dort via `frappe.utils.safe_exec` compile+exec testen —
+  die produktive Fassung bleibt unangetastet. Erst bei grün die produktive überschreiben, dann
+  Staging löschen. (Alternativ Kandidat als String in die Sandbox testen.)
+- Ausnahme nur bei **akutem Produktionsausfall**: „restore first" ist erlaubt, aber der
+  Sandbox-Test (compile+exec) bleibt Pflicht und wird unmittelbar nach dem Notfall-Deploy nachgezogen.
+
 **Erst wenn 1 UND 2 grün sind → deployen.** Gilt zusätzlich zum Skill `axessio-dev-process`
 (Risikoklassen, Autonomiestufen, Definition of Done, Run-Log-Pflicht), nicht statt ihm.
