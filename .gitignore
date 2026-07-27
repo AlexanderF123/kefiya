@@ -20,3 +20,6 @@ kefiya/docs/current
 !.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
+
+# Claude Code local settings (persoenliche Berechtigungen, nicht teilen)
+.claude/settings.local.json
