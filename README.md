@@ -38,6 +38,16 @@ Python 3.4 <\
 [https://www.hbci-zka.de/register/bedingungen_bankenliste.htm](https://www.hbci-zka.de/register/bedingungen_bankenliste.htm)
 -  [ ] ...
 
+### EU AI Act
+
+Kefiya contains no artificial intelligence component. Payment-to-voucher
+assignment is purely deterministic (exact amount and IBAN matching within fixed
+date windows) — no models, no scores, no inference. Kefiya is therefore not an
+AI system within the meaning of Art. 3(1) of Regulation (EU) 2024/1689.
+
+See [`kefiya/docs/eu_ai_act_assessment.md`](kefiya/docs/eu_ai_act_assessment.md)
+for the full assessment, including the changes that would invalidate it.
+
 ### License
 
 MIT License
