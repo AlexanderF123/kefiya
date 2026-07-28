@@ -93,6 +93,66 @@ class TestScheduleErrorLogging(unittest.TestCase):
         )
 
 
+class TestFailedLoginRecovery(unittest.TestCase):
+    """The per-login recovery path must isolate one login from the next."""
+
+    def test_recovery_rolls_back_then_logs_then_commits(self):
+        """Order matters: a rollback after logging drops the Error Log."""
+        order = []
+        originals = (frappe.db.rollback, frappe.db.commit, frappe.log_error)
+
+        frappe.db.rollback = lambda: order.append("rollback")
+        frappe.db.commit = lambda: order.append("commit")
+        frappe.log_error = lambda **kw: order.append("log")
+        try:
+            kefiya_schedule._recover_from_failed_login("Some Login")
+        finally:
+            frappe.db.rollback, frappe.db.commit, frappe.log_error = originals
+
+        self.assertEqual(
+            order, ["rollback", "log", "commit"],
+            "Must roll back the failed login's partial work first, then log, "
+            "then commit so the Error Log survives the rollback.",
+        )
+
+    def test_recovery_survives_failing_commit_and_rollback(self):
+        """A broken transaction must not abort the tick.
+
+        commit() and rollback() can fail in their own right; an exception
+        escaping here would end the batch -- the very failure this code exists
+        to prevent.
+        """
+        def boom(*args, **kwargs):
+            raise RuntimeError("transaction is gone")
+
+        originals = (frappe.db.rollback, frappe.db.commit, frappe.log_error)
+        frappe.db.rollback = boom
+        frappe.db.commit = boom
+        frappe.log_error = boom
+        try:
+            kefiya_schedule._recover_from_failed_login("Some Login")
+        finally:
+            frappe.db.rollback, frappe.db.commit, frappe.log_error = originals
+
+
+class TestSchedulerPermissionGate(unittest.TestCase):
+    def test_whitelisted_entrypoint_checks_permission(self):
+        """`scheduled_import_fints_payments` is callable by any logged-in user.
+
+        With ``manual=1`` it also bypasses the frequency gate, so without a
+        permission check anyone could trigger a bank fetch for every configured
+        login at will.
+        """
+        source = inspect.getsource(
+            kefiya_schedule.scheduled_import_fints_payments
+        )
+        self.assertIn(
+            "has_permission", source,
+            "The whitelisted scheduler entrypoint must gate on an explicit "
+            "frappe.has_permission(...) check.",
+        )
+
+
 class TestMaskIban(unittest.TestCase):
     def test_mask_iban_edge_cases(self):
         """Diagnostic output must never raise, whatever the field holds."""
