@@ -465,6 +465,27 @@ class FinTSController:
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
                 self.kefiya_login.account_iban)
+            if account is None:
+                # python-fints dereferences `account.iban` unguarded, so passing
+                # None surfaces as a bare "'NoneType' object has no attribute
+                # 'iban'" with no hint at which login is misconfigured. Fail
+                # here instead, naming the login and what the bank did offer.
+                # Typical cause: a login whose account carries no IBAN at all
+                # (credit cards), which cannot be fetched via HKKAZ/HKCAZ.
+                offered = []
+                for acc in (self.fints_accounts or []):
+                    iban = acc.get("iban") if isinstance(acc, dict) \
+                        else getattr(acc, "iban", None)
+                    offered.append(iban or "<no IBAN>")
+                frappe.throw(_(
+                    "No FinTS account matching IBAN {0} for login {1}. "
+                    "The bank offered: {2}. Accounts without an IBAN "
+                    "(e.g. credit cards) cannot be fetched this way."
+                ).format(
+                    self.kefiya_login.account_iban or "<empty>",
+                    self.kefiya_login.name,
+                    ", ".join(offered) or "<none>",
+                ))
             return json.loads(
                 json.dumps(
                     self.fints_connection.get_transactions(

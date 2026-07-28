@@ -24,6 +24,27 @@ class KefiyaSchedule(Document):
             )
 
 
+def _log_import_failure(login_name):
+    """Log a per-login import failure without ever raising.
+
+    `frappe.log_error(text)` passes its single positional argument as *title*,
+    which is the Error Log's `method` field -- a Data column capped at 140
+    characters. Handing it a full traceback therefore raised
+    CharacterLengthExceededError from inside the except block below, so one
+    broken login aborted the whole scheduler tick instead of just its own
+    iteration. Title and message must stay separate, and this helper must
+    never raise: error logging is not allowed to end the batch.
+    """
+    title = "Kefiya Schedule: import failed for {0}".format(login_name)
+    try:
+        frappe.log_error(title=title[:140], message=frappe.get_traceback())
+    except Exception:
+        try:
+            frappe.logger("kefiya").exception(title)
+        except Exception:
+            pass
+
+
 @frappe.whitelist()
 def scheduled_import_fints_payments(manual=None):
     """Create payment entries by Kefiya Schedule.
@@ -96,4 +117,4 @@ def scheduled_import_fints_payments(manual=None):
                 FinTSControllerLegacy(login_name) \
                     .import_fints_transactions(kefiya_import.name)
         except Exception:
-            frappe.log_error(frappe.get_traceback())
+            _log_import_failure(child_item.kefiya_login)
