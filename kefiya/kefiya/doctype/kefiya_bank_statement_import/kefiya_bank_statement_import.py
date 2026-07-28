@@ -12,6 +12,10 @@ class KefiyaBankStatementImport(Document):
 	
 	@frappe.whitelist()
 	def start_import(self, file_url, bank_account, company):
+		# Permission gate: a whitelisted document method is callable by anyone
+		# who may read the document; importing creates Bank Transactions.
+		frappe.has_permission(
+			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
 		file_path = self.get_file_from_url(file_url)
 		# Detect encoding
 		with open(file_path, 'rb') as f:

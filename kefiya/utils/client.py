@@ -40,6 +40,11 @@ def import_fints_transactions(kefiya_import, kefiya_login, user_scope):
     :type user_scopet: str
     :return: List of max 10 transactions and all new payment entries
     """
+    # Permission gate: this contacts the bank and writes Bank Transactions,
+    # so it needs write rights on the login -- a whitelisted endpoint is
+    # otherwise callable by any logged-in user.
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=kefiya_login, throw=True)
     FinTSController = _get_fints_controller()
     interactive = {"docname": user_scope, "enabled": True}
 
@@ -55,6 +60,8 @@ def import_fints_holdings(kefiya_login, user_scope):
     :param user_scope: current open doctype page (for progress/TAN UI)
     :return: dict with created/updated counts
     """
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=kefiya_login, throw=True)
     from kefiya.utils.securities import refresh_holdings
 
     FinTSController = _get_fints_controller()
@@ -647,6 +654,9 @@ def get_accounts(kefiya_login, user_scope):
     For TAN-enabled mode we may end up triggering a TAN flow.
     For legacy mode we just use the old controller.
     """
+    # Reading the bank's account list exposes account data of that login.
+    frappe.has_permission("Kefiya Login", ptype="read",
+                          doc=kefiya_login, throw=True)
     FinTSController = _get_fints_controller()
 
     interactive = {"docname": user_scope, "enabled": True}
@@ -684,6 +694,10 @@ def new_bank_account(payment_doc, bankData):
     :type bankData: str
     :return: Dict with status and bank details
     """
+    # Permission gate: creates a Bank Account record from client-supplied
+    # bank data, so it must require create rights rather than being callable
+    # by any logged-in user.
+    frappe.has_permission("Bank Account", ptype="create", throw=True)
     from kefiya.utils.bank_account_controller import \
         BankAccountController
     return BankAccountController().new_bank_account(payment_doc, bankData)
@@ -696,6 +710,7 @@ def get_missing_bank_accounts():
     Query payment entries for missing bank accounts.
     :return: List of payment entry data
     """
+    frappe.has_permission("Bank Account", ptype="read", throw=True)
     from kefiya.utils.bank_account_controller import \
         BankAccountController
     return BankAccountController().get_missing_bank_accounts()
@@ -1078,6 +1093,10 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
     When a user was requested to perform a 2FA, this method is called as a callback
     to resolve the interaction. If TAN is disabled, this is effectively a no-op.
     """
+    # Permission gate: this continues an authenticated bank dialog with a
+    # user-supplied TAN, so it must require write rights on that login.
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=fints_login, throw=True)
     if not _use_tan_authentication():
         # Old banks / legacy mode: nothing to resolve
         return

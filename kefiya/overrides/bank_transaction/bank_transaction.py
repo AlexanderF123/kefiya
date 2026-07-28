@@ -19,6 +19,12 @@ except Exception:
 class CustomBankTransaction(BankTransactionBase):
     @frappe.whitelist()
     def remove_payment_entries(self):
+        # Permission gate: a whitelisted document method is callable by anyone
+        # who may read the document, and this unreconciles -- and depending on
+        # Kefiya Settings cancels and deletes -- the linked Payment Entries.
+        frappe.has_permission(
+            "Bank Transaction", ptype="write", doc=self, throw=True)
+
         payment_entries = []
         for payment_entry in self.payment_entries[:]:
             self.remove_payment_entry(payment_entry)
