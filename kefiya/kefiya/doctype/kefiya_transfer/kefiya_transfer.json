@@ -1,0 +1,177 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-07-28 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "kefiya_login",
+  "company",
+  "column_break_head",
+  "execution_date",
+  "instant_payment",
+  "status",
+  "items_section",
+  "items",
+  "totals_section",
+  "total_amount",
+  "column_break_totals",
+  "payment_count",
+  "bank_section",
+  "bank_reference",
+  "vop_pending",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "KEF-TRF-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "KEF-TRF-.YYYY.-",
+   "reqd": 1
+  },
+  {
+   "description": "The account the money is paid from.",
+   "fieldname": "kefiya_login",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Paying Account (Kefiya Login)",
+   "options": "Kefiya Login",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "execution_date",
+   "fieldtype": "Date",
+   "label": "Execution Date"
+  },
+  {
+   "default": "0",
+   "description": "Real-time credit transfer (HKIPZ). Bank and account must support it, otherwise the order is rejected.",
+   "fieldname": "instant_payment",
+   "fieldtype": "Check",
+   "label": "Instant Payment (Echtzeitüberweisung)"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nApproved\nSent\nFailed",
+   "read_only": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Payments"
+  },
+  {
+   "description": "One row is a single transfer (HKCCS). Several rows are sent as one collective order (HKCCM) requiring only one TAN.",
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Payments",
+   "options": "Kefiya Transfer Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Total Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_totals",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "payment_count",
+   "fieldtype": "Int",
+   "label": "Number of Payments",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bank_section",
+   "fieldtype": "Section Break",
+   "label": "Bank Response"
+  },
+  {
+   "fieldname": "bank_reference",
+   "fieldtype": "Small Text",
+   "label": "Bank Response",
+   "read_only": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "vop_pending",
+   "fieldtype": "Check",
+   "label": "Verification of Payee pending",
+   "read_only": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Kefiya Transfer",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-07-28 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kefiya",
+ "name": "Kefiya Transfer",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "kefiya_login",
+ "track_changes": 1
+}

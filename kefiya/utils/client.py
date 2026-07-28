@@ -284,6 +284,86 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
 
 
 @frappe.whitelist()
+def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
+    """Send an approved Kefiya Transfer to the bank.
+
+    One payment goes out as a single transfer (HKCCS, or HKIPZ when instant),
+    several as one collective order (HKCCM) that needs only a single TAN
+    instead of one per payment.
+
+    Recipients are typed in freely here, so the guards the invoice workflow
+    would otherwise provide sit on this path instead: the document must be
+    submitted (and submit rights are separate from create rights), the caller
+    must confirm explicitly, and nothing is sent twice.
+
+    :return: {"status": "submitted" | "tan_required" | "vop_mismatch" | "error"}
+    """
+    from frappe.utils import cint
+
+    # Hard gate: never reach the bank without an explicit confirmation.
+    if not cint(confirmed):
+        return {"status": "error", "message": _(
+            "Transfer not confirmed. Money is only sent after explicit"
+            " confirmation."
+        )}
+
+    # Permission gate: sending is a submit-level action on the transfer.
+    frappe.has_permission(
+        "Kefiya Transfer", ptype="submit", doc=transfer_name, throw=True)
+
+    doc = frappe.get_doc("Kefiya Transfer", transfer_name)
+    if doc.docstatus != 1:
+        return {"status": "error", "message": _(
+            "The transfer must be approved (submitted) before it is sent."
+        )}
+    if doc.status == "Sent":
+        return {"status": "error", "message": _(
+            "This transfer was already sent to the bank."
+        )}
+
+    # Guard against a double click resending real money.
+    lock_key = "kefiya_transfer_doc:" + transfer_name
+    if frappe.cache().get_value(lock_key):
+        return {"status": "error", "message": _(
+            "A transfer for this document is already in progress."
+        )}
+
+    pain_xml, control_sum, count = doc.build_pain001()
+
+    # Audit every attempt before contacting the bank.
+    frappe.logger("kefiya").info(
+        "Kefiya Transfer attempt: doc=%s login=%s count=%s sum=%s user=%s",
+        transfer_name, doc.kefiya_login, count, control_sum,
+        frappe.session.user,
+    )
+    frappe.cache().set_value(lock_key, frappe.session.user, expires_in_sec=600)
+
+    from kefiya.utils.fints_controller import FinTSController
+    interactive = {"docname": user_scope, "enabled": True}
+    try:
+        controller = FinTSController(doc.kefiya_login, interactive)
+        result = controller.submit_sepa_transfer(
+            pain_xml,
+            instant_payment=cint(doc.instant_payment),
+            payment_reference=transfer_name,
+            multiple=count > 1,
+            control_sum=control_sum if count > 1 else None,
+        )
+    except Exception:
+        # Release the lock so the user can retry deliberately; the audit log
+        # and the bank statement remain the source of truth.
+        frappe.cache().delete_value(lock_key)
+        raise
+
+    status = (result or {}).get("status")
+    if status == "submitted":
+        doc.db_set("status", "Sent")
+    elif status == "vop_mismatch":
+        doc.db_set("vop_pending", 1)
+    return result
+
+
+@frappe.whitelist()
 def get_pending_vop(kefiya_login):
     """Return the parked Verification-of-Payee mismatch for a login, if any.
 

@@ -783,7 +783,8 @@ class FinTSController:
             return {"status": "submitted"}
 
     def submit_sepa_transfer(self, pain_xml, instant_payment=False,
-                             payment_reference=None):
+                             payment_reference=None, multiple=False,
+                             control_sum=None):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
         Requires a TAN: if the bank asks for one, the request is persisted and
@@ -795,13 +796,32 @@ class FinTSController:
             credit transfer (Echtzeitueberweisung, FinTS HKIPZ) instead of a
             regular transfer (HKCCS). The debtor bank + account must support
             instant payments, otherwise the bank rejects the order.
+        :param multiple: send as a collective order (HKCCM) -- one order
+            carrying many payments, authorised by a single TAN. Without this a
+            payment run needs one TAN per payment.
+        :param control_sum: total of all payments, which the bank checks a
+            collective order against. Required by the standard whenever
+            ``multiple`` is set.
         :return: {"status": "submitted" | "tan_required", ...}
         """
         instant_payment = bool(cint(instant_payment))
+        multiple = bool(cint(multiple))
+        if multiple and control_sum is None:
+            frappe.throw(_(
+                "A collective transfer requires a control sum."
+            ))
+
+        kwargs = {"instant_payment": instant_payment}
+        if multiple:
+            # Only pass these for a collective order: banks reject a control
+            # sum on a single transfer.
+            kwargs["multiple"] = True
+            kwargs["control_sum"] = control_sum
+
         with self.fints_connection:
             account = self._require_fints_account()
             response = self.fints_connection.sepa_transfer(
-                account, pain_xml, instant_payment=instant_payment)
+                account, pain_xml, **kwargs)
             vop = self._vop_mismatch(response)
             if vop is not None:
                 # Verification of Payee mismatch: the bank could not confirm the
