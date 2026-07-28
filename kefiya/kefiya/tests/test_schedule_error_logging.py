@@ -153,6 +153,49 @@ class TestSchedulerPermissionGate(unittest.TestCase):
         )
 
 
+class TestRequireFintsAccount(unittest.TestCase):
+    """Every FinTS operation must resolve its account through the guard.
+
+    python-fints dereferences ``account.iban`` unguarded, so an unresolved
+    account surfaces as a bare ``AttributeError`` naming no login. That applies
+    to balance, holdings, statements, credit card and -- critically -- the
+    money-moving transfer and debit paths.
+    """
+
+    def test_no_raw_account_lookup_reaches_the_fints_library(self):
+        from kefiya.utils import fints_controller
+
+        source = Path(inspect.getfile(fints_controller)).read_text(
+            encoding="utf-8"
+        )
+        offenders = [
+            number
+            for number, line in enumerate(source.splitlines(), start=1)
+            if "= self.get_fints_account_by_iban(" in line
+            and "_require_fints_account" not in line
+        ]
+        # The single legitimate use is inside _require_fints_account itself.
+        self.assertLessEqual(
+            len(offenders), 1,
+            "Resolve accounts via self._require_fints_account(); a raw "
+            "get_fints_account_by_iban() can return None and reach "
+            "python-fints unguarded. Offending lines: {0}".format(offenders),
+        )
+
+    def test_require_fints_account_does_not_recurse(self):
+        """The guard must call the low-level lookup, not itself."""
+        from kefiya.utils import fints_controller
+
+        source = inspect.getsource(
+            fints_controller.FinTSController._require_fints_account
+        )
+        self.assertIn(
+            "self.get_fints_account_by_iban(", source,
+            "_require_fints_account must delegate to the low-level lookup; "
+            "calling itself would recurse until the stack blows.",
+        )
+
+
 class TestMaskIban(unittest.TestCase):
     def test_mask_iban_edge_cases(self):
         """Diagnostic output must never raise, whatever the field holds."""

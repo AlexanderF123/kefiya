@@ -437,6 +437,47 @@ class FinTSController:
         """
         return self.__get_fints_account_by_key("iban", iban)
 
+    def _require_fints_account(self, iban=None):
+        """Resolve the login's FinTS account, or fail with a usable message.
+
+        python-fints dereferences ``account.iban`` unguarded, so handing it a
+        None surfaces as a bare "'NoneType' object has no attribute 'iban'"
+        with no hint at which login is misconfigured. That applies to every
+        operation below -- balance, holdings, statements, credit card, and the
+        money-moving transfer and debit paths alike -- so resolve centrally
+        rather than guarding each call site. Typical cause: an account that
+        carries no IBAN at all (credit cards), which cannot be addressed this
+        way at all.
+
+        :param iban: IBAN to look up; defaults to the login's account IBAN
+        :return: the matching SEPAAccount (never None)
+        """
+        if iban is None:
+            iban = self.kefiya_login.account_iban
+
+        account = self.get_fints_account_by_iban(iban)
+        if account is not None:
+            return account
+
+        # `fints_accounts` is only set once __fetch_fints_accounts() succeeded;
+        # read it defensively, since this is the error path and must not raise
+        # an AttributeError of its own while reporting another failure.
+        offered = []
+        for acc in (getattr(self, "fints_accounts", None) or []):
+            value = acc.get("iban") if isinstance(acc, dict) \
+                else getattr(acc, "iban", None)
+            offered.append(_mask_iban(value))
+
+        frappe.throw(_(
+            "No FinTS account matching IBAN {0} for login {1}. "
+            "The bank offered: {2}. Accounts without an IBAN "
+            "(e.g. credit cards) cannot be fetched this way."
+        ).format(
+            _mask_iban(iban),
+            self.kefiya_login.name,
+            ", ".join(offered) or "<none>",
+        ))
+
     def get_fints_account_by_nr(self, account_nr):
         """Get FinTS account by account number.
 
@@ -478,32 +519,7 @@ class FinTSController:
             )
 
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
-            if account is None:
-                # python-fints dereferences `account.iban` unguarded, so a
-                # None surfaces as a bare "'NoneType' object has no attribute
-                # 'iban'" with no hint at which login is misconfigured. Fail
-                # here instead, naming the login and what the bank did offer.
-                # Typical cause: a login whose account carries no IBAN at all
-                # (credit cards), which cannot be fetched via HKKAZ/HKCAZ.
-                # `fints_accounts` is only set once __fetch_fints_accounts()
-                # succeeded, so read it defensively: this is the error path and
-                # must not raise an AttributeError of its own.
-                offered = []
-                for acc in (getattr(self, "fints_accounts", None) or []):
-                    iban = acc.get("iban") if isinstance(acc, dict) \
-                        else getattr(acc, "iban", None)
-                    offered.append(_mask_iban(iban))
-                frappe.throw(_(
-                    "No FinTS account matching IBAN {0} for login {1}. "
-                    "The bank offered: {2}. Accounts without an IBAN "
-                    "(e.g. credit cards) cannot be fetched this way."
-                ).format(
-                    _mask_iban(self.kefiya_login.account_iban),
-                    self.kefiya_login.name,
-                    ", ".join(offered) or "<none>",
-                ))
+            account = self._require_fints_account()
             return json.loads(
                 json.dumps(
                     self.fints_connection.get_transactions(
@@ -522,8 +538,7 @@ class FinTSController:
             market_value, currency, valuation_date, securities_account)
         """
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             holdings = self.fints_connection.get_holdings(account)
             result = []
             for h in holdings or []:
@@ -588,7 +603,7 @@ class FinTSController:
             return rows
 
         with conn:
-            account = self.get_fints_account_by_iban(iban)
+            account = self._require_fints_account(iban)
             with conn._get_dialog() as dialog:
                 hksal = conn._find_highest_supported_command(
                     HKSAL5, HKSAL6, HKSAL7)
@@ -609,16 +624,14 @@ class FinTSController:
         """Standing orders / scheduled debits (Dauerauftraege /
         Termin-Ueberweisungen) for the login's account."""
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_scheduled_debits(account, multiple)
 
     def get_fints_statements(self):
         """List available electronic account statements
         (elektronische Kontoauszuege / Dokumente)."""
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_statements(account)
 
     def get_fints_statement(self, number=None, year=None, file_format=None):
@@ -627,8 +640,7 @@ class FinTSController:
         May return binary content (e.g. PDF); the caller decides how to store it.
         """
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_statement(
                 account, number, year, file_format)
 
@@ -636,8 +648,7 @@ class FinTSController:
                                            start_date=None, end_date=None):
         """Credit card transactions (Kreditkartenumsaetze) for the account."""
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_credit_card_transactions(
                 account, credit_card_number, start_date, end_date)
 
@@ -650,8 +661,7 @@ class FinTSController:
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_transactions_xml(
                 account, start_date, end_date)
 
@@ -677,8 +687,7 @@ class FinTSController:
         auto-approved.
         """
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             response = self.fints_connection.sepa_debit(account, pain008_xml)
             if self.is_tan_required_and_requested(response):
                 return {
@@ -728,8 +737,7 @@ class FinTSController:
         """
         instant_payment = bool(cint(instant_payment))
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             response = self.fints_connection.sepa_transfer(
                 account, pain_xml, instant_payment=instant_payment)
             vop = self._vop_mismatch(response)
