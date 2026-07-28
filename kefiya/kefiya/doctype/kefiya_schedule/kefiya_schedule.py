@@ -35,12 +35,19 @@ def _log_import_failure(login_name):
     iteration. Title and message must stay separate, and this helper must
     never raise: error logging is not allowed to end the batch.
     """
-    title = "Kefiya Schedule: import failed for {0}".format(login_name)
     try:
-        frappe.log_error(title=title[:140], message=frappe.get_traceback())
+        title = "Kefiya Schedule: import failed for {0}".format(login_name)
+        frappe.log_error(
+            title=title[:140],
+            message=frappe.get_traceback(),
+            reference_doctype="Kefiya Login",
+            reference_name=login_name,
+        )
     except Exception:
         try:
-            frappe.logger("kefiya").exception(title)
+            frappe.logger("kefiya").exception(
+                "Kefiya Schedule: import failed for %s", login_name
+            )
         except Exception:
             pass
 
