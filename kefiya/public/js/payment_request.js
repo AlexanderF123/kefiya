@@ -8,7 +8,7 @@ frappe.ui.form.on('Payment Request', {
         // FinTS direct transfer (no manual upload) -- only for a submitted
         // Outward request, and always behind an explicit confirmation + TAN.
         // The SEPA-XML export is offered on the same terms: only after the
-        // request has been GF-approved and submitted (FEAT-7931). The server
+        // request has been approved and submitted. The server
         // refuses to build a pain.001 for a draft, so exporting before approval
         // is impossible -- the button just mirrors that gate in the UI.
         if (frm.doc.docstatus === 1 && frm.doc.payment_request_type === "Outward") {
@@ -45,10 +45,10 @@ frappe.ui.form.on('Payment Request', {
 });
 
 
-// --- SEPA pain.001 export (only for submitted / GF-approved Outward PRs) ------
+// --- SEPA pain.001 export (only for submitted / approved Outward PRs) ------
 //
 // Moved off `before_submit` on purpose: the server now refuses to build a
-// pain.001 for a draft (FEAT-7931), so an auto-export at submit time would fail
+// pain.001 for a draft, so an auto-export at submit time would fail
 // the very transition it runs in. Instead the file is produced on demand once
 // the request is submitted -- the approval workflow gates the submit, the
 // server gates the build, and this button gates the UI.

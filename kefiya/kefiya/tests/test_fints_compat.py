@@ -111,7 +111,7 @@ class TestMoneyEndpointPermissions(unittest.TestCase):
 
 
 class TestSepaExportGate(unittest.TestCase):
-    """Regression for FEAT-7931: the SEPA pain.001 export must not bypass the
+    """Regression: the SEPA pain.001 export must not bypass the
     outgoing-payment approval workflow.
 
     ``export_request`` / ``send_sepa_xml_via_email`` are ``@frappe.whitelist()``
@@ -167,7 +167,7 @@ class TestSepaExportGate(unittest.TestCase):
         )
 
     def test_builder_validates_against_xsd(self):
-        """FEAT-7937: the pain.001 must be validated against the SEPA XSD before
+        """The pain.001 must be validated against the SEPA XSD before
         it leaves the system, so a malformed instruction is blocked rather than
         sent to the bank."""
         from kefiya.events.hammer_script import payment_request_on_submit as m

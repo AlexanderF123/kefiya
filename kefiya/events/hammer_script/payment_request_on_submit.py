@@ -17,8 +17,8 @@ def _build_sepa_xml(payment_request_name):
 	if doc.payment_request_type != "Outward":
 		return None, _("SEPA XML (pain.001) is only supported for Outward payment requests.")
 
-	# Approval gate (FEAT-7931): a pain.001 file is a ready-to-execute payment
-	# instruction. It must only be produced for a submitted -- i.e. GF-approved
+	# Approval gate: a pain.001 file is a ready-to-execute payment
+	# instruction. It must only be produced for a submitted -- i.e. approved
 	# via the "Payment Request Freigabe (Ausgang)" 4-eyes workflow -- request.
 	# Refusing drafts here is what makes the submit/approval gate meaningful:
 	# without it, calling the whitelisted export endpoint on an unapproved draft
@@ -95,8 +95,8 @@ def _build_sepa_xml(payment_request_name):
 	try:
 		sepa = SepaTransfer(config, schema="pain.001.001.03", clean=False)
 		sepa.add_payment(payment)
-		# Validate the generated document against the pain.001.001.03 XSD
-		# (FEAT-7937). ``clean=False`` above means input text is not sanitised,
+		# Validate the generated document against the pain.001.001.03 XSD.
+		# ``clean=False`` above means input text is not sanitised,
 		# so an out-of-spec name/IBAN/charset would otherwise silently produce a
 		# malformed bank instruction. Fail closed instead: a schema violation
 		# returns an error and blocks the export rather than handing out an
