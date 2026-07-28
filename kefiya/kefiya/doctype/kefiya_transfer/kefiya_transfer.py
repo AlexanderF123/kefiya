@@ -22,7 +22,7 @@ otherwise provide:
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, getdate, now_datetime
+from frappe.utils import cint, flt, getdate, now_datetime
 
 
 def normalize_iban(value):
@@ -103,10 +103,28 @@ class KefiyaTransfer(Document):
         # Submitting approves the transfer; it does not send it. Sending is a
         # separate, explicitly confirmed action so an approval can never move
         # money as a side effect.
-        self.status = "Approved"
+        self.status = "On Hold" if self.on_hold else "Approved"
         for row in self.items:
             if not row.end_to_end_id:
                 row.end_to_end_id = "{0}-{1}".format(self.name, row.idx)[:35]
+
+    @frappe.whitelist()
+    def set_hold(self, on_hold):
+        """Hold an approved order back, or release it again.
+
+        Holding changes when an order is sent, never what it says -- amounts
+        and recipients stay locked by the submit. That is why this is allowed
+        after approval while everything else on the document is not.
+        """
+        if self.docstatus != 1:
+            frappe.throw(_("Only approved transfers can be held back."))
+        if self.status == "Sent":
+            frappe.throw(_("This transfer was already sent."))
+
+        on_hold = 1 if cint(on_hold) else 0
+        self.db_set("on_hold", on_hold)
+        self.db_set("status", "On Hold" if on_hold else "Approved")
+        return {"status": self.status, "on_hold": on_hold}
 
     def on_cancel(self):
         if self.status == "Sent":
@@ -119,72 +137,102 @@ class KefiyaTransfer(Document):
     def build_pain001(self):
         """Render this document as a pain.001.001.03 credit-transfer message.
 
-        Returns (xml, control_sum, count). The control sum is what the bank
-        checks a collective order against, so it is derived from the same rows
-        that go into the message rather than from the stored total.
+        Returns (xml, control_sum, count).
         """
-        from sepaxml import SepaTransfer
+        return build_pain001_for([self])
 
-        login = frappe.get_doc("Kefiya Login", self.kefiya_login)
-        bank_account = login.bank_account
-        if not bank_account:
-            frappe.throw(_("Kefiya Login {0} has no bank account.").format(
-                self.kefiya_login))
 
-        company_bank = frappe.get_doc("Bank Account", bank_account)
-        debtor_iban = normalize_iban(company_bank.iban)
-        if not debtor_iban:
-            frappe.throw(_("Bank account {0} has no IBAN.").format(
-                bank_account))
+def build_pain001_for(docs):
+    """Render one or more Kefiya Transfers as a single pain.001 message.
 
-        company_name = frappe.get_cached_value(
-            "Company", self.company, "company_name") or self.company or ""
+    Several documents collapse into one collective order (HKCCM) that the bank
+    authorises with a single TAN -- the point of the outbox. They must all be
+    paid from the same account, since one message carries exactly one debtor.
 
-        config = {
-            "name": (company_name or self.company or "")[:70],
-            "currency": "EUR",
-            "IBAN": debtor_iban,
-            # A collective order is a batch; a single payment is not.
-            "batch": len(self.items) > 1,
-        }
-        if company_bank.branch_code:
-            config["BIC"] = (company_bank.branch_code or "").replace(
-                " ", "").upper()
+    Returns (xml, control_sum, count). The control sum is what the bank checks
+    a collective order against, so it is summed from the very rows that go into
+    the message rather than from stored totals that could have drifted.
+    """
+    from sepaxml import SepaTransfer
 
-        # clean=False keeps the text exactly as entered, so the XSD validation
-        # below is what catches out-of-spec characters instead of silently
-        # rewriting a recipient name.
-        sepa = SepaTransfer(config, schema="pain.001.001.03", clean=False)
+    if not docs:
+        frappe.throw(_("No transfers to send."))
 
-        control_sum = 0
-        execution_date = getdate(self.execution_date or now_datetime().date())
-        for row in self.items:
-            amount_cents = int(round(flt(row.amount) * 100))
-            if amount_cents <= 0:
-                frappe.throw(_(
-                    "Row {0}: amount must be greater than zero."
-                ).format(row.idx))
-            payment = {
-                "name": (row.recipient_name or "")[:70],
-                "IBAN": normalize_iban(row.recipient_iban),
-                "amount": amount_cents,
-                "description": (row.purpose or self.name)[:140],
-                "execution_date": execution_date,
-                "endtoend_id": (row.end_to_end_id
-                                or "{0}-{1}".format(self.name, row.idx))[:35],
-            }
-            if row.recipient_bic:
-                payment["BIC"] = row.recipient_bic
-            sepa.add_payment(payment)
-            control_sum += amount_cents
+    logins = {doc.kefiya_login for doc in docs}
+    if len(logins) > 1:
+        frappe.throw(_(
+            "All selected transfers must be paid from the same account."
+            " Found: {0}"
+        ).format(", ".join(sorted(logins))))
 
-        try:
-            xml = sepa.export(validate=True)
-        except Exception as exc:
+    rows = []
+    for doc in docs:
+        for row in doc.items:
+            rows.append((doc, row))
+    if not rows:
+        frappe.throw(_("The selected transfers contain no payments."))
+
+    first = docs[0]
+    login = frappe.get_doc("Kefiya Login", first.kefiya_login)
+    bank_account = login.bank_account
+    if not bank_account:
+        frappe.throw(_("Kefiya Login {0} has no bank account.").format(
+            first.kefiya_login))
+
+    company_bank = frappe.get_doc("Bank Account", bank_account)
+    debtor_iban = normalize_iban(company_bank.iban)
+    if not debtor_iban:
+        frappe.throw(_("Bank account {0} has no IBAN.").format(bank_account))
+
+    company = first.company or login.company
+    company_name = frappe.get_cached_value(
+        "Company", company, "company_name") or company or ""
+
+    config = {
+        "name": (company_name or "")[:70],
+        "currency": "EUR",
+        "IBAN": debtor_iban,
+        # A collective order is a batch; a single payment is not.
+        "batch": len(rows) > 1,
+    }
+    if company_bank.branch_code:
+        config["BIC"] = (company_bank.branch_code or "").replace(
+            " ", "").upper()
+
+    # clean=False keeps the text exactly as entered, so the XSD validation
+    # below is what catches out-of-spec characters instead of silently
+    # rewriting a recipient name.
+    sepa = SepaTransfer(config, schema="pain.001.001.03", clean=False)
+
+    control_sum = 0
+    for doc, row in rows:
+        amount_cents = int(round(flt(row.amount) * 100))
+        if amount_cents <= 0:
             frappe.throw(_(
-                "Generated SEPA XML failed schema validation: {0}"
-            ).format(exc))
+                "{0} row {1}: amount must be greater than zero."
+            ).format(doc.name, row.idx))
+        payment = {
+            "name": (row.recipient_name or "")[:70],
+            "IBAN": normalize_iban(row.recipient_iban),
+            "amount": amount_cents,
+            "description": (row.purpose or doc.name)[:140],
+            "execution_date": getdate(
+                doc.execution_date or now_datetime().date()),
+            "endtoend_id": (row.end_to_end_id
+                            or "{0}-{1}".format(doc.name, row.idx))[:35],
+        }
+        if row.recipient_bic:
+            payment["BIC"] = row.recipient_bic
+        sepa.add_payment(payment)
+        control_sum += amount_cents
 
-        if isinstance(xml, bytes):
-            xml = xml.decode("utf-8")
-        return xml, control_sum / 100.0, len(self.items)
+    try:
+        xml = sepa.export(validate=True)
+    except Exception as exc:
+        frappe.throw(_(
+            "Generated SEPA XML failed schema validation: {0}"
+        ).format(exc))
+
+    if isinstance(xml, bytes):
+        xml = xml.decode("utf-8")
+    return xml, control_sum / 100.0, len(rows)

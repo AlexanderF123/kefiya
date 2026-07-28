@@ -14,6 +14,7 @@
   "execution_date",
   "instant_payment",
   "status",
+  "on_hold",
   "items_section",
   "items",
   "totals_section",
@@ -71,7 +72,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Draft\nApproved\nSent\nFailed",
+   "options": "Draft\nApproved\nOn Hold\nSent\nFailed",
    "read_only": 1,
    "allow_on_submit": 1
   },
@@ -136,6 +137,15 @@
    "options": "Kefiya Transfer",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "on_hold",
+   "fieldtype": "Check",
+   "label": "Held Back",
+   "in_list_view": 1,
+   "allow_on_submit": 1,
+   "description": "Keep this order in the outbox: it is skipped by the collective send until released."
   }
  ],
  "is_submittable": 1,

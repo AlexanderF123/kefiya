@@ -14,9 +14,28 @@ frappe.ui.form.on("Kefiya Transfer", {
 		// Sending is deliberately separate from submitting: approving a
 		// transfer must never move money as a side effect.
 		if (frm.doc.docstatus === 1 && frm.doc.status !== "Sent") {
-			frm.add_custom_button(__("Send to bank"), function () {
-				kefiya_confirm_and_send(frm);
-			}).addClass("btn-primary");
+			if (!frm.doc.on_hold) {
+				frm.add_custom_button(__("Send to bank"), function () {
+					kefiya_confirm_and_send(frm);
+				}).addClass("btn-primary");
+			}
+
+			// Holding back is allowed after approval because it changes only
+			// when the order goes out, not what it says.
+			frm.add_custom_button(
+				frm.doc.on_hold ? __("Release") : __("Hold back"),
+				function () {
+					frm.call("set_hold", { on_hold: frm.doc.on_hold ? 0 : 1 })
+						.then(() => frm.reload_doc());
+				}
+			);
+		}
+
+		if (frm.doc.on_hold && frm.doc.status !== "Sent") {
+			frm.dashboard.set_headline_alert(
+				__("Held back — this order stays in the outbox and is skipped by a collective send."),
+				"orange"
+			);
 		}
 
 		if (frm.doc.status === "Sent") {

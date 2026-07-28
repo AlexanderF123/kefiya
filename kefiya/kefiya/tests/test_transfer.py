@@ -119,3 +119,70 @@ class TestTransferApprovalSeparation(unittest.TestCase):
             "def before_submit", source,
             "Submit should mark the transfer approved, nothing more.",
         )
+
+
+class TestOutbox(unittest.TestCase):
+    """The outbox collects orders and sends them together on one TAN.
+
+    Its refusals matter more than its conveniences: a wrong batch debits the
+    wrong account or pays twice, so each precondition aborts the whole send
+    rather than quietly dropping or including a document.
+    """
+
+    def test_send_requires_confirmation(self):
+        result = client.send_transfer_outbox(
+            transfer_names=["KEF-TRF-0001"], user_scope="x"
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("not confirmed", result["message"].lower())
+
+    def test_empty_selection_is_refused(self):
+        result = client.send_transfer_outbox(
+            transfer_names=[], user_scope="x", confirmed=1
+        )
+        self.assertEqual(result["status"], "error")
+
+    def test_batch_refuses_mixed_accounts_already_at_build_time(self):
+        """One pain.001 carries exactly one debtor; mixing would debit the
+        wrong account."""
+        from kefiya.kefiya.doctype.kefiya_transfer import kefiya_transfer
+
+        source = inspect.getsource(kefiya_transfer.build_pain001_for)
+        self.assertIn("same account", source)
+
+        endpoint = inspect.getsource(client.send_transfer_outbox)
+        self.assertIn("same account", endpoint)
+
+    def test_batch_refuses_held_back_and_already_sent(self):
+        source = inspect.getsource(client.send_transfer_outbox)
+        self.assertIn(
+            "doc.on_hold", source,
+            "A held-back order must never ride along in a collective send.",
+        )
+        self.assertIn(
+            'doc.status == "Sent"', source,
+            "An already-sent order must not be paid a second time.",
+        )
+        self.assertIn(
+            "docstatus != 1", source,
+            "Unapproved orders must not reach the bank.",
+        )
+
+    def test_batch_marks_all_or_none_as_sent(self):
+        """Leaving part of an accepted batch unsent invites paying it twice."""
+        source = inspect.getsource(client.send_transfer_outbox)
+        self.assertIn("for doc in docs:", source)
+        self.assertIn('db_set("status", "Sent")', source)
+
+    def test_hold_is_permitted_after_approval(self):
+        """Holding changes when an order is sent, not what it says."""
+        from kefiya.kefiya.doctype.kefiya_transfer import kefiya_transfer
+
+        source = inspect.getsource(kefiya_transfer.KefiyaTransfer.set_hold)
+        self.assertIn("docstatus != 1", source)
+        self.assertIn('self.status == "Sent"', source)
+
+    def test_hold_endpoint_checks_permission(self):
+        source = inspect.getsource(client.set_transfer_hold)
+        self.assertIn("has_permission", source)
+        self.assertIn('ptype="submit"', source)

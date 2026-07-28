@@ -364,6 +364,132 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
 
 
 @frappe.whitelist()
+def set_transfer_hold(transfer_names, on_hold):
+    """Hold approved transfers back in the outbox, or release them again.
+
+    Holding changes only when an order is sent, never what it says -- amounts
+    and recipients stay locked by the submit -- which is why it is permitted
+    after approval while editing the document is not.
+    """
+    from frappe.utils import cint
+
+    if isinstance(transfer_names, str):
+        transfer_names = json.loads(transfer_names)
+
+    changed = []
+    for name in transfer_names:
+        frappe.has_permission(
+            "Kefiya Transfer", ptype="submit", doc=name, throw=True)
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        doc.set_hold(cint(on_hold))
+        changed.append(name)
+    return {"status": "ok", "changed": changed}
+
+
+@frappe.whitelist()
+def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
+    """Send several approved transfers as one collective order (HKCCM).
+
+    This is what makes the outbox worth having: orders are entered one by one
+    and then leave together on a single TAN, instead of one TAN per order.
+
+    Refuses rather than guesses. Mixing paying accounts would silently debit
+    the wrong one, an already-sent order would pay twice, and a held-back order
+    is held back for a reason -- so each of those aborts the whole send instead
+    of quietly dropping or including a document.
+
+    :param transfer_names: JSON list (or list) of Kefiya Transfer names
+    :return: {"status": ..., "sent": [names]}
+    """
+    from frappe.utils import cint
+
+    if not cint(confirmed):
+        return {"status": "error", "message": _(
+            "Transfer not confirmed. Money is only sent after explicit"
+            " confirmation."
+        )}
+
+    if isinstance(transfer_names, str):
+        transfer_names = json.loads(transfer_names)
+    if not transfer_names:
+        return {"status": "error", "message": _("No transfers selected.")}
+
+    docs = []
+    for name in transfer_names:
+        frappe.has_permission(
+            "Kefiya Transfer", ptype="submit", doc=name, throw=True)
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        if doc.docstatus != 1:
+            return {"status": "error", "message": _(
+                "{0} is not approved yet."
+            ).format(name)}
+        if doc.status == "Sent":
+            return {"status": "error", "message": _(
+                "{0} was already sent to the bank."
+            ).format(name)}
+        if doc.on_hold:
+            return {"status": "error", "message": _(
+                "{0} is held back. Release it first or deselect it."
+            ).format(name)}
+        docs.append(doc)
+
+    logins = {doc.kefiya_login for doc in docs}
+    if len(logins) > 1:
+        return {"status": "error", "message": _(
+            "All selected transfers must be paid from the same account."
+        )}
+    kefiya_login = docs[0].kefiya_login
+
+    # One lock for the whole batch: a double click must not send it twice.
+    lock_key = "kefiya_transfer_outbox:" + kefiya_login
+    if frappe.cache().get_value(lock_key):
+        return {"status": "error", "message": _(
+            "A send for this account is already in progress."
+        )}
+
+    from kefiya.kefiya.doctype.kefiya_transfer.kefiya_transfer import (
+        build_pain001_for,
+    )
+    pain_xml, control_sum, count = build_pain001_for(docs)
+
+    frappe.logger("kefiya").info(
+        "Kefiya outbox send: docs=%s login=%s count=%s sum=%s user=%s",
+        ",".join(transfer_names), kefiya_login, count, control_sum,
+        frappe.session.user,
+    )
+    frappe.cache().set_value(lock_key, frappe.session.user, expires_in_sec=600)
+
+    from kefiya.utils.fints_controller import FinTSController
+    interactive = {"docname": user_scope, "enabled": True}
+    try:
+        controller = FinTSController(kefiya_login, interactive)
+        result = controller.submit_sepa_transfer(
+            pain_xml,
+            instant_payment=cint(docs[0].instant_payment),
+            payment_reference=",".join(transfer_names)[:140],
+            multiple=count > 1,
+            control_sum=control_sum if count > 1 else None,
+        )
+    except Exception:
+        frappe.cache().delete_value(lock_key)
+        raise
+
+    status = (result or {}).get("status")
+    if status == "submitted":
+        # The bank accepted one message covering all of them, so they are
+        # marked together -- leaving part of a batch as unsent would invite a
+        # second send of money that is already gone.
+        for doc in docs:
+            doc.db_set("status", "Sent")
+    elif status == "vop_mismatch":
+        for doc in docs:
+            doc.db_set("vop_pending", 1)
+
+    result["sent"] = transfer_names
+    return result
+
+
+@frappe.whitelist()
 def get_pending_vop(kefiya_login):
     """Return the parked Verification-of-Payee mismatch for a login, if any.
 
