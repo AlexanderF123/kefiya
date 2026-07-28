@@ -152,11 +152,33 @@ def export_request(payment_request_name):
 
 
 @frappe.whitelist()
-def send_sepa_xml_via_email(recipient_email, xml_content):
-	# Permission gate: this mails an executable SEPA payment file to the
-	# configured recipient, so it must require submit rights on Payment Request
-	# rather than being callable by any logged-in user.
-	frappe.has_permission("Payment Request", ptype="submit", throw=True)
+def send_sepa_xml_via_email(payment_request_name):
+	# Permission gate: this mails an executable SEPA payment file, so it must
+	# require submit rights on the specific Payment Request rather than being
+	# callable by any logged-in user holding the right on some other one.
+	frappe.has_permission(
+		"Payment Request", ptype="submit",
+		doc=payment_request_name, throw=True)
+
+	# Neither the attachment nor the recipient may come from the caller. Both
+	# used to be parameters, so a user with submit rights could have arbitrary
+	# content mailed to an arbitrary address through the server -- and the
+	# approval and XSD gates in _build_sepa_xml did not apply to whatever the
+	# client passed in. Build the file here and send it only to the address
+	# configured in Kefiya Settings.
+	settings = frappe.get_single("Kefiya Settings")
+	recipient_email = (settings.recipient_email or "").strip()
+	if not recipient_email:
+		return {"status": "error", "message": _(
+			"No recipient e-mail is configured in Kefiya Settings."
+		)}
+
+	xml_content, error = _build_sepa_xml(payment_request_name)
+	if error:
+		return {"status": "error", "message": error}
+	if not xml_content:
+		return {"status": "error", "message": _("Failed to generate SEPA XML.")}
+
 	try:
 		subject = _("Moneyplex SEPA File")
 		message = _("Please find the attached SEPA XML payment file.")

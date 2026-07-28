@@ -224,3 +224,53 @@ class TestScheduledDebitNormalizer(unittest.TestCase):
 
         out = normalize_scheduled_debits(None)
         self.assertEqual(out, {"items": [], "skipped": 0})
+
+
+class TestSepaEmailIsServerControlled(unittest.TestCase):
+    """The mail endpoint must not relay caller-supplied content.
+
+    ``recipient_email`` and ``xml_content`` used to be parameters, so a user
+    holding submit rights on any Payment Request could have arbitrary content
+    mailed to an arbitrary address through the server -- and the approval and
+    XSD gates in ``_build_sepa_xml`` never applied to what the client passed.
+    """
+
+    def test_endpoint_takes_no_recipient_or_payload(self):
+        import inspect
+
+        from kefiya.events.hammer_script.payment_request_on_submit import (
+            send_sepa_xml_via_email,
+        )
+
+        params = list(
+            inspect.signature(send_sepa_xml_via_email).parameters
+        )
+        self.assertEqual(
+            params, ["payment_request_name"],
+            "The recipient and the attachment must be resolved server-side; "
+            "accepting them as arguments makes this an open relay for anyone "
+            "with submit rights.",
+        )
+
+    def test_endpoint_builds_the_file_and_resolves_the_recipient(self):
+        import inspect
+
+        from kefiya.events.hammer_script.payment_request_on_submit import (
+            send_sepa_xml_via_email,
+        )
+
+        source = inspect.getsource(send_sepa_xml_via_email)
+        self.assertIn(
+            "_build_sepa_xml(", source,
+            "The mailed file must go through _build_sepa_xml so the approval "
+            "and XSD gates apply to it as well.",
+        )
+        self.assertIn(
+            "recipient_email", source,
+            "The recipient must come from Kefiya Settings.",
+        )
+        self.assertIn(
+            "has_permission", source,
+            "Mailing an executable payment file requires submit rights on "
+            "the specific Payment Request.",
+        )

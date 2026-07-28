@@ -99,9 +99,11 @@ function kefiya_export_sepa_xml(frm) {
 
                 frappe.call({
                     method: "kefiya.events.hammer_script.payment_request_on_submit.send_sepa_xml_via_email",
+                    // The server rebuilds the file and resolves the recipient
+                    // from Kefiya Settings; passing either from here would let
+                    // a caller mail arbitrary content to an arbitrary address.
                     args: {
-                        recipient_email: recipient_email,
-                        xml_content: file_content
+                        payment_request_name: frm.doc.name
                     },
                     callback: function (r) {
 
