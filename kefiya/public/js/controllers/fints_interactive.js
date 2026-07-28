@@ -52,14 +52,12 @@ kefiya.interactive = {
 				kefiya.interactive.progressState[frm.doc.name] = state;
 
 				kefiya.interactive.enqueueUpdate(() => {
-					if(data.reload && data.reload === true) {
-						frm.reload_doc();
-					}
-					if(data.progress==100) {
-						frappe.hide_progress();
-					} else {
-						frappe.show_progress(data.docname,data.progress,100,data.message);
-					}
+					// One persistent window collecting every message, instead
+					// of show_progress/hide_progress flashing a separate one
+					// per step and per account.
+					kefiya.progress.update(
+						data.message, data.progress, data.docname
+					);
 
 					if(data.reload && data.reload === true) {
 						// reload with short delay, to have progress update come active before
@@ -84,7 +82,11 @@ kefiya.interactive = {
 			}
 
 			await kefiya.interactive.enqueueUpdate(() => {
-				frappe.hide_progress();
+				// Step out of the way for the TAN prompt, but keep the session
+				// log: hide() retains the entries and the next update()
+				// restores the window with its history intact.
+				kefiya.progress.update(__("Verification required"), 0);
+				kefiya.progress.hide();
 			});
 
 			let fields = [];

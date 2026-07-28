@@ -4,6 +4,12 @@
 from __future__ import unicode_literals
 
 import frappe
+import json
+
+# Every user-facing message in this module goes through _(). It was never
+# imported here: the transfer endpoints are the only callers and had not run in
+# production yet, so the resulting NameError stayed latent.
+from frappe import _
 
 
 def _use_tan_authentication() -> bool:
@@ -268,12 +274,90 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
     try:
         controller = FinTSController(kefiya_login, interactive)
         return controller.submit_sepa_transfer(
-            xml_content, instant_payment=instant_payment)
+            xml_content, instant_payment=instant_payment,
+            payment_reference=payment_request_name)
     except Exception:
         # release the lock on hard failure so the user can retry deliberately;
         # the audit log + bank statement remain the source of truth.
         frappe.cache().delete_value(lock_key)
         raise
+
+
+@frappe.whitelist()
+def get_pending_vop(kefiya_login):
+    """Return the parked Verification-of-Payee mismatch for a login, if any.
+
+    Read-only: lets the UI show what the bank actually objected to before a
+    reviewer decides whether to release the transfer.
+    """
+    frappe.has_permission(
+        "Kefiya Login", ptype="read", doc=kefiya_login, throw=True)
+
+    login = frappe.get_doc("Kefiya Login", kefiya_login)
+    if not login.stored_vop_state:
+        return {"status": "none"}
+
+    result = login.vop_result
+    try:
+        result = json.loads(result) if result else None
+    except Exception:
+        pass
+    return {
+        "status": "pending",
+        "reference": login.vop_reference,
+        "vop_result": result,
+    }
+
+
+@frappe.whitelist()
+def approve_vop_transfer(kefiya_login, user_scope, confirmed=0):
+    """Release a transfer the bank flagged with a Verification-of-Payee mismatch.
+
+    The bank could not confirm that the payee name matches the IBAN. Kefiya
+    refuses such an order outright and parks it; this endpoint is the only way
+    it can still go through, and only after a human compared the payee against
+    the underlying document. ``confirmed`` must be set by an explicit dialog --
+    a VoP mismatch is exactly the signal a payment-diversion fraud produces, so
+    it must never be waved through automatically.
+
+    :return: {"status": "submitted" | "tan_required" | "error", ...}
+    """
+    from frappe.utils import cint
+
+    # Hard gate: releasing a flagged payee is a deliberate human act.
+    if not cint(confirmed):
+        return {"status": "error", "message": _(
+            "Verification of Payee mismatch not confirmed. The payee must be"
+            " checked against the invoice before the transfer is released."
+        )}
+
+    # Permission gate: this is the step that lets money leave despite the
+    # bank's warning, so require write rights on the paying login.
+    frappe.has_permission(
+        "Kefiya Login", ptype="write", doc=kefiya_login, throw=True)
+
+    login = frappe.get_doc("Kefiya Login", kefiya_login)
+    if not login.stored_vop_state:
+        return {"status": "error",
+                "message": _("No pending Verification of Payee for this login.")}
+
+    # Audit before contacting the bank: who released which flagged payee.
+    frappe.logger("kefiya").info(
+        "VoP override: login=%s reference=%s user=%s",
+        kefiya_login, login.vop_reference, frappe.session.user,
+    )
+    frappe.log_error(
+        title="Kefiya: Verification-of-Payee mismatch released by user",
+        message="login={0} reference={1} user={2}\nvop_result={3}".format(
+            kefiya_login, login.vop_reference, frappe.session.user,
+            login.vop_result,
+        ),
+    )
+
+    from kefiya.utils.fints_controller import FinTSController
+    interactive = {"docname": user_scope, "enabled": True}
+    controller = FinTSController(kefiya_login, interactive)
+    return controller.approve_pending_vop()
 
 
 @frappe.whitelist()

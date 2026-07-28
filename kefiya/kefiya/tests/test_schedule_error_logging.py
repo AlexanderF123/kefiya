@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import inspect
+import re
 import unittest
 from pathlib import Path
 
@@ -193,6 +194,42 @@ class TestRequireFintsAccount(unittest.TestCase):
             "self.get_fints_account_by_iban(", source,
             "_require_fints_account must delegate to the low-level lookup; "
             "calling itself would recurse until the stack blows.",
+        )
+
+
+class TestTranslationHelperIsImported(unittest.TestCase):
+    """`_` is not a builtin in Frappe -- it must be imported per module.
+
+    Two modules used _() without importing it. Both stayed latent because the
+    affected paths are error branches that had not run in production, so the
+    NameError would first have surfaced while reporting another failure.
+    """
+
+    def test_every_module_using_underscore_imports_it(self):
+        app_root = Path(inspect.getfile(kefiya_schedule)).parents[3]
+        pattern = re.compile(r"(?<![\w.])_\(")
+        offenders = []
+
+        for path in sorted(app_root.rglob("*.py")):
+            if path.name == Path(__file__).name:
+                continue
+            text = path.read_text(encoding="utf-8")
+            body = "\n".join(
+                line for line in text.splitlines()
+                if not line.lstrip().startswith("#")
+            )
+            if not pattern.search(body):
+                continue
+            imports_underscore = re.search(
+                r"^\s*from frappe import (.*\b_\b.*)$", text, re.M
+            ) or re.search(r"^\s*from frappe import _\s*$", text, re.M)
+            if not imports_underscore:
+                offenders.append(str(path.relative_to(app_root)))
+
+        self.assertEqual(
+            offenders, [],
+            "These modules call _() without importing it; the call raises "
+            "NameError at runtime: {0}".format(", ".join(offenders)),
         )
 
 

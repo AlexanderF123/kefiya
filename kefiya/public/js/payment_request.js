@@ -165,14 +165,7 @@ function kefiya_handle_transfer_response(frm, msg) {
     } else if (msg.status === "tan_required") {
         kefiya_prompt_transfer_tan(frm, msg.docname);
     } else if (msg.status === "vop_mismatch") {
-        frappe.msgprint({
-            title: __("Verification of Payee — mismatch"),
-            indicator: "orange",
-            message: __("The bank could not confirm the payee name matches the IBAN. No money was sent. Please have a clerk verify and correct the recipient name, then retry.")
-                + "<pre style=\"white-space:pre-wrap\">"
-                + frappe.utils.escape_html(JSON.stringify(msg.vop_result || {}, null, 2))
-                + "</pre>"
-        });
+        kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
     } else {
         frappe.msgprint({
             title: __("Transfer failed"),
@@ -180,6 +173,82 @@ function kefiya_handle_transfer_response(frm, msg) {
             message: msg.message || __("Unknown error")
         });
     }
+}
+
+/**
+ * Verification of Payee mismatch: the bank could not confirm that the payee
+ * name belongs to the IBAN. No money has moved. The order is parked server-side
+ * and can only continue through this dialog, after a human compared the payee
+ * against the underlying document -- a VoP mismatch is exactly what a payment
+ * diversion (redirected invoice) looks like, so it is never waved through.
+ */
+function kefiya_prompt_vop_release(frm, kefiya_login, vop_result) {
+    let details = "";
+    if (vop_result && typeof vop_result === "object") {
+        const rows = Object.keys(vop_result).map((key) =>
+            "<tr><td style='padding:2px 10px 2px 0'><b>"
+            + frappe.utils.escape_html(key)
+            + "</b></td><td>"
+            + frappe.utils.escape_html(String(vop_result[key]))
+            + "</td></tr>"
+        );
+        details = "<table style='margin-top:8px'>" + rows.join("") + "</table>";
+    } else if (vop_result) {
+        details = "<pre style='white-space:pre-wrap'>"
+            + frappe.utils.escape_html(String(vop_result)) + "</pre>";
+    }
+
+    const d = new frappe.ui.Dialog({
+        title: __("Verification of Payee — mismatch"),
+        fields: [
+            {
+                fieldtype: "HTML",
+                options:
+                    "<div class='alert alert-warning' style='margin-bottom:10px'>"
+                    + __("The bank could not confirm that the payee name matches the IBAN. <b>No money has been sent.</b>")
+                    + "</div>"
+                    + __("Compare the recipient against the invoice before releasing. If the account details were changed recently or came in by email, treat this as a possible fraud attempt and clarify by phone using a known number.")
+                    + details
+            },
+            {
+                fieldtype: "Check",
+                fieldname: "reviewed",
+                label: __("I verified the recipient against the original document"),
+                default: 0,
+                reqd: 1
+            }
+        ],
+        primary_action_label: __("Release transfer"),
+        primary_action: function (values) {
+            if (!values.reviewed) {
+                frappe.msgprint(__("Please confirm you verified the recipient."));
+                return;
+            }
+            d.hide();
+            frappe.call({
+                method: "kefiya.utils.client.approve_vop_transfer",
+                args: {
+                    kefiya_login: kefiya_login,
+                    user_scope: frm.docname,
+                    confirmed: 1
+                },
+                freeze: true,
+                freeze_message: __("Releasing transfer..."),
+                callback: function (r) {
+                    kefiya_handle_transfer_response(frm, r.message);
+                }
+            });
+        },
+        secondary_action_label: __("Cancel transfer"),
+        secondary_action: function () {
+            d.hide();
+            frappe.show_alert({
+                message: __("Transfer not released. No money was sent."),
+                indicator: "orange"
+            });
+        }
+    });
+    d.show();
 }
 
 function kefiya_prompt_transfer_tan(frm, kefiya_login) {

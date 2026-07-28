@@ -721,7 +721,69 @@ class FinTSController:
                 return {"vop": "mismatch"}
         return None
 
-    def submit_sepa_transfer(self, pain_xml, instant_payment=False):
+    def _persist_vop_state(self, response, vop_result, payment_reference=None):
+        """Park a Verification-of-Payee challenge for later human release.
+
+        NeedVOPResponse is a NeedRetryResponse, so it survives a round trip
+        through the database exactly like a pending TAN: store the challenge
+        plus the paused dialog, and the reviewer can resume and approve it in
+        a later request.
+        """
+        self.kefiya_login.stored_vop_blob = response.get_data()
+        self.kefiya_login.stored_vop_dialog_blob = \
+            self.fints_connection.pause_dialog()
+        self.kefiya_login.vop_reference = payment_reference
+        try:
+            self.kefiya_login.vop_result = json.dumps(vop_result)[:2000]
+        except Exception:
+            self.kefiya_login.vop_result = str(vop_result)[:2000]
+        self.kefiya_login.save()
+
+    def approve_pending_vop(self, instant_payment=False):
+        """Release a parked VoP mismatch after a human reviewed the payee.
+
+        This is the deliberate counterpart to refusing the transfer in
+        submit_sepa_transfer: the bank could not confirm that payee name and
+        IBAN belong together, a reviewer checked it against the invoice, and
+        only now is the order approved. Callers must gate this on an explicit
+        confirmation -- it is the step that lets the money leave.
+
+        :return: {"status": "submitted" | "tan_required" | "error", ...}
+        """
+        blob = self.kefiya_login.stored_vop_blob
+        dialog_blob = self.kefiya_login.stored_vop_dialog_blob
+        if not (blob and dialog_blob):
+            return {
+                "status": "error",
+                "message": _("No pending Verification of Payee for this login."),
+            }
+
+        with self.fints_connection.resume_dialog(dialog_blob):
+            challenge = NeedRetryResponse.from_data(blob)
+            response = self.fints_connection.approve_vop_response(challenge)
+
+            # The challenge is spent either way -- approved orders must never be
+            # replayable, and a failure needs a fresh transfer, not a retry of a
+            # stale dialog.
+            self.kefiya_login.clear_vop_state()
+            self.kefiya_login.save()
+
+            if self.is_tan_required_and_requested(response):
+                return {
+                    "status": "tan_required",
+                    "docname": self.kefiya_login.name,
+                }
+
+            frappe.log_error(
+                title="Kefiya SEPA transfer approved via VoP without TAN",
+                message="login={0}: the bank did not request a TAN after the "
+                        "Verification-of-Payee approval".format(
+                            self.kefiya_login.name),
+            )
+            return {"status": "submitted"}
+
+    def submit_sepa_transfer(self, pain_xml, instant_payment=False,
+                             payment_reference=None):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
         Requires a TAN: if the bank asks for one, the request is persisted and
@@ -745,6 +807,10 @@ class FinTSController:
                 # Verification of Payee mismatch: the bank could not confirm the
                 # payee name matches the IBAN. NEVER auto-approve this -- money is
                 # not sent; a Sachbearbeiter must review/correct the payee name.
+                # Park the challenge so a reviewer can release it deliberately
+                # via approve_pending_vop(); without this the transfer is a dead
+                # end and has to be started over.
+                self._persist_vop_state(response, vop, payment_reference)
                 return {
                     "status": "vop_mismatch",
                     "docname": self.kefiya_login.name,

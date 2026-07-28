@@ -186,7 +186,10 @@ class KefiyaBankStatementImport(Document):
 				decimal_part = amount[-2:]
 				amount = integer_part + '.' + decimal_part
 			except Exception as e:
-				frappe.msgprint(f'currency formatting not supported for row: {row_data} - {e}')
+				# `row_data` does not exist here -- this method only receives
+				# the amount. Referencing it raised NameError from inside the
+				# except block, replacing the intended message with a crash.
+				frappe.msgprint(f'currency formatting not supported for amount: {amount} - {e}')
 
 		amount = float(amount)
 		if amount >= 0:
