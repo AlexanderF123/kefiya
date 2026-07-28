@@ -363,6 +363,41 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
     return result
 
 
+def _parse_transfer_names(transfer_names):
+    """Turn the client's argument into a de-duplicated list of names.
+
+    Two failure modes this guards against, both of which pay twice:
+
+    * a JSON string instead of a list -- iterating it would walk single
+      characters rather than document names;
+    * the same name listed twice -- the document would be loaded twice and its
+      payments would appear twice in one pain.001, so the recipient is paid
+      twice from a single order.
+
+    Order is preserved so the message matches what the user saw.
+    """
+    if isinstance(transfer_names, str):
+        try:
+            transfer_names = json.loads(transfer_names)
+        except ValueError:
+            frappe.throw(_("Invalid transfer selection."))
+
+    if isinstance(transfer_names, str) or not isinstance(
+            transfer_names, (list, tuple)):
+        frappe.throw(_("Invalid transfer selection: expected a list."))
+
+    seen = set()
+    unique = []
+    for name in transfer_names:
+        if not isinstance(name, str) or not name:
+            frappe.throw(_("Invalid transfer selection."))
+        if name in seen:
+            continue
+        seen.add(name)
+        unique.append(name)
+    return unique
+
+
 @frappe.whitelist()
 def set_transfer_hold(transfer_names, on_hold):
     """Hold approved transfers back in the outbox, or release them again.
@@ -373,8 +408,7 @@ def set_transfer_hold(transfer_names, on_hold):
     """
     from frappe.utils import cint
 
-    if isinstance(transfer_names, str):
-        transfer_names = json.loads(transfer_names)
+    transfer_names = _parse_transfer_names(transfer_names)
 
     changed = []
     for name in transfer_names:
@@ -409,8 +443,7 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             " confirmation."
         )}
 
-    if isinstance(transfer_names, str):
-        transfer_names = json.loads(transfer_names)
+    transfer_names = _parse_transfer_names(transfer_names)
     if not transfer_names:
         return {"status": "error", "message": _("No transfers selected.")}
 
@@ -440,12 +473,15 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
         )}
     kefiya_login = docs[0].kefiya_login
 
-    # One lock for the whole batch: a double click must not send it twice.
-    lock_key = "kefiya_transfer_outbox:" + kefiya_login
-    if frappe.cache().get_value(lock_key):
+    # Lock per document, not per account. The single-document endpoint locks
+    # the same keys, so a document cannot be sent through both paths at once --
+    # which would pay it twice.
+    lock_keys = ["kefiya_transfer_doc:" + doc.name for doc in docs]
+    held = [k for k in lock_keys if frappe.cache().get_value(k)]
+    if held:
         return {"status": "error", "message": _(
-            "A send for this account is already in progress."
-        )}
+            "A send is already in progress for: {0}"
+        ).format(", ".join(k.split(":", 1)[1] for k in held))}
 
     from kefiya.kefiya.doctype.kefiya_transfer.kefiya_transfer import (
         build_pain001_for,
@@ -457,7 +493,8 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
         ",".join(transfer_names), kefiya_login, count, control_sum,
         frappe.session.user,
     )
-    frappe.cache().set_value(lock_key, frappe.session.user, expires_in_sec=600)
+    for key in lock_keys:
+        frappe.cache().set_value(key, frappe.session.user, expires_in_sec=600)
 
     from kefiya.utils.fints_controller import FinTSController
     interactive = {"docname": user_scope, "enabled": True}
@@ -471,7 +508,8 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             control_sum=control_sum if count > 1 else None,
         )
     except Exception:
-        frappe.cache().delete_value(lock_key)
+        for key in lock_keys:
+            frappe.cache().delete_value(key)
         raise
 
     status = (result or {}).get("status")
@@ -517,7 +555,7 @@ def get_pending_vop(kefiya_login):
 
 @frappe.whitelist()
 def approve_vop_transfer(kefiya_login, user_scope, confirmed=0):
-    """Release a transfer the bank flagged with a Verification-of-Payee mismatch.
+    """Release a transfer the bank flagged with a VoP mismatch.
 
     The bank could not confirm that the payee name matches the IBAN. Kefiya
     refuses such an order outright and parks it; this endpoint is the only way

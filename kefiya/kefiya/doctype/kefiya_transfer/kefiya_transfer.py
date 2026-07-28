@@ -116,6 +116,12 @@ class KefiyaTransfer(Document):
         and recipients stay locked by the submit. That is why this is allowed
         after approval while everything else on the document is not.
         """
+        # A whitelisted document method is callable by anyone who may read the
+        # document. Releasing a held-back order makes it eligible for the next
+        # collective send, so it needs the same right as sending itself.
+        frappe.has_permission(
+            "Kefiya Transfer", ptype="submit", doc=self, throw=True)
+
         if self.docstatus != 1:
             frappe.throw(_("Only approved transfers can be held back."))
         if self.status == "Sent":

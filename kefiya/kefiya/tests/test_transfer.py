@@ -186,3 +186,41 @@ class TestOutbox(unittest.TestCase):
         source = inspect.getsource(client.set_transfer_hold)
         self.assertIn("has_permission", source)
         self.assertIn('ptype="submit"', source)
+
+
+class TestOutboxHardening(unittest.TestCase):
+    """Three ways the outbox could have paid twice or misassigned rights."""
+
+    def test_duplicate_names_are_collapsed(self):
+        """The same order listed twice would appear twice in one pain.001 --
+        the recipient would be paid twice from a single order."""
+        from kefiya.utils.client import _parse_transfer_names
+
+        self.assertEqual(_parse_transfer_names(["A", "A", "B"]), ["A", "B"])
+        self.assertEqual(_parse_transfer_names('["A", "A"]'), ["A"])
+
+    def test_non_list_selection_is_refused(self):
+        """A JSON string would be iterated character by character."""
+        from kefiya.utils.client import _parse_transfer_names
+
+        bad = ['"KEF-001"', '{"a": 1}', "123", "broken{", [1, 2], [""]]
+        for payload in bad:
+            with self.assertRaises(Exception, msg=repr(payload)):
+                _parse_transfer_names(payload)
+
+    def test_both_send_paths_lock_the_same_key(self):
+        """A document must not be sendable through the single and the
+        collective path at the same time."""
+        single = inspect.getsource(client.submit_kefiya_transfer)
+        batch = inspect.getsource(client.send_transfer_outbox)
+        self.assertIn('"kefiya_transfer_doc:"', single)
+        self.assertIn('"kefiya_transfer_doc:"', batch)
+
+    def test_hold_is_permission_checked(self):
+        """A whitelisted document method is callable by anyone who may read the
+        document; releasing an order makes it eligible for the next send."""
+        from kefiya.kefiya.doctype.kefiya_transfer import kefiya_transfer
+
+        source = inspect.getsource(kefiya_transfer.KefiyaTransfer.set_hold)
+        self.assertIn("has_permission", source)
+        self.assertIn('ptype="submit"', source)
