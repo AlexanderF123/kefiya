@@ -110,6 +110,81 @@ class TestMoneyEndpointPermissions(unittest.TestCase):
         self.assertIn("confirm", (res.get("message") or "").lower())
 
 
+class TestSepaExportGate(unittest.TestCase):
+    """Regression: the SEPA pain.001 export must not bypass the
+    outgoing-payment approval workflow.
+
+    ``export_request`` / ``send_sepa_xml_via_email`` are ``@frappe.whitelist()``
+    endpoints, so without an explicit gate any logged-in user could call them on
+    an *unapproved draft* Outward Payment Request and receive a ready-to-execute
+    SEPA file -- defeating the 4-eyes "Payment Request Freigabe (Ausgang)"
+    workflow that only gates the submit. So the export path must (a) require
+    submit permission and (b) refuse anything that is not a submitted request.
+    """
+
+    def test_export_endpoints_are_whitelisted(self):
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        for name in ("export_request", "send_sepa_xml_via_email"):
+            fn = getattr(m, name)
+            self.assertTrue(
+                getattr(fn, "__func__", fn) in frappe.whitelisted
+                or fn in frappe.whitelisted,
+                f"{name} is expected to be a whitelisted endpoint",
+            )
+
+    def test_export_endpoints_have_permission_gate(self):
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        for name in ("export_request", "send_sepa_xml_via_email"):
+            src = inspect.getsource(getattr(m, name))
+            self.assertIn(
+                "has_permission",
+                src,
+                f"{name} must call frappe.has_permission before acting",
+            )
+            self.assertIn(
+                "throw=True",
+                src,
+                f"{name}'s permission check must throw (deny) on failure",
+            )
+            self.assertIn(
+                "Payment Request",
+                src,
+                f"{name} must guard the Payment Request DocType",
+            )
+
+    def test_builder_gates_on_submitted_state(self):
+        """The pain.001 builder must refuse a non-submitted (unapproved) doc, so
+        the approval workflow that gates the submit cannot be side-stepped."""
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        src = inspect.getsource(m._build_sepa_xml)
+        self.assertIn(
+            "docstatus",
+            src,
+            "_build_sepa_xml must check the approval (docstatus) state",
+        )
+
+    def test_builder_validates_against_xsd(self):
+        """The pain.001 must be validated against the SEPA XSD before
+        it leaves the system, so a malformed instruction is blocked rather than
+        sent to the bank."""
+        from kefiya.events.hammer_script import payment_request_on_submit as m
+
+        src = inspect.getsource(m._build_sepa_xml)
+        self.assertIn(
+            "validate=True",
+            src,
+            "_build_sepa_xml must export with XSD validation enabled",
+        )
+        self.assertNotIn(
+            "validate=False",
+            src,
+            "_build_sepa_xml must not export without validation",
+        )
+
+
 class TestScheduledDebitNormalizer(unittest.TestCase):
     """The forecast table (Kefiya Planned Payment) is fed from the bank's
     standing orders via normalize_scheduled_debits. The bank/library shape is
@@ -149,3 +224,53 @@ class TestScheduledDebitNormalizer(unittest.TestCase):
 
         out = normalize_scheduled_debits(None)
         self.assertEqual(out, {"items": [], "skipped": 0})
+
+
+class TestSepaEmailIsServerControlled(unittest.TestCase):
+    """The mail endpoint must not relay caller-supplied content.
+
+    ``recipient_email`` and ``xml_content`` used to be parameters, so a user
+    holding submit rights on any Payment Request could have arbitrary content
+    mailed to an arbitrary address through the server -- and the approval and
+    XSD gates in ``_build_sepa_xml`` never applied to what the client passed.
+    """
+
+    def test_endpoint_takes_no_recipient_or_payload(self):
+        import inspect
+
+        from kefiya.events.hammer_script.payment_request_on_submit import (
+            send_sepa_xml_via_email,
+        )
+
+        params = list(
+            inspect.signature(send_sepa_xml_via_email).parameters
+        )
+        self.assertEqual(
+            params, ["payment_request_name"],
+            "The recipient and the attachment must be resolved server-side; "
+            "accepting them as arguments makes this an open relay for anyone "
+            "with submit rights.",
+        )
+
+    def test_endpoint_builds_the_file_and_resolves_the_recipient(self):
+        import inspect
+
+        from kefiya.events.hammer_script.payment_request_on_submit import (
+            send_sepa_xml_via_email,
+        )
+
+        source = inspect.getsource(send_sepa_xml_via_email)
+        self.assertIn(
+            "_build_sepa_xml(", source,
+            "The mailed file must go through _build_sepa_xml so the approval "
+            "and XSD gates apply to it as well.",
+        )
+        self.assertIn(
+            "recipient_email", source,
+            "The recipient must come from Kefiya Settings.",
+        )
+        self.assertIn(
+            "has_permission", source,
+            "Mailing an executable payment file requires submit rights on "
+            "the specific Payment Request.",
+        )
