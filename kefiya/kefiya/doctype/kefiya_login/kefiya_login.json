@@ -18,6 +18,7 @@
   "get_accounts",
   "account_iban",
   "failed_connection",
+  "skip_fetch",
   "allowed_sync_days_in_past",
   "column_break_ydzf",
   "dialog_state_updated",
@@ -226,6 +227,13 @@
    "fieldtype": "Small Text",
    "label": "VoP Result",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "skip_fetch",
+   "fieldtype": "Check",
+   "label": "Vom Abruf ausnehmen",
+   "description": "Loan and clearing accounts are not offered for statement retrieval over FinTS. Tick this to keep the login out of the scheduled and collective fetch instead of letting it fail every run."
   }
  ],
  "icon": "fa fa-university",

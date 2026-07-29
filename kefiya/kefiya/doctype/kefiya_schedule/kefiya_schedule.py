@@ -112,10 +112,16 @@ def scheduled_import_fints_payments(manual=None):
                 continue
 
             login_name = child_item.kefiya_login
-            bank_account, allowed_days = (frappe.db.get_value(
+            bank_account, allowed_days, skip_fetch = (frappe.db.get_value(
                 "Kefiya Login", login_name,
-                ["bank_account", "allowed_sync_days_in_past"]
-            ) or (None, None))
+                ["bank_account", "allowed_sync_days_in_past", "skip_fetch"]
+            ) or (None, None, 0))
+
+            # Loan and clearing accounts are never offered for statement
+            # retrieval, so fetching them fails every single run. Skipping them
+            # keeps the failure list down to the ones worth looking at.
+            if skip_fetch:
+                continue
 
             # Frequency gate: use the last IMPORT RUN time (creation), not the
             # transaction end_date. A run that returned no transactions (weekend,
