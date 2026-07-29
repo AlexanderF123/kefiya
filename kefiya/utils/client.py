@@ -72,6 +72,42 @@ def import_fints_holdings(kefiya_login, user_scope):
     return refresh_holdings(kefiya_login, holdings)
 
 
+def _optional_fetch(summary, key, label, fn):
+    """Run one best-effort extra fetch, telling absent from broken apart.
+
+    A bank that does not offer a segment is not a malfunction: python-fints
+    raises FinTSUnsupportedOperation ("bank supports ()"), which used to be
+    logged like any other failure. One collective run produced dozens of Error
+    Log entries that way -- 24 for credit cards alone -- burying the failures
+    that do need attention. Unsupported segments are now recorded on the
+    summary and skipped silently; everything else is still logged in full.
+
+    :param summary: the fetch_all result dict, mutated in place
+    :param key: summary key to fill
+    :param label: short name used in summary["errors"] / ["unsupported"]
+    :param fn: zero-argument callable performing the fetch
+    :return: the fetch result, or None when skipped or failed
+    """
+    try:
+        from fints.exceptions import FinTSUnsupportedOperation
+    except Exception:
+        FinTSUnsupportedOperation = ()
+
+    try:
+        return fn()
+    except Exception as exc:
+        if FinTSUnsupportedOperation and isinstance(
+                exc, FinTSUnsupportedOperation):
+            summary.setdefault("unsupported", []).append(label)
+            return None
+        summary["errors"].append(label)
+        frappe.log_error(
+            title="Kefiya fetch_all: {0} failed".format(label),
+            message=frappe.get_traceback(),
+        )
+        return None
+
+
 @frappe.whitelist()
 def fetch_all(kefiya_login, user_scope=None):
     """Fetch everything the bank offers for one login in a single action.
@@ -96,6 +132,13 @@ def fetch_all(kefiya_login, user_scope=None):
     # Transactions / Payment Entries must hold write rights on the login.
     frappe.has_permission("Kefiya Login", ptype="write",
                           doc=kefiya_login, throw=True)
+
+    if frappe.db.get_value("Kefiya Login", kefiya_login, "skip_fetch"):
+        return {
+            "transactions": {"status": "skipped"},
+            "skipped": True,
+            "errors": [],
+        }
 
     scope = user_scope or kefiya_login
     summary = {
@@ -150,15 +193,12 @@ def fetch_all(kefiya_login, user_scope=None):
     from kefiya.utils.fints_controller import _to_jsonable
 
     # 2) Balance incl. credit line (best effort).
-    try:
-        summary["balance"] = FetchCtl(kefiya_login).get_fints_balance()
-    except Exception:
-        summary["errors"].append("balance")
-        frappe.log_error(title="Kefiya fetch_all: balance failed",
-                         message=frappe.get_traceback())
+    summary["balance"] = _optional_fetch(
+        summary, "balance", "balance",
+        lambda: FetchCtl(kefiya_login).get_fints_balance())
 
     # 3) Standing orders / scheduled debits -> forecast table (best effort).
-    try:
+    def _fetch_planned():
         from kefiya.utils.planned_payment import (
             normalize_scheduled_debits, refresh_planned_payments,
         )
@@ -166,34 +206,27 @@ def fetch_all(kefiya_login, user_scope=None):
         norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
         planned = refresh_planned_payments(kefiya_login, norm["items"])
         planned["skipped"] = norm["skipped"]
-        summary["planned"] = planned
-    except Exception:
-        summary["errors"].append("scheduled_debits")
-        frappe.log_error(title="Kefiya fetch_all: scheduled debits failed",
-                         message=frappe.get_traceback())
+        return planned
+
+    summary["planned"] = _optional_fetch(
+        summary, "planned", "scheduled_debits", _fetch_planned)
 
     # 4) Electronic statement / document list (best effort).
-    try:
+    def _fetch_statements():
         stmts = _to_jsonable(FetchCtl(kefiya_login).get_fints_statements())
-        summary["statements"] = {
-            "count": len(stmts) if isinstance(stmts, list) else 0,
-        }
-    except Exception:
-        summary["errors"].append("statements")
-        frappe.log_error(title="Kefiya fetch_all: statements failed",
-                         message=frappe.get_traceback())
+        return {"count": len(stmts) if isinstance(stmts, list) else 0}
+
+    summary["statements"] = _optional_fetch(
+        summary, "statements", "statements", _fetch_statements)
 
     # 5) Credit-card transactions (best effort).
-    try:
+    def _fetch_credit_card():
         cc = _to_jsonable(
             FetchCtl(kefiya_login).get_fints_credit_card_transactions())
-        summary["credit_card"] = {
-            "count": len(cc) if isinstance(cc, list) else 0,
-        }
-    except Exception:
-        summary["errors"].append("credit_card")
-        frappe.log_error(title="Kefiya fetch_all: credit card failed",
-                         message=frappe.get_traceback())
+        return {"count": len(cc) if isinstance(cc, list) else 0}
+
+    summary["credit_card"] = _optional_fetch(
+        summary, "credit_card", "credit_card", _fetch_credit_card)
 
     return summary
 

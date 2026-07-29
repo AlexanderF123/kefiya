@@ -437,6 +437,43 @@ class FinTSController:
         """
         return self.__get_fints_account_by_key("iban", iban)
 
+    def _get_transactions_checked(self, account, start_date, end_date):
+        """Fetch transactions, turning a mid-fetch TAN request into a TAN flow.
+
+        When the bank's strong authentication has expired -- PSD2 requires it
+        every 90 days -- it answers the statement request with a TAN challenge
+        instead of the data. python-fints expects a (booked, pending) tuple at
+        that point and fails while unpacking, so the user saw
+        "cannot unpack non-iterable NeedTANResponse object": a message that
+        names neither the login nor the actual cause, and offers no way
+        forward.
+
+        The challenge object is consumed inside the library and cannot be
+        recovered here, so this cannot complete the TAN itself. What it can do
+        is raise the same TanInteractionRequired the rest of the app already
+        handles, which prompts the user for a TAN in the interactive paths and
+        is reported as "TAN required" rather than a crash elsewhere.
+        """
+        try:
+            return self.fints_connection.get_transactions(
+                account, start_date, end_date)
+        except TypeError as exc:
+            if "NeedTANResponse" not in str(exc):
+                raise
+            # Publish the prompt where a user can act on it, exactly as the
+            # dialog-level TAN handling does. Guarded: the scheduler runs with
+            # no UI attached, and this error path must not raise on its own.
+            try:
+                self.interactive.request_tan_prompt(
+                    possible_tan_modes=None, request_tan=True)
+            except Exception:
+                pass
+            raise TanInteractionRequired(_(
+                "The bank requires a TAN for {0} before transactions can be"
+                " read. Open the login and fetch it individually to enter the"
+                " TAN."
+            ).format(self.kefiya_login.name))
+
     def _require_fints_account(self, iban=None):
         """Resolve the login's FinTS account, or fail with a usable message.
 
@@ -522,7 +559,7 @@ class FinTSController:
             account = self._require_fints_account()
             return json.loads(
                 json.dumps(
-                    self.fints_connection.get_transactions(
+                    self._get_transactions_checked(
                         account,
                         start_date,
                         end_date
