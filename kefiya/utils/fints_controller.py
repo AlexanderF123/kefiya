@@ -32,6 +32,21 @@ class InitFailedException(Exception):
 class TanInteractionRequired(InitFailedException):
     pass
 
+
+def _mask_iban(value):
+    """Shorten an IBAN for diagnostic output.
+
+    Error messages end up in the Error Log, which is broadly readable. Keeping
+    the country code and the last four digits is enough to tell the accounts of
+    one login apart without writing full account numbers into the log.
+    """
+    if not value:
+        return "<no IBAN>"
+    value = str(value)
+    if len(value) <= 6:
+        return value
+    return "{0}***{1}".format(value[:2], value[-4:])
+
 class FinTSController:
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
         self.kefiya_login = frappe.get_doc("Kefiya Login", kefiya_login_docname)
@@ -422,6 +437,47 @@ class FinTSController:
         """
         return self.__get_fints_account_by_key("iban", iban)
 
+    def _require_fints_account(self, iban=None):
+        """Resolve the login's FinTS account, or fail with a usable message.
+
+        python-fints dereferences ``account.iban`` unguarded, so handing it a
+        None surfaces as a bare "'NoneType' object has no attribute 'iban'"
+        with no hint at which login is misconfigured. That applies to every
+        operation below -- balance, holdings, statements, credit card, and the
+        money-moving transfer and debit paths alike -- so resolve centrally
+        rather than guarding each call site. Typical cause: an account that
+        carries no IBAN at all (credit cards), which cannot be addressed this
+        way at all.
+
+        :param iban: IBAN to look up; defaults to the login's account IBAN
+        :return: the matching SEPAAccount (never None)
+        """
+        if iban is None:
+            iban = self.kefiya_login.account_iban
+
+        account = self.get_fints_account_by_iban(iban)
+        if account is not None:
+            return account
+
+        # `fints_accounts` is only set once __fetch_fints_accounts() succeeded;
+        # read it defensively, since this is the error path and must not raise
+        # an AttributeError of its own while reporting another failure.
+        offered = []
+        for acc in (getattr(self, "fints_accounts", None) or []):
+            value = acc.get("iban") if isinstance(acc, dict) \
+                else getattr(acc, "iban", None)
+            offered.append(_mask_iban(value))
+
+        frappe.throw(_(
+            "No FinTS account matching IBAN {0} for login {1}. "
+            "The bank offered: {2}. Accounts without an IBAN "
+            "(e.g. credit cards) cannot be fetched this way."
+        ).format(
+            _mask_iban(iban),
+            self.kefiya_login.name,
+            ", ".join(offered) or "<none>",
+        ))
+
     def get_fints_account_by_nr(self, account_nr):
         """Get FinTS account by account number.
 
@@ -463,8 +519,7 @@ class FinTSController:
             )
 
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return json.loads(
                 json.dumps(
                     self.fints_connection.get_transactions(
@@ -483,8 +538,7 @@ class FinTSController:
             market_value, currency, valuation_date, securities_account)
         """
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             holdings = self.fints_connection.get_holdings(account)
             result = []
             for h in holdings or []:
@@ -549,7 +603,7 @@ class FinTSController:
             return rows
 
         with conn:
-            account = self.get_fints_account_by_iban(iban)
+            account = self._require_fints_account(iban)
             with conn._get_dialog() as dialog:
                 hksal = conn._find_highest_supported_command(
                     HKSAL5, HKSAL6, HKSAL7)
@@ -570,16 +624,14 @@ class FinTSController:
         """Standing orders / scheduled debits (Dauerauftraege /
         Termin-Ueberweisungen) for the login's account."""
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_scheduled_debits(account, multiple)
 
     def get_fints_statements(self):
         """List available electronic account statements
         (elektronische Kontoauszuege / Dokumente)."""
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_statements(account)
 
     def get_fints_statement(self, number=None, year=None, file_format=None):
@@ -588,8 +640,7 @@ class FinTSController:
         May return binary content (e.g. PDF); the caller decides how to store it.
         """
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_statement(
                 account, number, year, file_format)
 
@@ -597,8 +648,7 @@ class FinTSController:
                                            start_date=None, end_date=None):
         """Credit card transactions (Kreditkartenumsaetze) for the account."""
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_credit_card_transactions(
                 account, credit_card_number, start_date, end_date)
 
@@ -611,8 +661,7 @@ class FinTSController:
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             return self.fints_connection.get_transactions_xml(
                 account, start_date, end_date)
 
@@ -638,8 +687,7 @@ class FinTSController:
         auto-approved.
         """
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             response = self.fints_connection.sepa_debit(account, pain008_xml)
             if self.is_tan_required_and_requested(response):
                 return {
@@ -673,7 +721,70 @@ class FinTSController:
                 return {"vop": "mismatch"}
         return None
 
-    def submit_sepa_transfer(self, pain_xml, instant_payment=False):
+    def _persist_vop_state(self, response, vop_result, payment_reference=None):
+        """Park a Verification-of-Payee challenge for later human release.
+
+        NeedVOPResponse is a NeedRetryResponse, so it survives a round trip
+        through the database exactly like a pending TAN: store the challenge
+        plus the paused dialog, and the reviewer can resume and approve it in
+        a later request.
+        """
+        self.kefiya_login.stored_vop_blob = response.get_data()
+        self.kefiya_login.stored_vop_dialog_blob = \
+            self.fints_connection.pause_dialog()
+        self.kefiya_login.vop_reference = payment_reference
+        try:
+            self.kefiya_login.vop_result = json.dumps(vop_result)[:2000]
+        except Exception:
+            self.kefiya_login.vop_result = str(vop_result)[:2000]
+        self.kefiya_login.save()
+
+    def approve_pending_vop(self, instant_payment=False):
+        """Release a parked VoP mismatch after a human reviewed the payee.
+
+        This is the deliberate counterpart to refusing the transfer in
+        submit_sepa_transfer: the bank could not confirm that payee name and
+        IBAN belong together, a reviewer checked it against the invoice, and
+        only now is the order approved. Callers must gate this on an explicit
+        confirmation -- it is the step that lets the money leave.
+
+        :return: {"status": "submitted" | "tan_required" | "error", ...}
+        """
+        blob = self.kefiya_login.stored_vop_blob
+        dialog_blob = self.kefiya_login.stored_vop_dialog_blob
+        if not (blob and dialog_blob):
+            return {
+                "status": "error",
+                "message": _("No pending Verification of Payee for this login."),
+            }
+
+        with self.fints_connection.resume_dialog(dialog_blob):
+            challenge = NeedRetryResponse.from_data(blob)
+            response = self.fints_connection.approve_vop_response(challenge)
+
+            # The challenge is spent either way -- approved orders must never be
+            # replayable, and a failure needs a fresh transfer, not a retry of a
+            # stale dialog.
+            self.kefiya_login.clear_vop_state()
+            self.kefiya_login.save()
+
+            if self.is_tan_required_and_requested(response):
+                return {
+                    "status": "tan_required",
+                    "docname": self.kefiya_login.name,
+                }
+
+            frappe.log_error(
+                title="Kefiya SEPA transfer approved via VoP without TAN",
+                message="login={0}: the bank did not request a TAN after the "
+                        "Verification-of-Payee approval".format(
+                            self.kefiya_login.name),
+            )
+            return {"status": "submitted"}
+
+    def submit_sepa_transfer(self, pain_xml, instant_payment=False,
+                             payment_reference=None, multiple=False,
+                             control_sum=None):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
         Requires a TAN: if the bank asks for one, the request is persisted and
@@ -685,19 +796,41 @@ class FinTSController:
             credit transfer (Echtzeitueberweisung, FinTS HKIPZ) instead of a
             regular transfer (HKCCS). The debtor bank + account must support
             instant payments, otherwise the bank rejects the order.
+        :param multiple: send as a collective order (HKCCM) -- one order
+            carrying many payments, authorised by a single TAN. Without this a
+            payment run needs one TAN per payment.
+        :param control_sum: total of all payments, which the bank checks a
+            collective order against. Required by the standard whenever
+            ``multiple`` is set.
         :return: {"status": "submitted" | "tan_required", ...}
         """
         instant_payment = bool(cint(instant_payment))
+        multiple = bool(cint(multiple))
+        if multiple and control_sum is None:
+            frappe.throw(_(
+                "A collective transfer requires a control sum."
+            ))
+
+        kwargs = {"instant_payment": instant_payment}
+        if multiple:
+            # Only pass these for a collective order: banks reject a control
+            # sum on a single transfer.
+            kwargs["multiple"] = True
+            kwargs["control_sum"] = control_sum
+
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
+            account = self._require_fints_account()
             response = self.fints_connection.sepa_transfer(
-                account, pain_xml, instant_payment=instant_payment)
+                account, pain_xml, **kwargs)
             vop = self._vop_mismatch(response)
             if vop is not None:
                 # Verification of Payee mismatch: the bank could not confirm the
                 # payee name matches the IBAN. NEVER auto-approve this -- money is
                 # not sent; a Sachbearbeiter must review/correct the payee name.
+                # Park the challenge so a reviewer can release it deliberately
+                # via approve_pending_vop(); without this the transfer is a dead
+                # end and has to be started over.
+                self._persist_vop_state(response, vop, payment_reference)
                 return {
                     "status": "vop_mismatch",
                     "docname": self.kefiya_login.name,

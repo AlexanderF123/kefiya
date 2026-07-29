@@ -1,3 +1,5 @@
+{% include "kefiya/public/js/controllers/fints_transfer_flow.js" %}
+
 frappe.ui.form.on('Payment Request', {
     refresh: function(frm) {
         frm.set_df_property('transaction_date', 'reqd', 1);
@@ -147,79 +149,6 @@ function kefiya_submit_transfer_via_fints(frm) {
                 freeze_message: __("Submitting transfer via FinTS..."),
                 callback: function (r) {
                     kefiya_handle_transfer_response(frm, r.message);
-                }
-            });
-        }
-    });
-    d.show();
-}
-
-function kefiya_handle_transfer_response(frm, msg) {
-    if (!msg) {
-        frappe.msgprint(__("No response from server."));
-        return;
-    }
-    if (msg.status === "submitted") {
-        frappe.show_alert({ message: __("Transfer submitted."), indicator: "green" });
-        frm.reload_doc();
-    } else if (msg.status === "tan_required") {
-        kefiya_prompt_transfer_tan(frm, msg.docname);
-    } else if (msg.status === "vop_mismatch") {
-        frappe.msgprint({
-            title: __("Verification of Payee — mismatch"),
-            indicator: "orange",
-            message: __("The bank could not confirm the payee name matches the IBAN. No money was sent. Please have a clerk verify and correct the recipient name, then retry.")
-                + "<pre style=\"white-space:pre-wrap\">"
-                + frappe.utils.escape_html(JSON.stringify(msg.vop_result || {}, null, 2))
-                + "</pre>"
-        });
-    } else {
-        frappe.msgprint({
-            title: __("Transfer failed"),
-            indicator: "red",
-            message: msg.message || __("Unknown error")
-        });
-    }
-}
-
-function kefiya_prompt_transfer_tan(frm, kefiya_login) {
-    const d = new frappe.ui.Dialog({
-        title: __("Enter TAN to authorise the transfer"),
-        fields: [
-            {
-                fieldname: "tan",
-                fieldtype: "Data",
-                label: __("TAN"),
-                reqd: 1,
-                description: __("Enter the TAN from your bank's app/device. For push-TAN, confirm in the app, then submit.")
-            }
-        ],
-        primary_action_label: __("Confirm transfer"),
-        primary_action: function (values) {
-            d.hide();
-            frappe.call({
-                method: "kefiya.utils.client.send_transfer_tan",
-                args: {
-                    kefiya_login: kefiya_login,
-                    tan: values.tan,
-                    user_scope: frm.docname
-                },
-                freeze: true,
-                freeze_message: __("Sending TAN..."),
-                callback: function (r) {
-                    if (r.message && r.message.status === "submitted") {
-                        frappe.show_alert({
-                            message: __("Transfer authorised and submitted."),
-                            indicator: "green"
-                        });
-                        frm.reload_doc();
-                    } else {
-                        frappe.msgprint({
-                            title: __("TAN failed"),
-                            indicator: "red",
-                            message: (r.message && r.message.message) || __("Unknown error")
-                        });
-                    }
                 }
             });
         }

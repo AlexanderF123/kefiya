@@ -4,6 +4,12 @@
 from __future__ import unicode_literals
 
 import frappe
+import json
+
+# Every user-facing message in this module goes through _(). It was never
+# imported here: the transfer endpoints are the only callers and had not run in
+# production yet, so the resulting NameError stayed latent.
+from frappe import _
 
 
 def _use_tan_authentication() -> bool:
@@ -34,6 +40,11 @@ def import_fints_transactions(kefiya_import, kefiya_login, user_scope):
     :type user_scopet: str
     :return: List of max 10 transactions and all new payment entries
     """
+    # Permission gate: this contacts the bank and writes Bank Transactions,
+    # so it needs write rights on the login -- a whitelisted endpoint is
+    # otherwise callable by any logged-in user.
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=kefiya_login, throw=True)
     FinTSController = _get_fints_controller()
     interactive = {"docname": user_scope, "enabled": True}
 
@@ -49,6 +60,8 @@ def import_fints_holdings(kefiya_login, user_scope):
     :param user_scope: current open doctype page (for progress/TAN UI)
     :return: dict with created/updated counts
     """
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=kefiya_login, throw=True)
     from kefiya.utils.securities import refresh_holdings
 
     FinTSController = _get_fints_controller()
@@ -268,12 +281,334 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
     try:
         controller = FinTSController(kefiya_login, interactive)
         return controller.submit_sepa_transfer(
-            xml_content, instant_payment=instant_payment)
+            xml_content, instant_payment=instant_payment,
+            payment_reference=payment_request_name)
     except Exception:
         # release the lock on hard failure so the user can retry deliberately;
         # the audit log + bank statement remain the source of truth.
         frappe.cache().delete_value(lock_key)
         raise
+
+
+@frappe.whitelist()
+def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
+    """Send an approved Kefiya Transfer to the bank.
+
+    One payment goes out as a single transfer (HKCCS, or HKIPZ when instant),
+    several as one collective order (HKCCM) that needs only a single TAN
+    instead of one per payment.
+
+    Recipients are typed in freely here, so the guards the invoice workflow
+    would otherwise provide sit on this path instead: the document must be
+    submitted (and submit rights are separate from create rights), the caller
+    must confirm explicitly, and nothing is sent twice.
+
+    :return: {"status": "submitted" | "tan_required" | "vop_mismatch" | "error"}
+    """
+    from frappe.utils import cint
+
+    # Hard gate: never reach the bank without an explicit confirmation.
+    if not cint(confirmed):
+        return {"status": "error", "message": _(
+            "Transfer not confirmed. Money is only sent after explicit"
+            " confirmation."
+        )}
+
+    # Permission gate: sending is a submit-level action on the transfer.
+    frappe.has_permission(
+        "Kefiya Transfer", ptype="submit", doc=transfer_name, throw=True)
+
+    doc = frappe.get_doc("Kefiya Transfer", transfer_name)
+    if doc.docstatus != 1:
+        return {"status": "error", "message": _(
+            "The transfer must be approved (submitted) before it is sent."
+        )}
+    if doc.status == "Sent":
+        return {"status": "error", "message": _(
+            "This transfer was already sent to the bank."
+        )}
+
+    # Guard against a double click resending real money.
+    lock_key = "kefiya_transfer_doc:" + transfer_name
+    if frappe.cache().get_value(lock_key):
+        return {"status": "error", "message": _(
+            "A transfer for this document is already in progress."
+        )}
+
+    pain_xml, control_sum, count = doc.build_pain001()
+
+    # Audit every attempt before contacting the bank.
+    frappe.logger("kefiya").info(
+        "Kefiya Transfer attempt: doc=%s login=%s count=%s sum=%s user=%s",
+        transfer_name, doc.kefiya_login, count, control_sum,
+        frappe.session.user,
+    )
+    frappe.cache().set_value(lock_key, frappe.session.user, expires_in_sec=600)
+
+    from kefiya.utils.fints_controller import FinTSController
+    interactive = {"docname": user_scope, "enabled": True}
+    try:
+        controller = FinTSController(doc.kefiya_login, interactive)
+        result = controller.submit_sepa_transfer(
+            pain_xml,
+            instant_payment=cint(doc.instant_payment),
+            payment_reference=transfer_name,
+            multiple=count > 1,
+            control_sum=control_sum if count > 1 else None,
+        )
+    except Exception:
+        # Release the lock so the user can retry deliberately; the audit log
+        # and the bank statement remain the source of truth.
+        frappe.cache().delete_value(lock_key)
+        raise
+
+    status = (result or {}).get("status")
+    if status == "submitted":
+        doc.db_set("status", "Sent")
+    elif status == "vop_mismatch":
+        doc.db_set("vop_pending", 1)
+    return result
+
+
+def _parse_transfer_names(transfer_names):
+    """Turn the client's argument into a de-duplicated list of names.
+
+    Two failure modes this guards against, both of which pay twice:
+
+    * a JSON string instead of a list -- iterating it would walk single
+      characters rather than document names;
+    * the same name listed twice -- the document would be loaded twice and its
+      payments would appear twice in one pain.001, so the recipient is paid
+      twice from a single order.
+
+    Order is preserved so the message matches what the user saw.
+    """
+    if isinstance(transfer_names, str):
+        try:
+            transfer_names = json.loads(transfer_names)
+        except ValueError:
+            frappe.throw(_("Invalid transfer selection."))
+
+    if isinstance(transfer_names, str) or not isinstance(
+            transfer_names, (list, tuple)):
+        frappe.throw(_("Invalid transfer selection: expected a list."))
+
+    seen = set()
+    unique = []
+    for name in transfer_names:
+        if not isinstance(name, str) or not name:
+            frappe.throw(_("Invalid transfer selection."))
+        if name in seen:
+            continue
+        seen.add(name)
+        unique.append(name)
+    return unique
+
+
+@frappe.whitelist()
+def set_transfer_hold(transfer_names, on_hold):
+    """Hold approved transfers back in the outbox, or release them again.
+
+    Holding changes only when an order is sent, never what it says -- amounts
+    and recipients stay locked by the submit -- which is why it is permitted
+    after approval while editing the document is not.
+    """
+    from frappe.utils import cint
+
+    transfer_names = _parse_transfer_names(transfer_names)
+
+    changed = []
+    for name in transfer_names:
+        frappe.has_permission(
+            "Kefiya Transfer", ptype="submit", doc=name, throw=True)
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        doc.set_hold(cint(on_hold))
+        changed.append(name)
+    return {"status": "ok", "changed": changed}
+
+
+@frappe.whitelist()
+def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
+    """Send several approved transfers as one collective order (HKCCM).
+
+    This is what makes the outbox worth having: orders are entered one by one
+    and then leave together on a single TAN, instead of one TAN per order.
+
+    Refuses rather than guesses. Mixing paying accounts would silently debit
+    the wrong one, an already-sent order would pay twice, and a held-back order
+    is held back for a reason -- so each of those aborts the whole send instead
+    of quietly dropping or including a document.
+
+    :param transfer_names: JSON list (or list) of Kefiya Transfer names
+    :return: {"status": ..., "sent": [names]}
+    """
+    from frappe.utils import cint
+
+    if not cint(confirmed):
+        return {"status": "error", "message": _(
+            "Transfer not confirmed. Money is only sent after explicit"
+            " confirmation."
+        )}
+
+    transfer_names = _parse_transfer_names(transfer_names)
+    if not transfer_names:
+        return {"status": "error", "message": _("No transfers selected.")}
+
+    docs = []
+    for name in transfer_names:
+        frappe.has_permission(
+            "Kefiya Transfer", ptype="submit", doc=name, throw=True)
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        if doc.docstatus != 1:
+            return {"status": "error", "message": _(
+                "{0} is not approved yet."
+            ).format(name)}
+        if doc.status == "Sent":
+            return {"status": "error", "message": _(
+                "{0} was already sent to the bank."
+            ).format(name)}
+        if doc.on_hold:
+            return {"status": "error", "message": _(
+                "{0} is held back. Release it first or deselect it."
+            ).format(name)}
+        docs.append(doc)
+
+    logins = {doc.kefiya_login for doc in docs}
+    if len(logins) > 1:
+        return {"status": "error", "message": _(
+            "All selected transfers must be paid from the same account."
+        )}
+    kefiya_login = docs[0].kefiya_login
+
+    # Lock per document, not per account. The single-document endpoint locks
+    # the same keys, so a document cannot be sent through both paths at once --
+    # which would pay it twice.
+    lock_keys = ["kefiya_transfer_doc:" + doc.name for doc in docs]
+    held = [k for k in lock_keys if frappe.cache().get_value(k)]
+    if held:
+        return {"status": "error", "message": _(
+            "A send is already in progress for: {0}"
+        ).format(", ".join(k.split(":", 1)[1] for k in held))}
+
+    from kefiya.kefiya.doctype.kefiya_transfer.kefiya_transfer import (
+        build_pain001_for,
+    )
+    pain_xml, control_sum, count = build_pain001_for(docs)
+
+    frappe.logger("kefiya").info(
+        "Kefiya outbox send: docs=%s login=%s count=%s sum=%s user=%s",
+        ",".join(transfer_names), kefiya_login, count, control_sum,
+        frappe.session.user,
+    )
+    for key in lock_keys:
+        frappe.cache().set_value(key, frappe.session.user, expires_in_sec=600)
+
+    from kefiya.utils.fints_controller import FinTSController
+    interactive = {"docname": user_scope, "enabled": True}
+    try:
+        controller = FinTSController(kefiya_login, interactive)
+        result = controller.submit_sepa_transfer(
+            pain_xml,
+            instant_payment=cint(docs[0].instant_payment),
+            payment_reference=",".join(transfer_names)[:140],
+            multiple=count > 1,
+            control_sum=control_sum if count > 1 else None,
+        )
+    except Exception:
+        for key in lock_keys:
+            frappe.cache().delete_value(key)
+        raise
+
+    status = (result or {}).get("status")
+    if status == "submitted":
+        # The bank accepted one message covering all of them, so they are
+        # marked together -- leaving part of a batch as unsent would invite a
+        # second send of money that is already gone.
+        for doc in docs:
+            doc.db_set("status", "Sent")
+    elif status == "vop_mismatch":
+        for doc in docs:
+            doc.db_set("vop_pending", 1)
+
+    result["sent"] = transfer_names
+    return result
+
+
+@frappe.whitelist()
+def get_pending_vop(kefiya_login):
+    """Return the parked Verification-of-Payee mismatch for a login, if any.
+
+    Read-only: lets the UI show what the bank actually objected to before a
+    reviewer decides whether to release the transfer.
+    """
+    frappe.has_permission(
+        "Kefiya Login", ptype="read", doc=kefiya_login, throw=True)
+
+    login = frappe.get_doc("Kefiya Login", kefiya_login)
+    if not login.stored_vop_state:
+        return {"status": "none"}
+
+    result = login.vop_result
+    try:
+        result = json.loads(result) if result else None
+    except Exception:
+        pass
+    return {
+        "status": "pending",
+        "reference": login.vop_reference,
+        "vop_result": result,
+    }
+
+
+@frappe.whitelist()
+def approve_vop_transfer(kefiya_login, user_scope, confirmed=0):
+    """Release a transfer the bank flagged with a VoP mismatch.
+
+    The bank could not confirm that the payee name matches the IBAN. Kefiya
+    refuses such an order outright and parks it; this endpoint is the only way
+    it can still go through, and only after a human compared the payee against
+    the underlying document. ``confirmed`` must be set by an explicit dialog --
+    a VoP mismatch is exactly the signal a payment-diversion fraud produces, so
+    it must never be waved through automatically.
+
+    :return: {"status": "submitted" | "tan_required" | "error", ...}
+    """
+    from frappe.utils import cint
+
+    # Hard gate: releasing a flagged payee is a deliberate human act.
+    if not cint(confirmed):
+        return {"status": "error", "message": _(
+            "Verification of Payee mismatch not confirmed. The payee must be"
+            " checked against the invoice before the transfer is released."
+        )}
+
+    # Permission gate: this is the step that lets money leave despite the
+    # bank's warning, so require write rights on the paying login.
+    frappe.has_permission(
+        "Kefiya Login", ptype="write", doc=kefiya_login, throw=True)
+
+    login = frappe.get_doc("Kefiya Login", kefiya_login)
+    if not login.stored_vop_state:
+        return {"status": "error",
+                "message": _("No pending Verification of Payee for this login.")}
+
+    # Audit before contacting the bank: who released which flagged payee.
+    frappe.logger("kefiya").info(
+        "VoP override: login=%s reference=%s user=%s",
+        kefiya_login, login.vop_reference, frappe.session.user,
+    )
+    frappe.log_error(
+        title="Kefiya: Verification-of-Payee mismatch released by user",
+        message="login={0} reference={1} user={2}\nvop_result={3}".format(
+            kefiya_login, login.vop_reference, frappe.session.user,
+            login.vop_result,
+        ),
+    )
+
+    from kefiya.utils.fints_controller import FinTSController
+    interactive = {"docname": user_scope, "enabled": True}
+    controller = FinTSController(kefiya_login, interactive)
+    return controller.approve_pending_vop()
 
 
 @frappe.whitelist()
@@ -319,6 +654,9 @@ def get_accounts(kefiya_login, user_scope):
     For TAN-enabled mode we may end up triggering a TAN flow.
     For legacy mode we just use the old controller.
     """
+    # Reading the bank's account list exposes account data of that login.
+    frappe.has_permission("Kefiya Login", ptype="read",
+                          doc=kefiya_login, throw=True)
     FinTSController = _get_fints_controller()
 
     interactive = {"docname": user_scope, "enabled": True}
@@ -356,6 +694,10 @@ def new_bank_account(payment_doc, bankData):
     :type bankData: str
     :return: Dict with status and bank details
     """
+    # Permission gate: creates a Bank Account record from client-supplied
+    # bank data, so it must require create rights rather than being callable
+    # by any logged-in user.
+    frappe.has_permission("Bank Account", ptype="create", throw=True)
     from kefiya.utils.bank_account_controller import \
         BankAccountController
     return BankAccountController().new_bank_account(payment_doc, bankData)
@@ -368,6 +710,7 @@ def get_missing_bank_accounts():
     Query payment entries for missing bank accounts.
     :return: List of payment entry data
     """
+    frappe.has_permission("Bank Account", ptype="read", throw=True)
     from kefiya.utils.bank_account_controller import \
         BankAccountController
     return BankAccountController().get_missing_bank_accounts()
@@ -750,6 +1093,10 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
     When a user was requested to perform a 2FA, this method is called as a callback
     to resolve the interaction. If TAN is disabled, this is effectively a no-op.
     """
+    # Permission gate: this continues an authenticated bank dialog with a
+    # user-supplied TAN, so it must require write rights on that login.
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=fints_login, throw=True)
     if not _use_tan_authentication():
         # Old banks / legacy mode: nothing to resolve
         return

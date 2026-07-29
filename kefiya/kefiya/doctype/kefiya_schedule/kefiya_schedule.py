@@ -24,6 +24,61 @@ class KefiyaSchedule(Document):
             )
 
 
+def _log_import_failure(login_name):
+    """Log a per-login import failure without ever raising.
+
+    `frappe.log_error(text)` passes its single positional argument as *title*,
+    which is the Error Log's `method` field -- a Data column capped at 140
+    characters. Handing it a full traceback therefore raised
+    CharacterLengthExceededError from inside the except block below, so one
+    broken login aborted the whole scheduler tick instead of just its own
+    iteration. Title and message must stay separate, and this helper must
+    never raise: error logging is not allowed to end the batch.
+    """
+    try:
+        title = "Kefiya Schedule: import failed for {0}".format(login_name)
+        frappe.log_error(
+            title=title[:140],
+            message=frappe.get_traceback(),
+            reference_doctype="Kefiya Login",
+            reference_name=login_name,
+        )
+    except Exception:
+        try:
+            frappe.logger("kefiya").exception(
+                "Kefiya Schedule: import failed for %s", login_name
+            )
+        except Exception:
+            pass
+
+
+def _recover_from_failed_login(login_name):
+    """Discard a failed login's partial work and record why, never raising.
+
+    Rolls back the Kefiya Import created before the fetch, which would
+    otherwise survive as an empty draft: while an aborting tick still
+    propagated, the scheduler rolled the whole run back and no such leftovers
+    appeared -- now that the loop continues, this iteration has to clean up
+    after itself. The rollback drops the Error Log as well, hence the explicit
+    commit afterwards.
+
+    Every step is guarded. A commit or rollback can fail in its own right, and
+    an exception escaping here would abort the tick -- exactly the failure this
+    whole helper exists to prevent.
+    """
+    try:
+        frappe.db.rollback()
+    except Exception:
+        pass
+
+    _log_import_failure(login_name)
+
+    try:
+        frappe.db.commit()
+    except Exception:
+        pass
+
+
 @frappe.whitelist()
 def scheduled_import_fints_payments(manual=None):
     """Create payment entries by Kefiya Schedule.
@@ -32,6 +87,14 @@ def scheduled_import_fints_payments(manual=None):
     :type manual: bool
     :return: None
     """
+    # Permission gate: whitelisted endpoints are callable by any logged-in
+    # user, and `manual=1` additionally bypasses the frequency gate below --
+    # so without this check anyone could trigger a bank fetch for every
+    # configured login at will. The scheduler itself runs as Administrator and
+    # is unaffected. Mirrors the gates added to the money endpoints in
+    # kefiya/utils/client.py.
+    frappe.has_permission("Kefiya Schedule", ptype="write", throw=True)
+
     schedule_settings = frappe.get_single('Kefiya Schedule')
 
     today = now_datetime().date()
@@ -95,5 +158,10 @@ def scheduled_import_fints_payments(manual=None):
             else:
                 FinTSControllerLegacy(login_name) \
                     .import_fints_transactions(kefiya_import.name)
+
+            # Settle this login before touching the next one. Without it a
+            # later rollback would also discard the logins that already
+            # succeeded in this tick.
+            frappe.db.commit()
         except Exception:
-            frappe.log_error(frappe.get_traceback())
+            _recover_from_failed_login(child_item.kefiya_login)

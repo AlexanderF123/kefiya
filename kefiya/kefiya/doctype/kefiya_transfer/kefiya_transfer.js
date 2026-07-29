@@ -1,0 +1,192 @@
+// Copyright (c) 2026, Phamos GmbH and contributors
+// For license information, please see license.txt
+
+{% include "kefiya/public/js/controllers/fints_progress_log.js" %}
+{% include "kefiya/public/js/controllers/fints_interactive.js" %}
+{% include "kefiya/public/js/controllers/fints_transfer_flow.js" %}
+
+frappe.ui.form.on("Kefiya Transfer", {
+	onload: function (frm) {
+		kefiya.interactive.progressbar(frm);
+	},
+
+	refresh: function (frm) {
+		// Sending is deliberately separate from submitting: approving a
+		// transfer must never move money as a side effect.
+		if (frm.doc.docstatus === 1 && frm.doc.status !== "Sent") {
+			if (!frm.doc.on_hold) {
+				frm.add_custom_button(__("Send to bank"), function () {
+					kefiya_confirm_and_send(frm);
+				}).addClass("btn-primary");
+			}
+
+			// Holding back is allowed after approval because it changes only
+			// when the order goes out, not what it says.
+			frm.add_custom_button(
+				frm.doc.on_hold ? __("Release") : __("Hold back"),
+				function () {
+					frm.call("set_hold", { on_hold: frm.doc.on_hold ? 0 : 1 })
+						.then(() => frm.reload_doc());
+				}
+			);
+		}
+
+		if (frm.doc.on_hold && frm.doc.status !== "Sent") {
+			frm.dashboard.set_headline_alert(
+				__("Held back — this order stays in the outbox and is skipped by a collective send."),
+				"orange"
+			);
+		}
+
+		if (frm.doc.status === "Sent") {
+			frm.dashboard.set_headline_alert(
+				__("Sent to the bank. Recall it with your bank if needed — it cannot be withdrawn here."),
+				"green"
+			);
+		} else if (frm.doc.vop_pending) {
+			frm.dashboard.set_headline_alert(
+				__("The bank flagged a payee mismatch. Use 'Send to bank' to review and release it."),
+				"orange"
+			);
+		}
+
+		kefiya_render_summary(frm);
+	},
+
+	items_on_form_rendered: function (frm) {
+		kefiya_render_summary(frm);
+	},
+});
+
+frappe.ui.form.on("Kefiya Transfer Item", {
+	amount: function (frm) {
+		kefiya_recalculate(frm);
+	},
+	items_remove: function (frm) {
+		kefiya_recalculate(frm);
+	},
+	recipient_iban: function (frm, cdt, cdn) {
+		// Immediate feedback on a mistyped IBAN. With free recipient entry
+		// there is no invoice to check against, so the checksum is the only
+		// automatic defence -- and catching it here beats a server error.
+		const row = locals[cdt][cdn];
+		if (!row.recipient_iban) {
+			return;
+		}
+		const iban = row.recipient_iban.replace(/[\s-]/g, "").toUpperCase();
+		frappe.model.set_value(cdt, cdn, "recipient_iban", iban);
+		if (!kefiya_iban_is_valid(iban)) {
+			frappe.msgprint({
+				title: __("Invalid IBAN"),
+				indicator: "red",
+				message: __("{0} is not a valid IBAN — the checksum does not match. Please re-check the recipient's account.", [frappe.utils.escape_html(iban)]),
+			});
+		}
+	},
+});
+
+/** ISO 7064 mod-97 check, mirroring the server-side validation. */
+function kefiya_iban_is_valid(iban) {
+	if (!iban || iban.length < 15 || iban.length > 34) {
+		return false;
+	}
+	if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]+$/.test(iban)) {
+		return false;
+	}
+	const rearranged = iban.slice(4) + iban.slice(0, 4);
+	let digits = "";
+	for (const ch of rearranged) {
+		digits += /[0-9]/.test(ch) ? ch : (ch.charCodeAt(0) - 55).toString();
+	}
+	// The number exceeds Number.MAX_SAFE_INTEGER, so reduce piecewise.
+	let remainder = 0;
+	for (const ch of digits) {
+		remainder = (remainder * 10 + parseInt(ch, 10)) % 97;
+	}
+	return remainder === 1;
+}
+
+function kefiya_recalculate(frm) {
+	let total = 0;
+	(frm.doc.items || []).forEach((row) => {
+		total += flt(row.amount);
+	});
+	frm.set_value("total_amount", total);
+	frm.set_value("payment_count", (frm.doc.items || []).length);
+	kefiya_render_summary(frm);
+}
+
+function kefiya_render_summary(frm) {
+	const count = (frm.doc.items || []).length;
+	if (!count) {
+		return;
+	}
+	const mode = count > 1
+		? __("Collective order ({0} payments) — a single TAN authorises all of them.", [count])
+		: __("Single transfer.");
+	frm.dashboard.clear_comment();
+	frm.dashboard.add_comment(mode, "blue", true);
+}
+
+function kefiya_confirm_and_send(frm) {
+	const count = (frm.doc.items || []).length;
+	const rows = (frm.doc.items || []).map((row) =>
+		"<tr><td>" + frappe.utils.escape_html(row.recipient_name || "")
+		+ "</td><td style='font-family:monospace'>"
+		+ frappe.utils.escape_html(row.recipient_iban || "")
+		+ "</td><td style='text-align:right'>"
+		+ format_currency(row.amount) + "</td></tr>"
+	).join("");
+
+	const d = new frappe.ui.Dialog({
+		title: count > 1 ? __("Send collective order") : __("Send transfer"),
+		size: "large",
+		fields: [
+			{
+				fieldtype: "HTML",
+				options:
+					"<div class='alert alert-warning'>"
+					+ __("You are about to move {0} from {1}. Check every recipient — a transfer cannot be undone here.", [
+						"<b>" + format_currency(frm.doc.total_amount) + "</b>",
+						frappe.utils.escape_html(frm.doc.kefiya_login || ""),
+					])
+					+ "</div>"
+					+ "<table class='table table-bordered'><thead><tr><th>"
+					+ __("Recipient") + "</th><th>" + __("IBAN") + "</th><th style='text-align:right'>"
+					+ __("Amount") + "</th></tr></thead><tbody>"
+					+ rows + "</tbody></table>"
+					+ (frm.doc.instant_payment
+						? "<p>" + __("Sent as an instant payment (SEPA Instant).") + "</p>"
+						: ""),
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "confirmed",
+				label: __("I checked every recipient and amount"),
+				reqd: 1,
+			},
+		],
+		primary_action_label: __("Send now"),
+		primary_action: function (values) {
+			if (!values.confirmed) {
+				frappe.msgprint(__("Please confirm you checked the recipients."));
+				return;
+			}
+			d.hide();
+			frappe.call({
+				method: "kefiya.utils.client.submit_kefiya_transfer",
+				args: {
+					transfer_name: frm.doc.name,
+					user_scope: frm.docname,
+					confirmed: 1,
+				},
+				freeze: true,
+				freeze_message: __("Sending to bank..."),
+				callback: function (r) {
+					kefiya_handle_transfer_response(frm, r.message);
+				},
+			});
+		},
+	});
+	d.show();
+}

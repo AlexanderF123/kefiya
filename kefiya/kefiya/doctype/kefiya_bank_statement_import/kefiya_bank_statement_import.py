@@ -12,6 +12,10 @@ class KefiyaBankStatementImport(Document):
 	
 	@frappe.whitelist()
 	def start_import(self, file_url, bank_account, company):
+		# Permission gate: a whitelisted document method is callable by anyone
+		# who may read the document; importing creates Bank Transactions.
+		frappe.has_permission(
+			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
 		file_path = self.get_file_from_url(file_url)
 		# Detect encoding
 		with open(file_path, 'rb') as f:
@@ -186,7 +190,10 @@ class KefiyaBankStatementImport(Document):
 				decimal_part = amount[-2:]
 				amount = integer_part + '.' + decimal_part
 			except Exception as e:
-				frappe.msgprint(f'currency formatting not supported for row: {row_data} - {e}')
+				# `row_data` does not exist here -- this method only receives
+				# the amount. Referencing it raised NameError from inside the
+				# except block, replacing the intended message with a crash.
+				frappe.msgprint(f'currency formatting not supported for amount: {amount} - {e}')
 
 		amount = float(amount)
 		if amount >= 0:
