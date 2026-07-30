@@ -184,6 +184,58 @@ class TestRetireOnFailure(unittest.TestCase):
         self.assertIn('session["open"].remove(conn)', source)
 
 
+class TestJoinedDialogIsRetiredToo(unittest.TestCase):
+    """The join branch is the normal case, not the exception.
+
+    Inside a session every command after the first joins, and so does every
+    login of the access after the first. It had no error handling at all: a TAN
+    request parked the dialog and left it registered, and the next command sent
+    on a frozen dialog -- "Cannot send() on a paused dialog", for every
+    remaining account of that bank.
+    """
+
+    def _source(self):
+        return inspect.getsource(FinTSController.client_session)
+
+    def test_the_join_branch_retires_on_failure(self):
+        source = self._source()
+        join_at = source.index("if conn._standing_dialog:")
+        opener_at = source.index("conn.__enter__()")
+        retires_before_opener = source.count(
+            "_retire_connection(session, conn)",
+        )
+        self.assertGreaterEqual(
+            retires_before_opener, 2,
+            "Both the join branch and the opener branch must retire; only the "
+            "opener did.",
+        )
+        self.assertLess(
+            join_at,
+            source.index("_retire_connection(session, conn)"),
+            "The join branch comes first and must carry its own handler.",
+        )
+        self.assertLess(join_at, opener_at)
+
+    def test_the_join_branch_spares_an_unsupported_segment(self):
+        source = self._source()
+        self.assertEqual(
+            source.count("_is_unsupported_operation(exc)"), 2,
+            "Both branches must apply the same exemption, or a bank that does "
+            "not offer a segment costs a fresh handshake.",
+        )
+
+    def test_a_dialog_without_a_session_is_never_retired(self):
+        """It belongs to a surrounding `with conn:` that cleans up itself;
+        retiring it here would close a dialog still in use."""
+        source = self._source()
+        self.assertIn("if session is None:", source)
+        self.assertLess(
+            source.index("session = _active_session()"),
+            source.index("if conn._standing_dialog:"),
+            "The session has to be known before the join branch decides.",
+        )
+
+
 class TestFailedHandshake(unittest.TestCase):
     """python-fints assigns _standing_dialog before entering it, so a dialog
     whose init fails leaves the client looking like it has one. Shared, the
@@ -264,5 +316,52 @@ class TestFetchGroup(unittest.TestCase):
 
     def test_a_single_fetch_also_shares_its_dialog(self):
         """Five retrievals per login used to mean five dialogs."""
-        self.assertIn("with fints_session():",
+        self.assertIn("with _fetch_session():",
                       inspect.getsource(client.fetch_all))
+
+    def test_the_group_runs_through_the_same_helper(self):
+        self.assertIn("with _fetch_session():",
+                      inspect.getsource(client.fetch_group))
+
+    def test_one_failed_login_does_not_commit_its_leftovers(self):
+        """The next successful login would otherwise commit the failed one's
+        empty draft import and half-written login state."""
+        source = inspect.getsource(client.fetch_group)
+        self.assertIn("frappe.db.rollback()", source)
+        self.assertLess(
+            source.index("frappe.db.rollback()"),
+            source.index("frappe.log_error"),
+            "Roll back first, then log -- the rollback would drop the Error "
+            "Log entry.",
+        )
+        self.assertIn(
+            "frappe.db.commit()", source,
+            "The rollback drops the Error Log too, so it needs its own commit.",
+        )
+
+
+class TestLegacyModeOpensNoSecondDialog(unittest.TestCase):
+    """The legacy controller knows nothing about sessions.
+
+    It builds its own client and opens its own dialog in the constructor. With
+    the session held open by the extras, the legacy import would open a SECOND
+    dialog on the same bank access -- the exact double dialog get_fetch_groups
+    exists to avoid.
+    """
+
+    def test_the_session_is_skipped_without_the_tan_controller(self):
+        source = inspect.getsource(client._fetch_session)
+        self.assertIn("_use_tan_authentication()", source)
+        self.assertIn(
+            "nullcontext()", source,
+            "In legacy mode every command must open and close its own dialog, "
+            "as it did before sessions existed.",
+        )
+
+    def test_no_caller_enters_the_session_directly(self):
+        source = inspect.getsource(client)
+        self.assertNotIn(
+            "with fints_session():", source,
+            "Every entry point must go through _fetch_session(), otherwise it "
+            "bypasses the legacy-mode check.",
+        )

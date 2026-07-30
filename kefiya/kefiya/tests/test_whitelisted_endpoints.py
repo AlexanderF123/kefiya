@@ -92,8 +92,11 @@ class TestReconcileAmount(unittest.TestCase):
         source = inspect.getsource(client.add_sales_invoice_payment)
         self.assertIn("min(unallocated, outstanding)", source)
         self.assertIn(
-            'frappe.has_permission("Bank Transaction", ptype="write"', source,
-            "Reconciliation writes the allocation onto the Bank Transaction.",
+            'frappe.has_permission(\n        "Bank Transaction", ptype="write", '
+            "doc=transaction, throw=True)", source,
+            "The check has to be document-bound: a DocType-level check alone "
+            "lets a user narrowed by a User Permission reconcile against any "
+            "bank transaction.",
         )
 
     def test_the_wizard_sends_a_raw_amount(self):

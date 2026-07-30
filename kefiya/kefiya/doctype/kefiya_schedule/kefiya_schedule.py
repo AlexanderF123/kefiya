@@ -130,6 +130,12 @@ def scheduled_import_fints_payments(manual=None):
     # Minimum number of days between two scheduled runs of the same login.
     FREQUENCY_GAP_DAYS = {'Daily': 1, 'Weekly': 7, 'Monthly': 30}
 
+    # Minimum number of days before a login that FAILED is tried again. Kept at
+    # one day regardless of the configured frequency: long enough to stop the
+    # every-20-minutes retry loop, short enough that a bank in maintenance does
+    # not cost a Monthly login the whole month.
+    ATTEMPT_RETRY_GAP_DAYS = 1
+
     # Query child table
     for child_item in schedule_settings.schedule_items:
         if not (current_hour == child_item.hour or manual):
@@ -170,13 +176,22 @@ def scheduled_import_fints_payments(manual=None):
                     order_by="creation desc",
                     limit=1,
                 )
-                seen = [getdate(row.creation) for row in last]
-                if last_attempt:
-                    seen.append(getdate(last_attempt))
-                if seen:
-                    gap = FREQUENCY_GAP_DAYS.get(child_item.import_frequency, 1)
-                    if (today - max(seen)).days < gap:
-                        continue
+                gap = FREQUENCY_GAP_DAYS.get(child_item.import_frequency, 1)
+
+                # A successful run closes the gate for the configured frequency.
+                if last and (today - getdate(last[0].creation)).days < gap:
+                    continue
+
+                # A failed attempt closes it only until the next day. This
+                # stamp exists to stop the 20-minute retry loop, not to punish
+                # a login for a bank that happened to be in maintenance: with
+                # Weekly or Monthly the full gap would push the next try a week
+                # or a month out, and a few of those in a row reach the 90-day
+                # FinTS window past which the transactions cannot be fetched at
+                # all any more.
+                if last_attempt and (today - getdate(last_attempt)).days \
+                        < ATTEMPT_RETRY_GAP_DAYS:
+                    continue
 
             # Default fetch window: from the date of the account's last booked
             # transaction up to today ("immer vom Datum der letzten Umsaetze bis

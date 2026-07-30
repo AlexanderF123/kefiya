@@ -63,6 +63,21 @@ def _access_key(kefiya_login):
     return (str(blz), str(fints_login))
 
 
+def _is_unsupported_operation(exc):
+    """True for "this bank does not offer that segment".
+
+    Decided from the stored BPD without ever touching the dialog, so it leaves
+    the connection perfectly usable -- and it is the common case here, twelve
+    in a single collective run. Every other failure may have left the dialog
+    broken or parked.
+    """
+    try:
+        from fints.exceptions import FinTSUnsupportedOperation
+    except Exception:
+        return False
+    return isinstance(exc, FinTSUnsupportedOperation)
+
+
 def _retire_connection(session, conn):
     """Drop a connection from the session after a command failed on it.
 
@@ -282,21 +297,37 @@ class FinTSController:
         it.
         """
         conn = self.fints_connection
+        session = _active_session()
 
         if conn._standing_dialog:
-            yield conn
+            # Joining a dialog somebody else opened. Inside a session that is
+            # the normal case -- every command after the first lands here, and
+            # so does every login of the access after the first -- so a failure
+            # has to retire the connection exactly as the opener below does.
+            # Without that, a TAN request parks the dialog and leaves it
+            # registered, and the next command sends on a frozen dialog:
+            # "Cannot send() on a paused dialog", for every remaining account
+            # of that bank.
+            #
+            # With no session the dialog belongs to a surrounding `with conn:`
+            # that will clean up after itself. Retiring it here would close a
+            # dialog still in use.
+            if session is None:
+                yield conn
+                return
+
+            try:
+                yield conn
+            except Exception as exc:
+                if not _is_unsupported_operation(exc):
+                    _retire_connection(session, conn)
+                raise
             return
 
-        session = _active_session()
         if session is None:
             with conn:
                 yield conn
             return
-
-        try:
-            from fints.exceptions import FinTSUnsupportedOperation
-        except Exception:
-            FinTSUnsupportedOperation = ()
 
         try:
             conn.__enter__()
@@ -315,13 +346,10 @@ class FinTSController:
         try:
             yield conn
         except Exception as exc:
-            # A bank that does not offer a segment is decided from the stored
-            # BPD without ever touching the dialog, so that one leaves it
-            # perfectly usable -- and it is the common case here. Anything else
-            # may have left it broken or parked, and every later command in
-            # this session would inherit it.
-            if not (FinTSUnsupportedOperation
-                    and isinstance(exc, FinTSUnsupportedOperation)):
+            # Anything but an unsupported segment may have left the dialog
+            # broken or parked, and every later command in this session would
+            # inherit it.
+            if not _is_unsupported_operation(exc):
                 _retire_connection(session, conn)
             raise
 
