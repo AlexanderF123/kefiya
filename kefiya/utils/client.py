@@ -127,6 +127,56 @@ def get_fetch_groups():
     ]
 
 
+@frappe.whitelist()
+def fetch_group(logins, user_scope=None):
+    """Fetch every login of ONE bank access through a single FinTS dialog.
+
+    The counterpart to get_fetch_groups(): that one says which logins may be
+    fetched together, this one does it. All logins of a group share one client
+    and one open dialog, so the bank handshake -- several round trips plus
+    authentication -- is paid once for the whole access instead of once per
+    account.
+
+    A failure of one login does not stop the rest: each is reported on its own,
+    the same way the sequential run reports it. That matters more here than in
+    a single fetch, because giving up would abandon thirty accounts over one.
+
+    Not a replacement for running the groups side by side: this makes each
+    chain shorter, the caller still runs the chains in parallel.
+
+    :param logins: list of Kefiya Login names, or its JSON form
+    :return: {"results": {login: summary}, "failed": {login: message}}
+    """
+    from kefiya.utils.fints_controller import fints_session
+
+    if isinstance(logins, str):
+        logins = frappe.parse_json(logins)
+    if not isinstance(logins, (list, tuple)):
+        frappe.throw(_("fetch_group expects a list of logins."))
+
+    # Deduplicate while keeping the order: the same login twice would fetch and
+    # import it twice.
+    ordered = list(dict.fromkeys(str(name) for name in logins if name))
+
+    results = {}
+    failed = {}
+
+    with fints_session():
+        for name in ordered:
+            try:
+                results[name] = fetch_all(name, user_scope)
+            except Exception as exc:
+                failed[name] = str(exc)
+                frappe.log_error(
+                    title="Kefiya fetch_group: {0}".format(name)[:140],
+                    message=frappe.get_traceback(),
+                    reference_doctype="Kefiya Login",
+                    reference_name=name,
+                )
+
+    return {"results": results, "failed": failed}
+
+
 def _optional_fetch(summary, key, label, fn):
     """Run one best-effort extra fetch, telling absent from broken apart.
 
@@ -180,125 +230,134 @@ def fetch_all(kefiya_login, user_scope=None):
     :return: dict summary {transactions, balance, planned, statements,
         credit_card, errors}
     """
-    from frappe.utils import now_datetime
-    from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
+    from kefiya.utils.fints_controller import fints_session
 
-    # Permission gate: a user-triggered bank fetch that creates Bank
-    # Transactions / Payment Entries must hold write rights on the login.
-    frappe.has_permission("Kefiya Login", ptype="write",
-                          doc=kefiya_login, throw=True)
+    # One dialog for the whole fetch. Without this every one of the five
+    # retrievals below builds its own controller and opens its own dialog:
+    # handshake, authentication, one command, HKEND -- five times, for one
+    # login. Inside the session they share a client and a standing dialog,
+    # and a caller that wraps several logins of the same bank access (see
+    # fetch_group) pays the handshake once for all of them.
+    with fints_session():
+        from frappe.utils import now_datetime
+        from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
 
-    if frappe.db.get_value("Kefiya Login", kefiya_login, "skip_fetch"):
-        return {
-            "transactions": {"status": "skipped"},
-            "skipped": True,
+        # Permission gate: a user-triggered bank fetch that creates Bank
+        # Transactions / Payment Entries must hold write rights on the login.
+        frappe.has_permission("Kefiya Login", ptype="write",
+                              doc=kefiya_login, throw=True)
+
+        if frappe.db.get_value("Kefiya Login", kefiya_login, "skip_fetch"):
+            return {
+                "transactions": {"status": "skipped"},
+                "skipped": True,
+                "errors": [],
+            }
+
+        scope = user_scope or kefiya_login
+        summary = {
+            "transactions": None,
+            "balance": None,
+            "planned": None,
+            "statements": None,
+            "credit_card": None,
             "errors": [],
         }
 
-    scope = user_scope or kefiya_login
-    summary = {
-        "transactions": None,
-        "balance": None,
-        "planned": None,
-        "statements": None,
-        "credit_card": None,
-        "errors": [],
-    }
+        bank_account, allowed_days = (frappe.db.get_value(
+            "Kefiya Login", kefiya_login,
+            ["bank_account", "allowed_sync_days_in_past"]
+        ) or (None, None))
 
-    bank_account, allowed_days = (frappe.db.get_value(
-        "Kefiya Login", kefiya_login,
-        ["bank_account", "allowed_sync_days_in_past"]
-    ) or (None, None))
-
-    # 1) Transactions (the primary purpose: "aktuelle Umsaetze abrufen").
-    #    A failure here IS reported to the user (unlike the best-effort extras).
-    kefiya_import = frappe.get_doc({
-        "doctype": "Kefiya Import",
-        "kefiya_login": kefiya_login,
-        "from_date": resolve_incremental_from_date(bank_account, allowed_days),
-        "to_date": now_datetime().date(),
-    })
-    kefiya_import.save()
-    try:
-        new_txns = import_fints_transactions(
-            kefiya_import.name, kefiya_login, scope)
-    except Exception as e:
-        # A TAN/SCA request raises TanInteractionRequired after the interactive
-        # socket event was already published, so the caller (form or cockpit)
-        # can prompt for the TAN. Report it as a status instead of a raw error
-        # and stop here: nothing else can be fetched until the session is
-        # authenticated. Any other error is surfaced truthfully.
+        # 1) Transactions (the primary purpose: "aktuelle Umsaetze abrufen").
+        #    A failure here IS reported to the user (unlike the best-effort extras).
+        kefiya_import = frappe.get_doc({
+            "doctype": "Kefiya Import",
+            "kefiya_login": kefiya_login,
+            "from_date": resolve_incremental_from_date(bank_account, allowed_days),
+            "to_date": now_datetime().date(),
+        })
+        kefiya_import.save()
         try:
-            from kefiya.utils.fints_controller import TanInteractionRequired
-        except Exception:
-            TanInteractionRequired = ()
-        if TanInteractionRequired and isinstance(e, TanInteractionRequired):
-            # Returning normally is what keeps the parked challenge alive -- a
-            # re-raise would fail the request and roll the login's TAN state
-            # back with it. The flip side is that this draft import is no
-            # longer discarded by that rollback: nothing was fetched into it,
-            # so remove it here instead of leaving one empty draft per attempt.
+            new_txns = import_fints_transactions(
+                kefiya_import.name, kefiya_login, scope)
+        except Exception as e:
+            # A TAN/SCA request raises TanInteractionRequired after the interactive
+            # socket event was already published, so the caller (form or cockpit)
+            # can prompt for the TAN. Report it as a status instead of a raw error
+            # and stop here: nothing else can be fetched until the session is
+            # authenticated. Any other error is surfaced truthfully.
             try:
-                frappe.delete_doc(
-                    "Kefiya Import", kefiya_import.name,
-                    ignore_permissions=True, delete_permanently=True)
+                from kefiya.utils.fints_controller import TanInteractionRequired
             except Exception:
-                frappe.log_error(
-                    title="Kefiya: removing empty import failed",
-                    message=frappe.get_traceback(),
-                )
-            summary["transactions"] = {"status": "tan_required"}
-            summary["tan_required"] = True
-            summary["message"] = str(e)
-            return summary
-        raise
-    summary["transactions"] = {
-        "import": kefiya_import.name,
-        "new_count": len(new_txns) if new_txns else 0,
-    }
+                TanInteractionRequired = ()
+            if TanInteractionRequired and isinstance(e, TanInteractionRequired):
+                # Returning normally is what keeps the parked challenge alive -- a
+                # re-raise would fail the request and roll the login's TAN state
+                # back with it. The flip side is that this draft import is no
+                # longer discarded by that rollback: nothing was fetched into it,
+                # so remove it here instead of leaving one empty draft per attempt.
+                try:
+                    frappe.delete_doc(
+                        "Kefiya Import", kefiya_import.name,
+                        ignore_permissions=True, delete_permanently=True)
+                except Exception:
+                    frappe.log_error(
+                        title="Kefiya: removing empty import failed",
+                        message=frappe.get_traceback(),
+                    )
+                summary["transactions"] = {"status": "tan_required"}
+                summary["tan_required"] = True
+                summary["message"] = str(e)
+                return summary
+            raise
+        summary["transactions"] = {
+            "import": kefiya_import.name,
+            "new_count": len(new_txns) if new_txns else 0,
+        }
 
-    # The FinTS-capability reads (balance, scheduled debits, statements, credit
-    # card) live on the new FinTSController regardless of the TAN toggle.
-    from kefiya.utils.fints_controller import FinTSController as FetchCtl
-    from kefiya.utils.fints_controller import _to_jsonable
+        # The FinTS-capability reads (balance, scheduled debits, statements, credit
+        # card) live on the new FinTSController regardless of the TAN toggle.
+        from kefiya.utils.fints_controller import FinTSController as FetchCtl
+        from kefiya.utils.fints_controller import _to_jsonable
 
-    # 2) Balance incl. credit line (best effort).
-    summary["balance"] = _optional_fetch(
-        summary, "balance", "balance",
-        lambda: FetchCtl(kefiya_login).get_fints_balance())
+        # 2) Balance incl. credit line (best effort).
+        summary["balance"] = _optional_fetch(
+            summary, "balance", "balance",
+            lambda: FetchCtl(kefiya_login).get_fints_balance())
 
-    # 3) Standing orders / scheduled debits -> forecast table (best effort).
-    def _fetch_planned():
-        from kefiya.utils.planned_payment import (
-            normalize_scheduled_debits, refresh_planned_payments,
-        )
-        raw = _to_jsonable(FetchCtl(kefiya_login).get_fints_scheduled_debits())
-        norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
-        planned = refresh_planned_payments(kefiya_login, norm["items"])
-        planned["skipped"] = norm["skipped"]
-        return planned
+        # 3) Standing orders / scheduled debits -> forecast table (best effort).
+        def _fetch_planned():
+            from kefiya.utils.planned_payment import (
+                normalize_scheduled_debits, refresh_planned_payments,
+            )
+            raw = _to_jsonable(FetchCtl(kefiya_login).get_fints_scheduled_debits())
+            norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
+            planned = refresh_planned_payments(kefiya_login, norm["items"])
+            planned["skipped"] = norm["skipped"]
+            return planned
 
-    summary["planned"] = _optional_fetch(
-        summary, "planned", "scheduled_debits", _fetch_planned)
+        summary["planned"] = _optional_fetch(
+            summary, "planned", "scheduled_debits", _fetch_planned)
 
-    # 4) Electronic statement / document list (best effort).
-    def _fetch_statements():
-        stmts = _to_jsonable(FetchCtl(kefiya_login).get_fints_statements())
-        return {"count": len(stmts) if isinstance(stmts, list) else 0}
+        # 4) Electronic statement / document list (best effort).
+        def _fetch_statements():
+            stmts = _to_jsonable(FetchCtl(kefiya_login).get_fints_statements())
+            return {"count": len(stmts) if isinstance(stmts, list) else 0}
 
-    summary["statements"] = _optional_fetch(
-        summary, "statements", "statements", _fetch_statements)
+        summary["statements"] = _optional_fetch(
+            summary, "statements", "statements", _fetch_statements)
 
-    # 5) Credit-card transactions (best effort).
-    def _fetch_credit_card():
-        cc = _to_jsonable(
-            FetchCtl(kefiya_login).get_fints_credit_card_transactions())
-        return {"count": len(cc) if isinstance(cc, list) else 0}
+        # 5) Credit-card transactions (best effort).
+        def _fetch_credit_card():
+            cc = _to_jsonable(
+                FetchCtl(kefiya_login).get_fints_credit_card_transactions())
+            return {"count": len(cc) if isinstance(cc, list) else 0}
 
-    summary["credit_card"] = _optional_fetch(
-        summary, "credit_card", "credit_card", _fetch_credit_card)
+        summary["credit_card"] = _optional_fetch(
+            summary, "credit_card", "credit_card", _fetch_credit_card)
 
-    return summary
+        return summary
 
 
 @frappe.whitelist()
