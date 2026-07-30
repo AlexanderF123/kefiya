@@ -58,16 +58,43 @@ def run_after_import(kefiya_login, from_date, to_date):
     bank_account_doc = frappe.get_doc("Bank Account", bank_account)
     company = login.company or bank_account_doc.company
 
-    _alyf_auto_reconcile(
-        company,
-        bank_account_doc.bank,
-        bank_account,
-        from_date,
-        to_date,
-    )
+    # Serialise reconciliation across the whole site, not per bank account.
+    #
+    # Matching reads an invoice's outstanding amount and then allocates against
+    # it. That is safe while fetches run one after another: the first
+    # allocation lowers the outstanding, so the second no longer matches. Since
+    # the collective fetch runs one chain per bank side by side, two chains can
+    # read the same outstanding before either writes -- and an invoice payable
+    # from two accounts would be allocated twice.
+    #
+    # The lock is held only for the matching, never for the bank dialog, so the
+    # parallel fetch keeps its speed. A timeout is not an error worth failing
+    # the import for: the transactions are imported either way and the next run
+    # reconciles them.
+    from frappe.utils.synchronization import filelock
 
-    if settings.auto_create_advance_payments:
-        _create_advance_payments(bank_account, from_date, to_date)
+    try:
+        with filelock("kefiya_auto_reconcile", timeout=120):
+            _alyf_auto_reconcile(
+                company,
+                bank_account_doc.bank,
+                bank_account,
+                from_date,
+                to_date,
+            )
+
+            if settings.auto_create_advance_payments:
+                _create_advance_payments(bank_account, from_date, to_date)
+    except Exception:
+        # Includes the lock timeout. Every stage inside guards itself, so
+        # anything reaching here is the lock or a bug -- and neither may fail
+        # an import whose transactions are already booked.
+        frappe.log_error(
+            title="Kefiya auto-reconcile skipped",
+            message=frappe.get_traceback(),
+            reference_doctype="Kefiya Login",
+            reference_name=kefiya_login,
+        )
 
 
 def _alyf_auto_reconcile(company, bank, bank_account, from_date, to_date):

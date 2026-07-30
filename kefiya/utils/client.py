@@ -182,6 +182,31 @@ def fetch_group(logins, user_scope=None):
     return {"results": results, "failed": failed}
 
 
+def _claim_send_lock(lock_key, seconds=600):
+    """Claim a send lock atomically, or report that someone else holds it.
+
+    The previous shape was a read followed by a write::
+
+        if frappe.cache().get_value(key): refuse
+        ...
+        frappe.cache().set_value(key, user)
+
+    Between those two lines sits a window in which a second request -- a double
+    click, or the outbox and the single send firing together -- finds the key
+    free as well. Both then go on and the same transfer is paid twice, which is
+    precisely what the lock exists to prevent.
+
+    frappe.cache() is a Redis client, so SET NX EX decides and claims in one
+    atomic operation. The key is built with make_key so it stays the same key
+    that get_value/delete_value use.
+
+    :return: True if the caller now holds the lock
+    """
+    cache = frappe.cache()
+    return bool(cache.set(
+        cache.make_key(lock_key), frappe.session.user, ex=seconds, nx=True))
+
+
 def _optional_fetch(summary, key, label, fn):
     """Run one best-effort extra fetch, telling absent from broken apart.
 
@@ -409,12 +434,11 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
         return {"status": "error",
                 "message": _("Payment Request has no company bank account.")}
 
-    # B2: guard against double submission (double click / retry).
+    # B2: guard against double submission (double click / retry). The claim
+    # itself happens further down, immediately before the bank is contacted --
+    # atomically, and after the checks that can still refuse the payout, so a
+    # refused attempt does not block a retry for ten minutes.
     lock_key = "kefiya_transfer:" + payment_request_name
-    if frappe.cache().get_value(lock_key):
-        return {"status": "error", "message": _(
-            "A transfer for this Payment Request is already in progress."
-        )}
 
     # B7: the company bank account must map to exactly one Kefiya Login.
     logins = frappe.get_all(
@@ -439,7 +463,10 @@ def submit_payment_request_via_fints(payment_request_name, user_scope, confirmed
         "SEPA transfer attempt: pr=%s login=%s user=%s",
         payment_request_name, kefiya_login, frappe.session.user,
     )
-    frappe.cache().set_value(lock_key, frappe.session.user, expires_in_sec=600)
+    if not _claim_send_lock(lock_key):
+        return {"status": "error", "message": _(
+            "A transfer for this Payment Request is already in progress."
+        )}
 
     # Transfers always require strong authentication (PSD2), so always use the
     # TAN-capable controller regardless of the import-mode setting.
@@ -495,12 +522,9 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
             "This transfer was already sent to the bank."
         )}
 
-    # Guard against a double click resending real money.
+    # Guard against a double click resending real money. Claimed atomically
+    # just before the bank is contacted, see _claim_send_lock.
     lock_key = "kefiya_transfer_doc:" + transfer_name
-    if frappe.cache().get_value(lock_key):
-        return {"status": "error", "message": _(
-            "A transfer for this document is already in progress."
-        )}
 
     pain_xml, control_sum, count = doc.build_pain001()
 
@@ -510,7 +534,10 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
         transfer_name, doc.kefiya_login, count, control_sum,
         frappe.session.user,
     )
-    frappe.cache().set_value(lock_key, frappe.session.user, expires_in_sec=600)
+    if not _claim_send_lock(lock_key):
+        return {"status": "error", "message": _(
+            "A transfer for this document is already in progress."
+        )}
 
     from kefiya.utils.fints_controller import FinTSController
     interactive = {"docname": user_scope, "enabled": True}
@@ -651,11 +678,6 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
     # the same keys, so a document cannot be sent through both paths at once --
     # which would pay it twice.
     lock_keys = ["kefiya_transfer_doc:" + doc.name for doc in docs]
-    held = [k for k in lock_keys if frappe.cache().get_value(k)]
-    if held:
-        return {"status": "error", "message": _(
-            "A send is already in progress for: {0}"
-        ).format(", ".join(k.split(":", 1)[1] for k in held))}
 
     from kefiya.kefiya.doctype.kefiya_transfer.kefiya_transfer import (
         build_pain001_for,
@@ -667,8 +689,20 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
         ",".join(transfer_names), kefiya_login, count, control_sum,
         frappe.session.user,
     )
+    # Claim every document atomically. All or nothing: a partial claim would
+    # leave documents locked that this send never covers, and sending a batch
+    # while one of its documents is already on its way to the bank is exactly
+    # the double payment these keys exist to prevent.
+    claimed = []
     for key in lock_keys:
-        frappe.cache().set_value(key, frappe.session.user, expires_in_sec=600)
+        if _claim_send_lock(key):
+            claimed.append(key)
+            continue
+        for done in claimed:
+            frappe.cache().delete_value(done)
+        return {"status": "error", "message": _(
+            "A send is already in progress for: {0}"
+        ).format(key.split(":", 1)[1])}
 
     from kefiya.utils.fints_controller import FinTSController
     interactive = {"docname": user_scope, "enabled": True}
