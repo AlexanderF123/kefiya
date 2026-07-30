@@ -398,15 +398,26 @@ def fetch_all(kefiya_login, user_scope=None):
         summary["balance"] = _optional_fetch(
             summary, "balance", "balance", _fetch_balance)
 
-        # 2b) Pending entries (vorgemerkte Umsaetze) -> draft Bank Transactions.
-        #     Fetched separately from the booked ones: the bank delivers them in
-        #     the same MT940/camt message but under a different field, and they
-        #     must not be mixed into the ledger.
+        # 2b) Pending entries (vorgemerkte Umsaetze) -> the forecast table.
+        #     A pending entry is a payment the bank accepted but has not booked
+        #     -- which is what Kefiya Planned Payment is for, and why its
+        #     payment_kind already carries a "Pending" option. Keeping them
+        #     there rather than as Bank Transaction drafts is also what makes
+        #     the reconciliation work by itself: when the booking finally
+        #     arrives, match_on_bank_transaction() removes the planned record it
+        #     fulfils, so the same payment is never counted twice.
         def _fetch_pending():
-            entries = _to_jsonable(
-                FetchCtl(kefiya_login).get_fints_pending_transactions())
-            return fetch_persistence.replace_pending_transactions(
-                kefiya_login, entries if isinstance(entries, list) else [])
+            from kefiya.utils.planned_payment import (
+                PENDING_KIND, normalize_pending_entries,
+                refresh_planned_payments,
+            )
+
+            entries = FetchCtl(kefiya_login).get_fints_pending_transactions()
+            norm = normalize_pending_entries(entries)
+            result = refresh_planned_payments(
+                kefiya_login, norm["items"], payment_kinds=(PENDING_KIND,))
+            result["skipped"] = norm["skipped"]
+            return result
 
         summary["pending"] = _optional_fetch(
             summary, "pending", "pending_transactions", _fetch_pending)
@@ -424,11 +435,16 @@ def fetch_all(kefiya_login, user_scope=None):
         # 3) Standing orders / scheduled debits -> forecast table (best effort).
         def _fetch_planned():
             from kefiya.utils.planned_payment import (
-                normalize_scheduled_debits, refresh_planned_payments,
+                STANDING_ORDER_KINDS, normalize_scheduled_debits,
+                refresh_planned_payments,
             )
             raw = _to_jsonable(FetchCtl(kefiya_login).get_fints_scheduled_debits())
             norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
-            planned = refresh_planned_payments(kefiya_login, norm["items"])
+            # Scoped: without it this sweep would cancel the pending entries
+            # written just above, and the next one would cancel these back.
+            planned = refresh_planned_payments(
+                kefiya_login, norm["items"],
+                payment_kinds=STANDING_ORDER_KINDS)
             planned["skipped"] = norm["skipped"]
             return planned
 
