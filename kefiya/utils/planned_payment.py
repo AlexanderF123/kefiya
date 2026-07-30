@@ -200,7 +200,108 @@ def normalize_scheduled_debits(raw_items):
     return {"items": items, "skipped": skipped}
 
 
-def refresh_planned_payments(kefiya_login, items):
+#: Kinds reported by the standing-order fetch (HKDSE / scheduled transfers).
+STANDING_ORDER_KINDS = ("Scheduled Transfer", "Standing Order")
+
+#: Kind used for entries the bank shows but has not booked yet.
+PENDING_KIND = "Pending"
+
+
+def normalize_pending_entries(raw_items):
+    """Turn the bank's pending entries into planned payments.
+
+    A pending entry is a payment the bank has accepted but not yet booked --
+    which is exactly what this forecast is for, and why payment_kind already
+    carries a "Pending" option.
+
+    Putting them here rather than into Bank Transaction drafts is what makes
+    the reconciliation work by itself: when the bank finally books the entry,
+    match_on_bank_transaction() fires on the real transaction and removes the
+    planned record it fulfils. No separate matching, and no risk of the same
+    payment being counted twice -- the forecast holds it exactly until the
+    booking arrives.
+
+    Direction follows the sign: a negative amount leaves the account.
+
+    :param raw_items: entries as delivered by
+        FinTSController.get_fints_pending_transactions()
+    :return: {"items": [...], "skipped": int}
+    """
+    items = []
+    skipped = 0
+
+    for raw in raw_items or []:
+        entry = raw if isinstance(raw, dict) else _as_mapping(raw)
+        raw_amount = _first(entry, ["amount", "Amount", "value"])
+        amount = _coerce_amount(raw_amount)
+        if amount is None or flt(amount) == 0:
+            skipped += 1
+            continue
+
+        planned_date = _first(entry, ["date", "entry_date", "booking_date",
+                                      "BookingDate", "ValueDate"])
+        try:
+            planned_date = getdate(planned_date) if planned_date \
+                else now_datetime().date()
+        except Exception:
+            planned_date = now_datetime().date()
+
+        items.append({
+            "planned_date": planned_date,
+            "amount": flt(amount),
+            "direction": _pending_direction(entry, raw_amount),
+            "payment_kind": PENDING_KIND,
+            "counterparty_name": _first(
+                entry, ["applicant_name", "Name", "counterparty", "party_name"]),
+            "counterparty_iban": _first(
+                entry, ["applicant_iban", "IBAN", "counterparty_iban"]),
+            "purpose": _first(
+                entry, ["purpose", "Purpose", "description", "posting_text",
+                        "RemittanceInformation"]),
+        })
+
+    return {"items": items, "skipped": skipped}
+
+
+def _as_mapping(entry):
+    """FinTS entries are objects, dicts or namedtuples depending on the bank."""
+    data = getattr(entry, "data", None)
+    if isinstance(data, dict):
+        return data
+    try:
+        return dict(entry)
+    except Exception:
+        return {k: getattr(entry, k) for k in dir(entry)
+                if not k.startswith("_") and not callable(getattr(entry, k))}
+
+
+def _pending_direction(entry, raw_amount):
+    """Which way a pending entry moves the money.
+
+    The existing _coerce_amount deliberately returns abs(), so the sign is
+    gone by the time the amount is normalised -- reading direction off it
+    would make every pending entry an incoming one.
+
+    FinTS states it explicitly instead: MT940 carries a credit/debit status,
+    camt a CreditDebitIndicator. Both are checked first; the raw sign is only
+    the fallback.
+    """
+    status = _first(entry, ["status", "CreditDebitIndicator",
+                            "credit_debit_indicator"])
+    if status:
+        token = str(status).strip().upper()
+        if token.startswith("D"):
+            return "Outgoing"
+        if token.startswith("C"):
+            return "Incoming"
+
+    try:
+        return "Outgoing" if flt(raw_amount) < 0 else "Incoming"
+    except Exception:
+        return "Outgoing"
+
+
+def refresh_planned_payments(kefiya_login, items, payment_kinds=None):
     """Idempotently upsert the planned payments reported for a login.
 
     Existing Open records that are no longer reported are marked Cancelled
@@ -210,6 +311,11 @@ def refresh_planned_payments(kefiya_login, items):
     :param kefiya_login: Kefiya Login name
     :param items: list of dicts with keys planned_date, amount, direction,
         payment_kind, counterparty_name, counterparty_iban, purpose
+    :param payment_kinds: restrict the cancellation sweep to these kinds. The
+        fetch reports standing orders and pending entries in two separate
+        calls; without this scope each call would cancel everything the other
+        one had just written, and the forecast would flip between the two on
+        every run.
     :return: dict with created / updated / cancelled counts
     """
     login = frappe.get_doc("Kefiya Login", kefiya_login)
@@ -261,9 +367,12 @@ def refresh_planned_payments(kefiya_login, items):
     # anything still Open for this login but no longer reported was cancelled
     # at the bank.
     cancelled = 0
+    sweep_filters = {"kefiya_login": kefiya_login, "status": "Open"}
+    if payment_kinds:
+        sweep_filters["payment_kind"] = ("in", list(payment_kinds))
     open_records = frappe.get_all(
         DOCTYPE,
-        filters={"kefiya_login": kefiya_login, "status": "Open"},
+        filters=sweep_filters,
         fields=["name", "reference_key"],
     )
     for rec in open_records:

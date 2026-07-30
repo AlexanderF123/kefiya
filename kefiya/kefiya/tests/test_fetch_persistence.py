@@ -6,7 +6,7 @@ import unittest
 
 import frappe
 
-from kefiya.utils import client, fetch_persistence
+from kefiya.utils import client, fetch_persistence, planned_payment
 from kefiya.utils.fints_controller import FinTSController
 
 
@@ -20,8 +20,7 @@ class TestNothingIsOnlyCounted(unittest.TestCase):
             '"count": len(', source,
             "Counting a result instead of storing it is the whole defect.",
         )
-        for helper in ("store_balance", "replace_pending_transactions",
-                       "download_statements",
+        for helper in ("store_balance", "download_statements",
                        "store_credit_card_transactions"):
             self.assertIn(
                 "fetch_persistence." + helper, source,
@@ -60,40 +59,63 @@ class TestBalanceIsStored(unittest.TestCase):
         self.assertTrue(meta.has_field("custom_credit_line"))
 
 
-class TestPendingEntriesCannotDoubleCount(unittest.TestCase):
-    """A pending entry becomes a booking with a different date, so the import's
-    dedup hash would not recognise the two as the same payment and the account
-    would show it twice."""
+class TestPendingEntriesGoIntoTheForecast(unittest.TestCase):
+    """A pending entry is a payment the bank accepted but has not booked --
+    which is what the forecast is for, and why payment_kind already carries a
+    "Pending" option.
 
-    def _source(self):
-        return inspect.getsource(fetch_persistence.replace_pending_transactions)
+    Storing them as Bank Transaction drafts instead would have been worse in
+    two ways: match_on_bank_transaction fires on after_insert, so every draft
+    would have deleted a forecast record it had not actually fulfilled; and
+    this instance already carries 211,340 unrelated drafts, in which they would
+    simply vanish.
+    """
 
-    def test_pending_entries_stay_drafts(self):
-        source = self._source()
-        self.assertIn('"docstatus": 0', source)
-        self.assertIn('"status": "Pending"', source)
+    def test_they_are_written_as_planned_payments(self):
+        source = inspect.getsource(client.fetch_all)
+        self.assertIn("normalize_pending_entries", source)
+        self.assertIn("PENDING_KIND", source)
 
-    def test_the_previous_snapshot_is_replaced(self):
-        source = self._source()
-        self.assertIn("frappe.delete_doc", source)
-        self.assertIn(
-            '"docstatus": 0', source,
-            "Only drafts may be dropped -- a submitted transaction is a real "
-            "booking.",
+    def test_no_bank_transaction_drafts_are_created(self):
+        from kefiya.utils import fetch_persistence as fp
+
+        self.assertFalse(
+            hasattr(fp, "replace_pending_transactions"),
+            "The draft path is gone; leaving it as dead code is dangerous "
+            "because it can delete Bank Transactions.",
         )
 
-    def test_a_booked_transaction_is_never_deleted(self):
-        source = self._source()
-        self.assertIn(
-            'filters={', source)
-        self.assertIn(
-            '"docstatus": 0,', source,
-            "The delete filter must be bound to drafts carrying our marker.",
-        )
-        self.assertIn("PENDING_MARKER", source)
+    def test_the_kind_exists_on_the_doctype(self):
+        options = frappe.get_meta("Kefiya Planned Payment") \
+            .get_field("payment_kind").options or ""
+        self.assertIn(planned_payment.PENDING_KIND, options.split("\n"))
 
-    def test_the_marker_is_recognisable(self):
-        self.assertIn("vorgemerkt", fetch_persistence.PENDING_MARKER)
+    def test_booking_the_entry_clears_the_forecast_by_itself(self):
+        """That is the whole reason they live here: no separate matching."""
+        source = inspect.getsource(planned_payment.match_on_bank_transaction)
+        self.assertIn('"status": "Open"', source)
+        self.assertNotIn(
+            "payment_kind", source,
+            "The matcher must not exclude Pending records -- clearing them on "
+            "the real booking is the reconciliation.",
+        )
+
+    def test_direction_is_not_read_off_the_absolute_amount(self):
+        """_coerce_amount deliberately returns abs(), so the sign is gone."""
+        source = inspect.getsource(planned_payment._pending_direction)
+        self.assertIn("CreditDebitIndicator", source)
+        self.assertIn('token.startswith("D")', source)
+
+    def test_the_two_sweeps_cannot_cancel_each_other(self):
+        """refresh_planned_payments cancels whatever it was not told about."""
+        source = inspect.getsource(client.fetch_all)
+        self.assertEqual(
+            source.count("payment_kinds="), 2,
+            "Standing orders and pending entries are written in two separate "
+            "calls; unscoped, each would cancel what the other just wrote.",
+        )
+        sweep = inspect.getsource(planned_payment.refresh_planned_payments)
+        self.assertIn('sweep_filters["payment_kind"] = ("in"', sweep)
 
 
 class TestPendingFetchIsSafe(unittest.TestCase):
@@ -143,6 +165,12 @@ class TestStatementsAreDownloaded(unittest.TestCase):
     def test_it_does_not_download_the_same_one_twice(self):
         source = self._source()
         self.assertIn('frappe.db.exists("File"', source)
+
+    def test_they_are_attached_to_the_bank_account(self):
+        """A statement documents an account, not a credential record."""
+        source = self._source()
+        self.assertIn('"attached_to_doctype": "Bank Account"', source)
+        self.assertNotIn('"attached_to_doctype": "Kefiya Login"', source)
 
     def test_the_field_names_match_the_fints_segment(self):
         """HIKAU calls them statement_number and year."""

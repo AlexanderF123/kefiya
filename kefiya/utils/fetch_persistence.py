@@ -10,9 +10,9 @@ from the bank and then dropped on the floor. These helpers give each of them a
 home:
 
   balance          -> Bank Account.custom_account_balance / custom_credit_line
-  pending entries  -> Bank Transaction, draft, status "Pending", replaced whole
+  pending entries  -> Kefiya Planned Payment (see planned_payment.py)
   credit card      -> Bank Transaction, same shape as a normal booking
-  documents        -> File attached to the Kefiya Login
+  documents        -> File attached to the Bank Account
 
 Every helper is idempotent and guarded: a fetch that already booked its
 transactions must never fail because a statement PDF could not be stored.
@@ -92,122 +92,12 @@ def store_balance(kefiya_login, rows):
     }
 
 
-# --------------------------------------------------------------------------
-# Pending (vorgemerkte) entries
-# --------------------------------------------------------------------------
-
-#: Marker in `description` identifying an entry as still only pending, so it can
-#: be recognised again without a schema change.
-PENDING_MARKER = "[vorgemerkt]"
-
-
-def _pending_reference(bank_account, date, amount, description):
-    raw = "pending|{0}|{1}|{2}|{3}".format(
-        bank_account, date, amount, (description or "")[:120])
-    return hashlib.md5(raw.encode("utf-8")).hexdigest()
-
-
-def replace_pending_transactions(kefiya_login, entries):
-    """Replace this account's pending entries with what the bank now shows.
-
-    A pending entry is not a booking: the bank may change its amount, its text
-    or its date before it settles, and then it disappears from the pending list
-    and reappears as a real booking. Matching the two is guesswork -- the
-    booking date usually differs from the pending date, so the import's dedup
-    hash would not recognise them as the same thing and the account would show
-    the payment twice.
-
-    So they are not merged at all. Every pending entry is stored as a DRAFT Bank
-    Transaction with status "Pending", and every fetch deletes the previous set
-    and writes the current one. Drafts stay out of reconciliation and out of the
-    ledger, so nothing double-counts; once the bank settles an entry it drops
-    off the pending list and the next fetch removes the draft, while the real
-    booking arrives through the normal import.
-
-    :return: {"removed": int, "created": int}
-    """
-    login = frappe.get_doc("Kefiya Login", kefiya_login)
-    if not login.bank_account:
-        return {"removed": 0, "created": 0, "reason": "no bank account linked"}
-
-    # Drop the previous snapshot. Only drafts carrying our marker -- a submitted
-    # transaction is a real booking and must never be touched here.
-    existing = frappe.get_all(
-        "Bank Transaction",
-        filters={
-            "bank_account": login.bank_account,
-            "docstatus": 0,
-            "description": ("like", "%{0}%".format(PENDING_MARKER)),
-        },
-        pluck="name",
-    )
-    removed = 0
-    for name in existing:
-        try:
-            frappe.delete_doc("Bank Transaction", name,
-                              ignore_permissions=True, delete_permanently=True)
-            removed += 1
-        except Exception:
-            frappe.log_error(
-                title="Kefiya: could not drop a stale pending entry",
-                message=frappe.get_traceback(),
-                reference_doctype="Bank Transaction",
-                reference_name=name,
-            )
-
-    created = 0
-    for raw in (entries or []):
-        entry = _as_dict(raw)
-        amount = _coerce_amount(_first(entry, ("amount", "Amount", "value")))
-        if amount is None:
-            continue
-
-        date = _first(entry, ("date", "entry_date", "booking_date",
-                              "BookingDate", "ValueDate"))
-        try:
-            date = getdate(date) if date else now_datetime().date()
-        except Exception:
-            date = now_datetime().date()
-
-        text = _first(entry, ("purpose", "Purpose", "description",
-                              "posting_text", "RemittanceInformation"), "")
-        counterparty = _first(entry, ("applicant_name", "Name",
-                                      "counterparty", "party_name"), "")
-
-        description = "{0} {1} {2}".format(
-            PENDING_MARKER, counterparty or "", text or "").strip()
-
-        try:
-            frappe.get_doc({
-                "doctype": "Bank Transaction",
-                "date": date,
-                "status": "Pending",
-                "bank_account": login.bank_account,
-                "company": login.company,
-                "deposit": amount if amount > 0 else 0,
-                "withdrawal": -amount if amount < 0 else 0,
-                "description": description,
-                "reference_number": _pending_reference(
-                    login.bank_account, date, amount, description),
-                "bank_party_name": counterparty or None,
-                # Draft on purpose: a pending entry is not a booking. It must
-                # stay out of reconciliation and out of the ledger.
-                "docstatus": 0,
-            }).insert(ignore_permissions=True)
-            created += 1
-        except Exception:
-            frappe.log_error(
-                title="Kefiya: could not store a pending entry",
-                message=frappe.get_traceback(),
-                reference_doctype="Kefiya Login",
-                reference_name=kefiya_login,
-            )
-
-    return {"removed": removed, "created": created}
-
-
 def _coerce_amount(value):
-    """FinTS amounts arrive as Decimal, float, str or an Amount object."""
+    """FinTS amounts arrive as Decimal, float, str or an Amount object.
+
+    The sign is kept: a card charge leaves the account, a refund arrives, and
+    the caller decides which side of the transaction it belongs on.
+    """
     if value is None:
         return None
     for attr in ("amount", "value"):
@@ -306,8 +196,10 @@ def download_statements(controller, kefiya_login, listing, limit=12):
     """Download the statement documents themselves, not just their names.
 
     The list from HKEKA only says which statements exist; each one has to be
-    fetched separately. They are attached to the Kefiya Login as private files,
-    named by year and number so a repeated fetch recognises what it already has
+    fetched separately. They are attached to the BANK ACCOUNT as private files,
+    not to the Kefiya Login: a statement documents a bank account, and that is
+    where anyone looking for it expects it -- the login is a credential record.
+    Named by year and number so a repeated fetch recognises what it already has
     and does not download it twice.
 
     :param controller: an initialised FinTSController (reuses the open dialog)
@@ -320,6 +212,12 @@ def download_statements(controller, kefiya_login, listing, limit=12):
     if not entries:
         return result
 
+    bank_account = frappe.db.get_value(
+        "Kefiya Login", kefiya_login, "bank_account")
+    if not bank_account:
+        result["reason"] = "no bank account linked"
+        return result
+
     for entry in entries[:limit]:
         # HIKAU names them statement_number / year -- checked against the
         # installed python-fints, not guessed.
@@ -330,8 +228,8 @@ def download_statements(controller, kefiya_login, listing, limit=12):
 
         filename = "Kontoauszug-{0}-{1}".format(year or "0000", number)
         if frappe.db.exists("File", {
-            "attached_to_doctype": "Kefiya Login",
-            "attached_to_name": kefiya_login,
+            "attached_to_doctype": "Bank Account",
+            "attached_to_name": bank_account,
             "file_name": filename,
         }):
             result["already_present"] += 1
@@ -361,8 +259,8 @@ def download_statements(controller, kefiya_login, listing, limit=12):
             frappe.get_doc({
                 "doctype": "File",
                 "file_name": filename,
-                "attached_to_doctype": "Kefiya Login",
-                "attached_to_name": kefiya_login,
+                "attached_to_doctype": "Bank Account",
+                "attached_to_name": bank_account,
                 "is_private": 1,
                 "content": payload,
             }).insert(ignore_permissions=True)
