@@ -385,10 +385,41 @@ def fetch_all(kefiya_login, user_scope=None):
         from kefiya.utils.fints_controller import FinTSController as FetchCtl
         from kefiya.utils.fints_controller import _to_jsonable
 
-        # 2) Balance incl. credit line (best effort).
+        from kefiya.utils import fetch_persistence
+
+        # 2) Balance incl. credit line -> Bank Account (best effort).
+        def _fetch_balance():
+            rows = _to_jsonable(FetchCtl(kefiya_login).get_fints_balance())
+            stored = fetch_persistence.store_balance(
+                kefiya_login, rows if isinstance(rows, list) else [])
+            stored["rows"] = rows
+            return stored
+
         summary["balance"] = _optional_fetch(
-            summary, "balance", "balance",
-            lambda: FetchCtl(kefiya_login).get_fints_balance())
+            summary, "balance", "balance", _fetch_balance)
+
+        # 2b) Pending entries (vorgemerkte Umsaetze) -> draft Bank Transactions.
+        #     Fetched separately from the booked ones: the bank delivers them in
+        #     the same MT940/camt message but under a different field, and they
+        #     must not be mixed into the ledger.
+        def _fetch_pending():
+            entries = _to_jsonable(
+                FetchCtl(kefiya_login).get_fints_pending_transactions())
+            return fetch_persistence.replace_pending_transactions(
+                kefiya_login, entries if isinstance(entries, list) else [])
+
+        summary["pending"] = _optional_fetch(
+            summary, "pending", "pending_transactions", _fetch_pending)
+
+        # 2c) Securities holdings (Depot) -> Kefiya Security Holding.
+        def _fetch_holdings():
+            from kefiya.utils.securities import refresh_holdings
+
+            holdings = FetchCtl(kefiya_login).get_fints_holdings()
+            return refresh_holdings(kefiya_login, holdings)
+
+        summary["holdings"] = _optional_fetch(
+            summary, "holdings", "holdings", _fetch_holdings)
 
         # 3) Standing orders / scheduled debits -> forecast table (best effort).
         def _fetch_planned():
@@ -404,19 +435,25 @@ def fetch_all(kefiya_login, user_scope=None):
         summary["planned"] = _optional_fetch(
             summary, "planned", "scheduled_debits", _fetch_planned)
 
-        # 4) Electronic statement / document list (best effort).
+        # 4) Electronic statements -> the documents themselves, attached to the
+        #    login. The list alone only says which ones exist; each has to be
+        #    fetched separately.
         def _fetch_statements():
-            stmts = _to_jsonable(FetchCtl(kefiya_login).get_fints_statements())
-            return {"count": len(stmts) if isinstance(stmts, list) else 0}
+            controller = FetchCtl(kefiya_login)
+            listing = controller.get_fints_statements()
+            return fetch_persistence.download_statements(
+                controller, kefiya_login,
+                listing if isinstance(listing, list) else [])
 
         summary["statements"] = _optional_fetch(
             summary, "statements", "statements", _fetch_statements)
 
-        # 5) Credit-card transactions (best effort).
+        # 5) Credit-card transactions -> Bank Transactions, same as a booking.
         def _fetch_credit_card():
             cc = _to_jsonable(
                 FetchCtl(kefiya_login).get_fints_credit_card_transactions())
-            return {"count": len(cc) if isinstance(cc, list) else 0}
+            return fetch_persistence.store_credit_card_transactions(
+                kefiya_login, cc if isinstance(cc, list) else [])
 
         summary["credit_card"] = _optional_fetch(
             summary, "credit_card", "credit_card", _fetch_credit_card)
