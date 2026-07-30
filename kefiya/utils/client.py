@@ -178,8 +178,23 @@ def fetch_all(kefiya_login, user_scope=None):
         except Exception:
             TanInteractionRequired = ()
         if TanInteractionRequired and isinstance(e, TanInteractionRequired):
+            # Returning normally is what keeps the parked challenge alive -- a
+            # re-raise would fail the request and roll the login's TAN state
+            # back with it. The flip side is that this draft import is no
+            # longer discarded by that rollback: nothing was fetched into it,
+            # so remove it here instead of leaving one empty draft per attempt.
+            try:
+                frappe.delete_doc(
+                    "Kefiya Import", kefiya_import.name,
+                    ignore_permissions=True, delete_permanently=True)
+            except Exception:
+                frappe.log_error(
+                    title="Kefiya: removing empty import failed",
+                    message=frappe.get_traceback(),
+                )
             summary["transactions"] = {"status": "tan_required"}
             summary["tan_required"] = True
+            summary["message"] = str(e)
             return summary
         raise
     summary["transactions"] = {
