@@ -23,6 +23,7 @@
   "column_break_ydzf",
   "dialog_state_updated",
   "client_state_updated",
+  "last_fetch_attempt",
   "tan_state_updated",
   "stored_tan_state_decoupled",
   "erpnext_account_settings_section",
@@ -168,6 +169,13 @@
    "fieldname": "client_state_updated",
    "fieldtype": "Datetime",
    "label": "Client State Updated",
+   "read_only": 1
+  },
+  {
+   "description": "Wann zuletzt ein Abruf für diesen Zugang gestartet wurde -- unabhängig davon, ob er erfolgreich war. Der Zeitplan nutzt diesen Wert als Frequenzsperre.",
+   "fieldname": "last_fetch_attempt",
+   "fieldtype": "Datetime",
+   "label": "Letzter Abrufversuch",
    "read_only": 1
   },
   {
