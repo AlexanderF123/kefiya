@@ -33,6 +33,11 @@ class TanInteractionRequired(InitFailedException):
     pass
 
 
+#: How many of the bank's IBANs an "account not found" message lists before it
+#: switches to a count. Enough to identify the access, short enough to read.
+OFFERED_IBAN_PREVIEW = 10
+
+
 def _mask_iban(value):
     """Shorten an IBAN for diagnostic output.
 
@@ -437,42 +442,105 @@ class FinTSController:
         """
         return self.__get_fints_account_by_key("iban", iban)
 
+    def _get_transactions_raw(self, account, start_date, end_date):
+        """python-fints' ``get_transactions()``, but keeping a TAN challenge.
+
+        The library unpacks the camt result into (booked, pending) and therefore
+        dies with "cannot unpack non-iterable NeedTANResponse object" as soon as
+        the bank answers the statement request with a TAN challenge instead of
+        the data -- and the challenge object dies with it. Without it neither a
+        TAN nor a decoupled confirmation can ever be completed, so the login is
+        stuck for good.
+
+        Mirroring the library internals here is the same approach
+        ``get_fints_balance`` already takes for HKSAL, for the same reason: the
+        public method throws information away that we need. Should a future
+        library version rename those internals, we fall back to the public call
+        and are no worse off than before.
+
+        :return: the transaction list, or the NeedTANResponse to act on
+        """
+        conn = self.fints_connection
+        try:
+            from fints.camt_parser import camt053_to_dict
+            from fints.exceptions import FinTSUnsupportedOperation
+            from fints.models import Transaction
+            from fints.segments.statement import (
+                HKCAZ1, HKKAZ5, HKKAZ6, HKKAZ7)
+
+            get_dialog = conn._get_dialog
+            find_command = conn._find_highest_supported_command
+            fetch_mt940 = conn._get_transactions_mt940
+            fetch_xml = conn._get_transactions_xml
+        except (AttributeError, ImportError):
+            return conn.get_transactions(account, start_date, end_date)
+
+        with get_dialog() as dialog:
+            try:
+                hkkaz = find_command(HKKAZ5, HKKAZ6, HKKAZ7)
+                # MT940 banks return the challenge instead of the statements;
+                # it is passed through untouched for the caller to handle.
+                return fetch_mt940(
+                    dialog, hkkaz, account, start_date, end_date, False)
+            except FinTSUnsupportedOperation:
+                hkcaz = find_command(HKCAZ1)
+                result = fetch_xml(
+                    dialog, hkcaz, account, start_date, end_date)
+                if isinstance(result, NeedRetryResponse):
+                    return result
+                booked_streams = result[0]
+                return [
+                    Transaction(txn)
+                    for stream in booked_streams
+                    for txn in camt053_to_dict(stream)
+                ]
+
     def _get_transactions_checked(self, account, start_date, end_date):
         """Fetch transactions, turning a mid-fetch TAN request into a TAN flow.
 
         When the bank's strong authentication has expired -- PSD2 requires it
-        every 90 days -- it answers the statement request with a TAN challenge
-        instead of the data. python-fints expects a (booked, pending) tuple at
-        that point and fails while unpacking, so the user saw
-        "cannot unpack non-iterable NeedTANResponse object": a message that
-        names neither the login nor the actual cause, and offers no way
-        forward.
+        every 90 days -- it answers the statement request with a challenge
+        instead of the data. Parking that challenge (exactly as the dialog-level
+        TAN handling does) is what lets the user finish the authentication and
+        fetch again.
 
-        The challenge object is consumed inside the library and cannot be
-        recovered here, so this cannot complete the TAN itself. What it can do
-        is raise the same TanInteractionRequired the rest of the app already
-        handles, which prompts the user for a TAN in the interactive paths and
-        is reported as "TAN required" rather than a crash elsewhere.
+        Which prompt is correct depends on the bank: a decoupled login
+        (pushTAN 2.0, as the Volksbank uses) is released in the banking app and
+        never produces a code to type in, so asking for "the TAN" there sends
+        the user looking for something that does not exist.
         """
+        response = self._get_transactions_raw(account, start_date, end_date)
+
+        if not isinstance(response, NeedTANResponse):
+            return response
+
+        decoupled = bool(getattr(response, "decoupled", False))
+
+        # Park the challenge and publish the matching prompt. Guarded: the
+        # scheduler runs with no UI attached, and this error path must not fail
+        # on its own -- the TanInteractionRequired below has to reach the caller
+        # either way.
         try:
-            return self.fints_connection.get_transactions(
-                account, start_date, end_date)
-        except TypeError as exc:
-            if "NeedTANResponse" not in str(exc):
-                raise
-            # Publish the prompt where a user can act on it, exactly as the
-            # dialog-level TAN handling does. Guarded: the scheduler runs with
-            # no UI attached, and this error path must not raise on its own.
-            try:
-                self.interactive.request_tan_prompt(
-                    possible_tan_modes=None, request_tan=True)
-            except Exception:
-                pass
+            self.ask_for_tan(response, decoupled=decoupled)
+        except Exception:
+            frappe.log_error(
+                title="Kefiya: parking mid-fetch TAN failed",
+                message=frappe.get_traceback(),
+                reference_doctype="Kefiya Login",
+                reference_name=self.kefiya_login.name,
+            )
+
+        if decoupled:
             raise TanInteractionRequired(_(
-                "The bank requires a TAN for {0} before transactions can be"
-                " read. Open the login and fetch it individually to enter the"
-                " TAN."
+                "{0}: the bank is waiting for the release in your banking app."
+                " Confirm it there and fetch again -- this login uses a"
+                " decoupled procedure and issues no TAN to type in."
             ).format(self.kefiya_login.name))
+
+        raise TanInteractionRequired(_(
+            "{0}: the bank requires a TAN before transactions can be read."
+            " Enter the TAN in the prompt and fetch again."
+        ).format(self.kefiya_login.name))
 
     def _require_fints_account(self, iban=None):
         """Resolve the login's FinTS account, or fail with a usable message.
@@ -505,6 +573,14 @@ class FinTSController:
                 else getattr(acc, "iban", None)
             offered.append(_mask_iban(value))
 
+        # A collective bank access can offer dozens of accounts; printing all
+        # forty of them turns one misconfigured login into an unreadable wall of
+        # text in the Error Log. Enough to recognise the access, not more.
+        shown = offered[:OFFERED_IBAN_PREVIEW]
+        rest = len(offered) - len(shown)
+        if rest > 0:
+            shown.append(_("and {0} more").format(rest))
+
         frappe.throw(_(
             "No FinTS account matching IBAN {0} for login {1}. "
             "The bank offered: {2}. Accounts without an IBAN "
@@ -512,7 +588,7 @@ class FinTSController:
         ).format(
             _mask_iban(iban),
             self.kefiya_login.name,
-            ", ".join(offered) or "<none>",
+            ", ".join(shown) or "<none>",
         ))
 
     def get_fints_account_by_nr(self, account_nr):
@@ -1003,6 +1079,15 @@ class FinTSController:
                 "payments": new_bank_transactions,
                 # "assignment": auto_assignment
             }
+        except TanInteractionRequired:
+            # Not a parsing error: the bank wants the session authenticated
+            # first. Wrapping it in a ValidationError hid that from every
+            # caller -- fetch_all's "tan_required" branch never matched, so the
+            # request failed and Frappe rolled back the challenge that had just
+            # been parked on the login. The user then confirmed a release in
+            # the banking app that no longer had anything to release. Let it
+            # through unchanged.
+            raise
         except Exception as e:
             frappe.throw(_(
                 "Error parsing transactions<br>{0}"

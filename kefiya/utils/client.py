@@ -72,6 +72,61 @@ def import_fints_holdings(kefiya_login, user_scope):
     return refresh_holdings(kefiya_login, holdings)
 
 
+@frappe.whitelist()
+def get_fetch_groups():
+    """Group the logins into sets that may be fetched in parallel.
+
+    A collective fetch of 54 logins runs for roughly twelve minutes because it
+    is strictly sequential -- one FinTS dialog after the other. Most of that
+    time is dialog setup, not data.
+
+    Parallelising *within* one bank access is not safe: FinTS is a single-
+    dialog protocol, two dialogs on the same access each trigger their own
+    strong authentication and can invalidate each other's stored client state
+    (which is exactly the state kefiya shares between sibling logins so that
+    one TAN covers the whole bank). Different banks are independent
+    counterparties, though, and can be talked to at the same time.
+
+    So the unit of parallelism is the bank access: same BLZ + same FinTS login.
+    The caller runs one sequential chain per group and the chains side by side.
+    Speed-up is bounded by the largest group, not by the total -- with one bank
+    holding forty of the accounts, expect roughly a third off, not a tenth of
+    the time.
+
+    Logins excluded from fetching, or without an account IBAN, are left out
+    entirely: they would only add failures.
+
+    :return: list of groups, each {"key", "logins": [name, ...]}; no
+        credentials are exposed -- the key is a hash, not the login.
+    """
+    import hashlib
+
+    rows = frappe.get_list(
+        "Kefiya Login",
+        fields=["name", "blz", "fints_login", "account_iban", "skip_fetch"],
+        limit_page_length=0,
+    )
+
+    groups = {}
+    for row in rows:
+        if row.get("skip_fetch") or not row.get("account_iban"):
+            continue
+        # The BLZ alone would merge two different accesses at the same bank,
+        # and the FinTS login is a credential -- hash the pair instead of
+        # handing it to the browser.
+        raw = "{0}|{1}".format(row.get("blz") or "", row.get("fints_login") or "")
+        key = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        groups.setdefault(key, []).append(row["name"])
+
+    # Longest group first: the caller starts it first, so the run is not held
+    # up at the end by the one chain that still has forty accounts to go.
+    return [
+        {"key": key, "logins": logins}
+        for key, logins in sorted(
+            groups.items(), key=lambda item: -len(item[1]))
+    ]
+
+
 def _optional_fetch(summary, key, label, fn):
     """Run one best-effort extra fetch, telling absent from broken apart.
 
@@ -178,8 +233,23 @@ def fetch_all(kefiya_login, user_scope=None):
         except Exception:
             TanInteractionRequired = ()
         if TanInteractionRequired and isinstance(e, TanInteractionRequired):
+            # Returning normally is what keeps the parked challenge alive -- a
+            # re-raise would fail the request and roll the login's TAN state
+            # back with it. The flip side is that this draft import is no
+            # longer discarded by that rollback: nothing was fetched into it,
+            # so remove it here instead of leaving one empty draft per attempt.
+            try:
+                frappe.delete_doc(
+                    "Kefiya Import", kefiya_import.name,
+                    ignore_permissions=True, delete_permanently=True)
+            except Exception:
+                frappe.log_error(
+                    title="Kefiya: removing empty import failed",
+                    message=frappe.get_traceback(),
+                )
             summary["transactions"] = {"status": "tan_required"}
             summary["tan_required"] = True
+            summary["message"] = str(e)
             return summary
         raise
     summary["transactions"] = {
@@ -784,6 +854,49 @@ def add_payment_reference(payment_entry, sales_invoice):
         payment_entry,
         sales_invoice
     )
+
+
+@frappe.whitelist()
+def add_sales_invoice_payment(bank_transaction_name, sales_invoice_name):
+    """Amount to allocate when reconciling a bank transaction against an
+    invoice.
+
+    The assignment wizard's "reconcile" button calls this and hands the result
+    to ERPNext's reconcile_vouchers. The method never existed in this module,
+    so the button answered with a 404 ("Die von Ihnen gesuchte Ressource ist
+    nicht verfuegbar") and no reconciliation ever happened.
+
+    Allocating more than either side has open would leave a negative
+    outstanding on the invoice or over-allocate the transaction, so the smaller
+    of the two open amounts wins -- the same rule the automatic assignment
+    applies.
+
+    :return: amount to allocate (float, always > 0)
+    """
+    from frappe.utils import flt
+
+    # Reconciliation writes the allocation onto the Bank Transaction, so write
+    # rights there are the relevant gate; the invoice is only read.
+    frappe.has_permission("Bank Transaction", ptype="write", throw=True)
+
+    transaction = frappe.get_doc("Bank Transaction", bank_transaction_name)
+    invoice = frappe.get_doc("Sales Invoice", sales_invoice_name)
+    frappe.has_permission("Sales Invoice", ptype="read", doc=invoice, throw=True)
+
+    unallocated = flt(transaction.unallocated_amount)
+    outstanding = flt(invoice.outstanding_amount)
+
+    if unallocated <= 0:
+        frappe.throw(_(
+            "Bank transaction {0} has nothing left to allocate."
+        ).format(bank_transaction_name))
+
+    if outstanding <= 0:
+        frappe.throw(_(
+            "Sales Invoice {0} has no outstanding amount."
+        ).format(sales_invoice_name))
+
+    return min(unallocated, outstanding)
 
 
 @frappe.whitelist()

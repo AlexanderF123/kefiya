@@ -52,6 +52,32 @@ def _log_import_failure(login_name):
             pass
 
 
+def _record_fetch_attempt(login_name):
+    """Stamp the login with "we tried", so the frequency gate can see it.
+
+    Without this a login that can never succeed is retried on every single
+    tick. The gate below reads the last successful Kefiya Import, and a failed
+    run leaves none: the rollback in _recover_from_failed_login() discards even
+    the draft. Six loan accounts and a handful of misconfigured IBANs therefore
+    hit their banks every twenty minutes and wrote three Error Log entries an
+    hour each, instead of one a day.
+
+    Written through the document lifecycle, and guarded like the error logging
+    around it -- a failure to record the attempt must never end the batch.
+    """
+    try:
+        login = frappe.get_doc("Kefiya Login", login_name)
+        login.last_fetch_attempt = now_datetime()
+        login.save(ignore_permissions=True)
+    except Exception:
+        try:
+            frappe.logger("kefiya").exception(
+                "Kefiya Schedule: could not record attempt for %s", login_name
+            )
+        except Exception:
+            pass
+
+
 def _recover_from_failed_login(login_name):
     """Discard a failed login's partial work and record why, never raising.
 
@@ -72,6 +98,7 @@ def _recover_from_failed_login(login_name):
         pass
 
     _log_import_failure(login_name)
+    _record_fetch_attempt(login_name)
 
     try:
         frappe.db.commit()
@@ -112,10 +139,12 @@ def scheduled_import_fints_payments(manual=None):
                 continue
 
             login_name = child_item.kefiya_login
-            bank_account, allowed_days, skip_fetch = (frappe.db.get_value(
-                "Kefiya Login", login_name,
-                ["bank_account", "allowed_sync_days_in_past", "skip_fetch"]
-            ) or (None, None, 0))
+            bank_account, allowed_days, skip_fetch, last_attempt = (
+                frappe.db.get_value(
+                    "Kefiya Login", login_name,
+                    ["bank_account", "allowed_sync_days_in_past",
+                     "skip_fetch", "last_fetch_attempt"]
+                ) or (None, None, 0, None))
 
             # Loan and clearing accounts are never offered for statement
             # retrieval, so fetching them fails every single run. Skipping them
@@ -123,10 +152,16 @@ def scheduled_import_fints_payments(manual=None):
             if skip_fetch:
                 continue
 
-            # Frequency gate: use the last IMPORT RUN time (creation), not the
-            # transaction end_date. A run that returned no transactions (weekend,
-            # or an expired SCA) still counts as a run, so we neither hammer the
-            # bank every 20 minutes nor get stuck refetching only "today" forever.
+            # Frequency gate: use the last import RUN, not the transaction
+            # end_date. A run that returned no transactions (weekend, or an
+            # expired SCA) still counts as a run, so we neither hammer the bank
+            # every 20 minutes nor get stuck refetching only "today" forever.
+            #
+            # A failed run counts too. It leaves no submitted Kefiya Import --
+            # the recovery rolls back even the draft -- so a login that can
+            # never succeed used to be retried on every tick, three times an
+            # hour, forever. `last_fetch_attempt` is stamped on both paths, so
+            # the newer of the two is what the gate goes by.
             if not manual:
                 last = frappe.get_all(
                     "Kefiya Import",
@@ -135,9 +170,12 @@ def scheduled_import_fints_payments(manual=None):
                     order_by="creation desc",
                     limit=1,
                 )
-                if last:
+                seen = [getdate(row.creation) for row in last]
+                if last_attempt:
+                    seen.append(getdate(last_attempt))
+                if seen:
                     gap = FREQUENCY_GAP_DAYS.get(child_item.import_frequency, 1)
-                    if (today - getdate(last[0].creation)).days < gap:
+                    if (today - max(seen)).days < gap:
                         continue
 
             # Default fetch window: from the date of the account's last booked
@@ -164,6 +202,8 @@ def scheduled_import_fints_payments(manual=None):
             else:
                 FinTSControllerLegacy(login_name) \
                     .import_fints_transactions(kefiya_import.name)
+
+            _record_fetch_attempt(login_name)
 
             # Settle this login before touching the next one. Without it a
             # later rollback would also discard the logins that already
