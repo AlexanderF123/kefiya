@@ -135,7 +135,10 @@ class ImportBankTransaction:
                     continue
 
                 if status not in ['c', 'd']:
-                    frappe.log_error(_('Payment type not handled'), 'Kefiya Import Error')
+                    frappe.log_error(
+                        title='Kefiya Import: payment type not handled',
+                        message=_('Payment type not handled'),
+                    )
                     continue
 
                 # Progress bar
@@ -213,7 +216,10 @@ class ImportBankTransaction:
                 self.bank_transactions.append(bank_transaction)
 
             except Exception as e:
-                frappe.log_error("Error importing bank transaction", "{}\n\n{}".format(t, frappe.get_traceback()))
+                frappe.log_error(
+                    title="Kefiya Import: error importing bank transaction",
+                    message="{}\n\n{}".format(t, frappe.get_traceback()),
+                )
                 frappe.msgprint("There were some transactions with error. Please, have a look on Error Log.")
 
     def old_kefiya_import(self, fints_transaction):
@@ -236,8 +242,8 @@ class ImportBankTransaction:
 
                 if raw_amount in (None, '') or not status:
                     frappe.log_error(
-                        _('Transaction missing amount or status'),
-                        'Kefiya Import Error'
+                        title='Kefiya Import: transaction incomplete',
+                        message=_('Transaction missing amount or status'),
                     )
                     continue
 
@@ -248,8 +254,8 @@ class ImportBankTransaction:
 
                 if status not in ['c', 'd']:
                     frappe.log_error(
-                        _('Payment type not handled'),
-                        'Kefiya Import Error'
+                        title='Kefiya Import: payment type not handled',
+                        message=_('Payment type not handled'),
                     )
                     continue
 
@@ -344,7 +350,10 @@ class ImportBankTransaction:
                 bank_transaction.insert()
                 self.bank_transactions.append(bank_transaction)
             except Exception as e:
-                frappe.log_error("Error importing bank transaction", "{}\n\n{}".format(t, frappe.get_traceback()))
+                frappe.log_error(
+                    title="Kefiya Import: error importing bank transaction",
+                    message="{}\n\n{}".format(t, frappe.get_traceback()),
+                )
                 frappe.msgprint("There were some transactions with error. Please, have a look on Error Log.")
 
     def get_bank_account_data(self, IBAN):

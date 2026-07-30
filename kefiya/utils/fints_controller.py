@@ -38,6 +38,106 @@ class TanInteractionRequired(InitFailedException):
 OFFERED_IBAN_PREVIEW = 10
 
 
+#: Key under which the active fetch session lives on ``frappe.local``. Request
+#: scoped by construction: frappe.local is rebuilt for every request and every
+#: background job, so a session can never outlive the work it belongs to.
+_SESSION_KEY = "kefiya_fints_session"
+
+
+def _active_session():
+    return getattr(frappe.local, _SESSION_KEY, None)
+
+
+def _access_key(kefiya_login):
+    """Identify the bank access (online-banking contract) of a login.
+
+    Two logins with the same BLZ and the same FinTS login are the same access
+    mapped to two accounts -- the bank sees one contract, and one dialog can
+    serve both. The BLZ alone is not enough: two separate contracts at the same
+    bank must never share a dialog.
+    """
+    blz = kefiya_login.blz
+    fints_login = kefiya_login.fints_login
+    if not (blz and fints_login):
+        return None
+    return (str(blz), str(fints_login))
+
+
+def _retire_connection(session, conn):
+    """Drop a connection from the session after a command failed on it.
+
+    With a dialog per command, a broken dialog died with the command that broke
+    it. In a shared session every later command inherits it, so one failure
+    would take down the rest of the login -- or, in a group fetch, the rest of
+    the bank access. Retiring it means the next controller opens a fresh dialog
+    and pays one handshake, which is what would have happened anyway before.
+
+    A paused dialog is deliberately left alone: a TAN request parks it for the
+    user to release later, and ending it would throw that away. It is still
+    removed from the session, because nothing may send on a paused dialog.
+    """
+    for access, registered in list(session.get("connections", {}).items()):
+        if registered is conn:
+            session["connections"].pop(access, None)
+
+    if conn in session.get("open", []):
+        session["open"].remove(conn)
+
+    dialog = getattr(conn, "_standing_dialog", None)
+    if dialog is not None and getattr(dialog, "paused", False):
+        return
+
+    try:
+        conn.__exit__(None, None, None)
+    except Exception:
+        frappe.logger("kefiya").exception(
+            "Kefiya: closing a failed FinTS dialog failed")
+
+
+@contextlib.contextmanager
+def fints_session():
+    """Hold one FinTS dialog open across everything done inside.
+
+    Without this, a single "fetch everything" for one login builds five
+    controllers -- transactions, balance, standing orders, statements, credit
+    card -- and each opens its own dialog: HKIDN/HKVVB, authentication, the one
+    command that actually carries data, HKEND. The handshake costs several
+    round trips, the data costs one, and that ratio is the whole reason a
+    collective fetch of 48 accounts takes twelve minutes.
+
+    Inside a session, controllers of the same bank access share one client and
+    one open dialog, so the handshake is paid once instead of once per command
+    -- and, for a caller that wraps several logins of the same access, once per
+    access instead of once per account.
+
+    Nesting is allowed and simply joins the outer session, so wrapping
+    fetch_all() is enough for a single login and wrapping a whole group is
+    enough for a bank access.
+
+    Outside a session nothing changes: every dialog is opened and closed
+    exactly as before.
+    """
+    if _active_session() is not None:
+        yield
+        return
+
+    setattr(frappe.local, _SESSION_KEY, {"connections": {}, "open": []})
+    try:
+        yield
+    finally:
+        session = _active_session() or {"open": []}
+        setattr(frappe.local, _SESSION_KEY, None)
+        # Close every dialog this session opened. Guarded per connection: the
+        # session ends on the error path too, and a bank that dropped the
+        # connection must not turn into a second exception on the way out.
+        for conn in session.get("open", []):
+            try:
+                conn.__exit__(None, None, None)
+            except Exception:
+                frappe.logger("kefiya").exception(
+                    "Kefiya: closing a shared FinTS dialog failed")
+
+
 def _mask_iban(value):
     """Shorten an IBAN for diagnostic output.
 
@@ -69,8 +169,15 @@ class FinTSController:
         if self.__init_tan_mode(tan_mode, tan_medium, tan) is False:
             raise TanInteractionRequired()
 
-        # If there is an open TAN request, try to fulfill it
-        if self.kefiya_login.stored_tan_blob:
+        # If there is an open TAN request, try to fulfill it.
+        #
+        # Not while a dialog of this access is already standing: resume_dialog()
+        # refuses to run inside one, and it would be pointless anyway -- an open
+        # dialog means the access is authenticated, so this login's parked
+        # challenge is a leftover from an earlier attempt and has nothing left
+        # to unlock.
+        if self.kefiya_login.stored_tan_blob \
+                and not self.fints_connection._standing_dialog:
             with self.fints_connection.resume_dialog(self.kefiya_login.stored_dialog_blob):
                 tan_request = NeedRetryResponse.from_data(self.kefiya_login.stored_tan_blob)
 
@@ -106,6 +213,18 @@ class FinTSController:
         if hasattr(self, "fints_connection"):
             return
 
+        # Inside a fetch session, the logins of one bank access share a single
+        # client -- and with it the dialog that client_session() keeps open. A
+        # second login of the same access then costs one command instead of a
+        # full handshake. Strictly keyed on (BLZ, FinTS login): routing a
+        # login's requests through another contract's credentials would read
+        # the wrong accounts, so anything else gets its own connection.
+        session = _active_session()
+        access = _access_key(self.kefiya_login) if session else None
+        if access and access in session["connections"]:
+            self.fints_connection = session["connections"][access]
+            return
+
         # "TAN once per bank": before opening a brand-new dialog (which would
         # trigger a fresh SCA/TAN), try to reuse an already-authenticated FinTS
         # session from a sibling login of the same bank (same blz + fints_login).
@@ -130,13 +249,110 @@ class FinTSController:
                 _("Could not conntect to fints server with error<br>{0}").format(e)
             )
 
+        # Offer it to the rest of the session, so the next login of this access
+        # joins this client instead of opening its own.
+        if access:
+            session["connections"][access] = self.fints_connection
+
+    @contextlib.contextmanager
+    def client_session(self):
+        """Open a FinTS dialog, join the open one, or leave it open.
+
+        Three cases. A dialog is already standing on this client: join it, and
+        leave closing to whoever opened it. A fetch session is active: open the
+        dialog and hand it to the session, which keeps it open for every
+        further command and closes it at the end. Neither: open and close it
+        here, exactly as before this existed.
+
+        Every read below used to open the client directly, and
+        FinTS3PinTanClient refuses to be entered twice ("Cannot double
+        __enter__"). One dialog per command means an HKIDN/HKVVB round trip
+        plus authentication plus an HKEND for every single command -- which is
+        where nearly all the time of a fetch goes. The data itself is one
+        message; the handshake around it is four.
+
+        Joining an already-open dialog lets a caller wrap a whole login, or a
+        whole bank access, in one dialog and pay that cost once. Nothing
+        changes for callers that do not: with no standing dialog this behaves
+        exactly as before.
+
+        Deliberately not used by the money paths (submit_sepa_transfer,
+        submit_sepa_debit). Those park the dialog on a TAN request, and
+        freezing a dialog that a surrounding fetch is still using would break
+        it.
+        """
+        conn = self.fints_connection
+
+        if conn._standing_dialog:
+            yield conn
+            return
+
+        session = _active_session()
+        if session is None:
+            with conn:
+                yield conn
+            return
+
+        try:
+            from fints.exceptions import FinTSUnsupportedOperation
+        except Exception:
+            FinTSUnsupportedOperation = ()
+
+        try:
+            conn.__enter__()
+        except Exception:
+            # A dialog whose init failed -- wrong credentials, bank in
+            # maintenance -- leaves _standing_dialog set but never opened.
+            # python-fints then reads that as "a dialog is standing", so the
+            # next login of this access would join a dialog that is dead, and
+            # every command on it would fail. One bad handshake would take the
+            # whole access down for the rest of the run. Take it out of the
+            # session so the next controller starts clean.
+            _retire_connection(session, conn)
+            raise
+
+        session["open"].append(conn)
+        try:
+            yield conn
+        except Exception as exc:
+            # A bank that does not offer a segment is decided from the stored
+            # BPD without ever touching the dialog, so that one leaves it
+            # perfectly usable -- and it is the common case here. Anything else
+            # may have left it broken or parked, and every later command in
+            # this session would inherit it.
+            if not (FinTSUnsupportedOperation
+                    and isinstance(exc, FinTSUnsupportedOperation)):
+                _retire_connection(session, conn)
+            raise
+
+    def _refuse_inside_fetch_session(self):
+        """Refuse to move money through a dialog a fetch is sharing.
+
+        A transfer or direct debit parks the dialog on the TAN request
+        (pause_dialog). The read paths avoid that by construction: a parked
+        dialog is retired from the session so nothing sends on it again. The
+        money paths cannot be retired the same way, because parking is their
+        SUCCESS case -- they return "tan_required" rather than raising -- so the
+        session would keep handing a frozen dialog to every later command.
+
+        Nothing does this today: fetching and transferring are separate
+        requests. But since a controller built inside a session adopts the
+        shared client, it became possible, and a corrupted collective fetch is
+        a far worse outcome than a refused order.
+        """
+        if _active_session() is not None:
+            frappe.throw(_(
+                "A SEPA order cannot be sent while a bank fetch is running."
+                " Wait for the fetch to finish and send it again."
+            ))
+
     @contextlib.contextmanager
     def trusted_client_context(self):
         """
         Opens the fints client context (will most likely generate a new fints dialog) and checks if a TAN is requested.
         If so, it will be requested from the user and the context body will be skipped.
         """
-        with self.fints_connection:
+        with self.client_session():
             if self.is_tan_required_and_requested(self.fints_connection.init_tan_response):
                 raise TanInteractionRequired()
 
@@ -631,7 +847,7 @@ class FinTSController:
                 )
             )
 
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             return json.loads(
                 json.dumps(
@@ -650,7 +866,7 @@ class FinTSController:
         :return: list of plain dicts (isin, security_name, quantity, price,
             market_value, currency, valuation_date, securities_account)
         """
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             holdings = self.fints_connection.get_holdings(account)
             result = []
@@ -715,7 +931,7 @@ class FinTSController:
                 })
             return rows
 
-        with conn:
+        with self.client_session():
             account = self._require_fints_account(iban)
             with conn._get_dialog() as dialog:
                 hksal = conn._find_highest_supported_command(
@@ -730,20 +946,20 @@ class FinTSController:
     def get_fints_information(self):
         """Bank + account capabilities, limits and supported operations
         (FinTS get_information). Returns a nested dict."""
-        with self.fints_connection:
+        with self.client_session():
             return self.fints_connection.get_information()
 
     def get_fints_scheduled_debits(self, multiple=False):
         """Standing orders / scheduled debits (Dauerauftraege /
         Termin-Ueberweisungen) for the login's account."""
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             return self.fints_connection.get_scheduled_debits(account, multiple)
 
     def get_fints_statements(self):
         """List available electronic account statements
         (elektronische Kontoauszuege / Dokumente)."""
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             return self.fints_connection.get_statements(account)
 
@@ -752,7 +968,7 @@ class FinTSController:
 
         May return binary content (e.g. PDF); the caller decides how to store it.
         """
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             return self.fints_connection.get_statement(
                 account, number, year, file_format)
@@ -760,7 +976,7 @@ class FinTSController:
     def get_fints_credit_card_transactions(self, credit_card_number=None,
                                            start_date=None, end_date=None):
         """Credit card transactions (Kreditkartenumsaetze) for the account."""
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             return self.fints_connection.get_credit_card_transactions(
                 account, credit_card_number, start_date, end_date)
@@ -773,19 +989,19 @@ class FinTSController:
             start_date = now_datetime().date() - relativedelta(days=allowed_days)
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
-        with self.fints_connection:
+        with self.client_session():
             account = self._require_fints_account()
             return self.fints_connection.get_transactions_xml(
                 account, start_date, end_date)
 
     def get_fints_status_protocol(self):
         """Bank status protocol messages (Statusprotokoll / diagnostics)."""
-        with self.fints_connection:
+        with self.client_session():
             return self.fints_connection.get_status_protocol()
 
     def get_fints_communication_endpoints(self):
         """Available bank communication endpoints (diagnostics)."""
-        with self.fints_connection:
+        with self.client_session():
             return self.fints_connection.get_communication_endpoints()
 
     def submit_sepa_debit(self, pain008_xml):
@@ -799,6 +1015,8 @@ class FinTSController:
         (Verification of Payee) mismatches must be resolved by a human, never
         auto-approved.
         """
+        self._refuse_inside_fetch_session()
+
         with self.fints_connection:
             account = self._require_fints_account()
             response = self.fints_connection.sepa_debit(account, pain008_xml)
@@ -871,6 +1089,8 @@ class FinTSController:
                 "message": _("No pending Verification of Payee for this login."),
             }
 
+        self._refuse_inside_fetch_session()
+
         with self.fints_connection.resume_dialog(dialog_blob):
             challenge = NeedRetryResponse.from_data(blob)
             response = self.fints_connection.approve_vop_response(challenge)
@@ -930,6 +1150,8 @@ class FinTSController:
             # sum on a single transfer.
             kwargs["multiple"] = True
             kwargs["control_sum"] = control_sum
+
+        self._refuse_inside_fetch_session()
 
         with self.fints_connection:
             account = self._require_fints_account()
