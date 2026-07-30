@@ -101,6 +101,11 @@ def get_fetch_groups():
     """
     import hashlib
 
+    # Permission gate: frappe.get_list applies the Kefiya Login read
+    # permissions and User Permissions, so a caller only ever sees the accesses
+    # they may read. No separate has_permission check is needed -- and none
+    # would be correct, since a user with partial access should get their part
+    # rather than an error.
     rows = frappe.get_list(
         "Kefiya Login",
         fields=["name", "blz", "fints_login", "account_iban", "skip_fetch"],

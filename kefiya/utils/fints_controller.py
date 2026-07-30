@@ -298,7 +298,19 @@ class FinTSController:
         except Exception:
             FinTSUnsupportedOperation = ()
 
-        conn.__enter__()
+        try:
+            conn.__enter__()
+        except Exception:
+            # A dialog whose init failed -- wrong credentials, bank in
+            # maintenance -- leaves _standing_dialog set but never opened.
+            # python-fints then reads that as "a dialog is standing", so the
+            # next login of this access would join a dialog that is dead, and
+            # every command on it would fail. One bad handshake would take the
+            # whole access down for the rest of the run. Take it out of the
+            # session so the next controller starts clean.
+            _retire_connection(session, conn)
+            raise
+
         session["open"].append(conn)
         try:
             yield conn
@@ -312,6 +324,27 @@ class FinTSController:
                     and isinstance(exc, FinTSUnsupportedOperation)):
                 _retire_connection(session, conn)
             raise
+
+    def _refuse_inside_fetch_session(self):
+        """Refuse to move money through a dialog a fetch is sharing.
+
+        A transfer or direct debit parks the dialog on the TAN request
+        (pause_dialog). The read paths avoid that by construction: a parked
+        dialog is retired from the session so nothing sends on it again. The
+        money paths cannot be retired the same way, because parking is their
+        SUCCESS case -- they return "tan_required" rather than raising -- so the
+        session would keep handing a frozen dialog to every later command.
+
+        Nothing does this today: fetching and transferring are separate
+        requests. But since a controller built inside a session adopts the
+        shared client, it became possible, and a corrupted collective fetch is
+        a far worse outcome than a refused order.
+        """
+        if _active_session() is not None:
+            frappe.throw(_(
+                "A SEPA order cannot be sent while a bank fetch is running."
+                " Wait for the fetch to finish and send it again."
+            ))
 
     @contextlib.contextmanager
     def trusted_client_context(self):
@@ -982,6 +1015,8 @@ class FinTSController:
         (Verification of Payee) mismatches must be resolved by a human, never
         auto-approved.
         """
+        self._refuse_inside_fetch_session()
+
         with self.fints_connection:
             account = self._require_fints_account()
             response = self.fints_connection.sepa_debit(account, pain008_xml)
@@ -1054,6 +1089,8 @@ class FinTSController:
                 "message": _("No pending Verification of Payee for this login."),
             }
 
+        self._refuse_inside_fetch_session()
+
         with self.fints_connection.resume_dialog(dialog_blob):
             challenge = NeedRetryResponse.from_data(blob)
             response = self.fints_connection.approve_vop_response(challenge)
@@ -1113,6 +1150,8 @@ class FinTSController:
             # sum on a single transfer.
             kwargs["multiple"] = True
             kwargs["control_sum"] = control_sum
+
+        self._refuse_inside_fetch_session()
 
         with self.fints_connection:
             account = self._require_fints_account()

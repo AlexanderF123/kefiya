@@ -184,6 +184,60 @@ class TestRetireOnFailure(unittest.TestCase):
         self.assertIn('session["open"].remove(conn)', source)
 
 
+class TestFailedHandshake(unittest.TestCase):
+    """python-fints assigns _standing_dialog before entering it, so a dialog
+    whose init fails leaves the client looking like it has one. Shared, the
+    next login of that access would join a dialog that never opened."""
+
+    def test_a_failed_enter_is_retired(self):
+        source = inspect.getsource(FinTSController.client_session)
+        self.assertIn("conn.__enter__()", source)
+        self.assertLess(
+            source.index("_retire_connection(session, conn)"),
+            source.index('session["open"].append(conn)'),
+            "The failed-handshake retire must sit between entering the client "
+            "and registering it, otherwise the dead client stays in the pool.",
+        )
+
+    def test_the_client_is_registered_only_after_a_successful_enter(self):
+        source = inspect.getsource(FinTSController.client_session)
+        self.assertLess(
+            source.index("conn.__enter__()"),
+            source.index('session["open"].append(conn)'),
+        )
+
+
+class TestMoneyPathsRefuseAsharedDialog(unittest.TestCase):
+    """A transfer parks the dialog on the TAN request, and parking is its
+    SUCCESS case -- it returns rather than raising, so the retire-on-failure
+    path never runs and the session would keep handing out a frozen dialog."""
+
+    def test_the_guard_exists_and_checks_the_session(self):
+        source = inspect.getsource(
+            FinTSController._refuse_inside_fetch_session)
+        self.assertIn("_active_session() is not None", source)
+        self.assertIn("frappe.throw", source)
+
+    def test_every_money_path_is_guarded(self):
+        for method in (FinTSController.submit_sepa_transfer,
+                       FinTSController.submit_sepa_debit,
+                       FinTSController.approve_pending_vop):
+            source = inspect.getsource(method)
+            self.assertIn(
+                "self._refuse_inside_fetch_session()", source,
+                "{0} moves money or resumes a stored dialog; neither may run "
+                "inside a shared fetch dialog.".format(method.__name__),
+            )
+
+    def test_the_guard_runs_before_the_bank_is_contacted(self):
+        source = inspect.getsource(FinTSController.submit_sepa_transfer)
+        self.assertLess(
+            source.index("self._refuse_inside_fetch_session()"),
+            source.index("with self.fints_connection:"),
+            "Refusing after opening the dialog would defeat the purpose.",
+        )
+
+
 class TestFetchGroup(unittest.TestCase):
     """One access, one dialog, every account of it."""
 
