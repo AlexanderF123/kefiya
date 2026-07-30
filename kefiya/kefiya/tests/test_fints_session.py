@@ -236,6 +236,36 @@ class TestJoinedDialogIsRetiredToo(unittest.TestCase):
         )
 
 
+class TestParkedChallengeSurvivesSiblings(unittest.TestCase):
+    """"TAN once per bank" shares a fresh client state with every sibling of
+    the access. A sibling holding a parked challenge must be left alone: the
+    paused dialog belongs to the client state it was frozen with, so replacing
+    that state leaves the user releasing the payment in their banking app while
+    the resumed dialog no longer fits its client."""
+
+    def _source(self):
+        return inspect.getsource(
+            FinTSController._propagate_client_state_to_siblings)
+
+    def test_a_parked_sibling_is_skipped(self):
+        source = self._source()
+        self.assertIn("s.stored_tan_state or s.stored_dialog_state", source)
+
+    def test_the_skip_comes_before_the_freshness_check(self):
+        source = self._source()
+        self.assertLess(
+            source.index("s.stored_tan_state or s.stored_dialog_state"),
+            source.index("s.client_state_updated >= mine"),
+            "A parked challenge outranks freshness: the newer state is exactly "
+            "what would break it.",
+        )
+
+    def test_both_halves_of_the_parked_state_are_read(self):
+        source = self._source()
+        self.assertIn('"stored_tan_state", "stored_dialog_state"', source,
+                      "Both fields have to be selected to be testable.")
+
+
 class TestFailedHandshake(unittest.TestCase):
     """python-fints assigns _standing_dialog before entering it, so a dialog
     whose init fails leaves the client looking like it has one. Shared, the

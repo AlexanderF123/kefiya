@@ -480,9 +480,25 @@ class FinTSController:
             siblings = frappe.get_all(
                 "Kefiya Login",
                 filters=filters,
-                fields=["name", "stored_client_state", "client_state_updated"],
+                fields=["name", "stored_client_state", "client_state_updated",
+                        "stored_tan_state", "stored_dialog_state"],
             )
             for s in siblings:
+                # Never pull the client state out from under a parked
+                # challenge. A paused dialog belongs to the client state it was
+                # frozen with -- message counters, dialog id, signature
+                # counter -- so replacing that state leaves the user releasing
+                # the payment in their banking app while the resumed dialog no
+                # longer fits its client, and the release fails.
+                #
+                # This went unnoticed until the challenge started surviving at
+                # all: before that it was destroyed by the unpacking bug long
+                # before a sibling could overwrite anything. The parallel fetch
+                # makes it near-certain, because the siblings of one access now
+                # run seconds apart.
+                if s.stored_tan_state or s.stored_dialog_state:
+                    continue
+
                 # keep a sibling's own session if it is at least as fresh
                 if s.stored_client_state and mine and s.client_state_updated and s.client_state_updated >= mine:
                     continue
