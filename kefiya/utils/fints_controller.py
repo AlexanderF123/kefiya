@@ -702,7 +702,8 @@ class FinTSController:
         """
         return self.__get_fints_account_by_key("iban", iban)
 
-    def _get_transactions_raw(self, account, start_date, end_date):
+    def _get_transactions_raw(self, account, start_date, end_date,
+                              include_pending=False):
         """python-fints' ``get_transactions()``, but keeping a TAN challenge.
 
         The library unpacks the camt result into (booked, pending) and therefore
@@ -733,7 +734,8 @@ class FinTSController:
             fetch_mt940 = conn._get_transactions_mt940
             fetch_xml = conn._get_transactions_xml
         except (AttributeError, ImportError):
-            return conn.get_transactions(account, start_date, end_date)
+            return conn.get_transactions(
+                account, start_date, end_date, include_pending)
 
         with get_dialog() as dialog:
             try:
@@ -741,17 +743,20 @@ class FinTSController:
                 # MT940 banks return the challenge instead of the statements;
                 # it is passed through untouched for the caller to handle.
                 return fetch_mt940(
-                    dialog, hkkaz, account, start_date, end_date, False)
+                    dialog, hkkaz, account, start_date, end_date,
+                    include_pending)
             except FinTSUnsupportedOperation:
                 hkcaz = find_command(HKCAZ1)
                 result = fetch_xml(
                     dialog, hkcaz, account, start_date, end_date)
                 if isinstance(result, NeedRetryResponse):
                     return result
-                booked_streams = result[0]
+                streams = list(result[0])
+                if include_pending and result[1]:
+                    streams += list(result[1])
                 return [
                     Transaction(txn)
-                    for stream in booked_streams
+                    for stream in streams
                     for txn in camt053_to_dict(stream)
                 ]
 
@@ -903,6 +908,60 @@ class FinTSController:
                     cls=mt940.JSONEncoder
                 )
             )
+
+    def get_fints_pending_transactions(self, start_date=None, end_date=None):
+        """Fetch the entries the bank shows as pending (vorgemerkte Umsaetze).
+
+        The bank delivers them in the same MT940/camt message as the booked
+        ones, in a separate field, and python-fints only returns them when
+        asked -- ``include_pending``. The booked fetch deliberately leaves it
+        off: a pending entry is not a booking and must not reach the ledger.
+
+        This asks for both and returns the difference, because the library has
+        no "pending only" call. Cheap: it is one more command on a dialog that
+        is already open, not a second handshake.
+
+        :return: list of entries the bank has not booked yet
+        """
+        allowed_days = cint(self.kefiya_login.allowed_sync_days_in_past) or 90
+        if start_date is None:
+            start_date = now_datetime().date() - relativedelta(days=allowed_days)
+        if end_date is None:
+            end_date = now_datetime().date()
+
+        with self.client_session():
+            account = self._require_fints_account()
+
+            # Through _get_transactions_raw, not the library's public call:
+            # that one dies on the camt unpacking as soon as the bank answers
+            # with a TAN challenge, which is the bug this app already fixed
+            # once. No reason to reintroduce it here.
+            booked = self._get_transactions_raw(
+                account, start_date, end_date, include_pending=False)
+            both = self._get_transactions_raw(
+                account, start_date, end_date, include_pending=True)
+
+        if isinstance(booked, NeedRetryResponse) \
+                or isinstance(both, NeedRetryResponse):
+            # A TAN request here is not worth interrupting the fetch for: the
+            # booked transactions are the point, and they already went through.
+            return []
+
+        booked_keys = {self._pending_key(t) for t in (booked or [])}
+        return [t for t in (both or [])
+                if self._pending_key(t) not in booked_keys]
+
+    @staticmethod
+    def _pending_key(entry):
+        """Identify an entry well enough to tell booked from pending apart."""
+        data = entry if isinstance(entry, dict) else getattr(entry, "data", None)
+        if not isinstance(data, dict):
+            try:
+                data = dict(entry)
+            except Exception:
+                return repr(entry)
+        return "|".join(str(data.get(k, "")) for k in
+                        ("date", "amount", "purpose", "applicant_name"))
 
     def get_fints_holdings(self):
         """Fetch securities holdings (Depot / Wertpapiere) for the account.
