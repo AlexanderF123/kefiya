@@ -52,7 +52,15 @@ class TestScheduleErrorLogging(unittest.TestCase):
 
         frappe.log_error = capturing_log_error
         try:
-            kefiya_schedule._log_import_failure("L" * 500)
+            # Inside a real except block, because that is the only place
+            # _log_import_failure is ever called from -- and the only place
+            # frappe.get_traceback() returns anything. Outside one it returns
+            # an empty string, which made the traceback assertion below
+            # unsatisfiable and this test fail on every run.
+            try:
+                raise ValueError("simulated import failure")
+            except ValueError:
+                kefiya_schedule._log_import_failure("L" * 500)
         finally:
             frappe.log_error = original
 
