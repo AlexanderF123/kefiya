@@ -19,6 +19,30 @@ def _use_tan_authentication() -> bool:
     )
 
 
+def _fetch_session():
+    """A shared FinTS dialog -- but only where every caller knows about it.
+
+    With the TAN toggle off, the transaction import runs through the legacy
+    controller, which knows nothing about sessions: it builds its own client
+    and opens its own dialog in the constructor. The best-effort extras always
+    use the new controller and would leave the session's dialog standing, so
+    the legacy import would open a SECOND dialog on the same bank access --
+    exactly the double dialog get_fetch_groups exists to avoid, and the one
+    banks answer by tearing the connection down.
+
+    So the session is only entered when the whole fetch goes through the
+    session-aware controller. In legacy mode every command opens and closes its
+    own dialog, as it did before any of this existed.
+    """
+    import contextlib
+
+    from kefiya.utils.fints_controller import fints_session
+
+    if not _use_tan_authentication():
+        return contextlib.nullcontext()
+    return fints_session()
+
+
 def _get_fints_controller():
     """Return the appropriate FinTSController class depending on TAN toggle."""
     if _use_tan_authentication():
@@ -152,8 +176,6 @@ def fetch_group(logins, user_scope=None):
     :param logins: list of Kefiya Login names, or its JSON form
     :return: {"results": {login: summary}, "failed": {login: message}}
     """
-    from kefiya.utils.fints_controller import fints_session
-
     if isinstance(logins, str):
         logins = frappe.parse_json(logins)
     if not isinstance(logins, (list, tuple)):
@@ -166,18 +188,32 @@ def fetch_group(logins, user_scope=None):
     results = {}
     failed = {}
 
-    with fints_session():
+    with _fetch_session():
         for name in ordered:
             try:
                 results[name] = fetch_all(name, user_scope)
             except Exception as exc:
                 failed[name] = str(exc)
+                # Discard this login's partial work before moving on. Without
+                # it the next successful login commits the failed one's leftovers
+                # too -- an empty draft Kefiya Import and half-written login
+                # state. The scheduler solves the same problem the same way in
+                # _recover_from_failed_login; the rollback drops the Error Log
+                # as well, hence the explicit commit after it.
+                try:
+                    frappe.db.rollback()
+                except Exception:
+                    pass
                 frappe.log_error(
                     title="Kefiya fetch_group: {0}".format(name)[:140],
                     message=frappe.get_traceback(),
                     reference_doctype="Kefiya Login",
                     reference_name=name,
                 )
+                try:
+                    frappe.db.commit()
+                except Exception:
+                    pass
 
     return {"results": results, "failed": failed}
 
@@ -260,15 +296,13 @@ def fetch_all(kefiya_login, user_scope=None):
     :return: dict summary {transactions, balance, planned, statements,
         credit_card, errors}
     """
-    from kefiya.utils.fints_controller import fints_session
-
     # One dialog for the whole fetch. Without this every one of the five
     # retrievals below builds its own controller and opens its own dialog:
     # handshake, authentication, one command, HKEND -- five times, for one
     # login. Inside the session they share a client and a standing dialog,
     # and a caller that wraps several logins of the same bank access (see
     # fetch_group) pays the handshake once for all of them.
-    with fints_session():
+    with _fetch_session():
         from frappe.utils import now_datetime
         from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
 
@@ -975,9 +1009,14 @@ def add_sales_invoice_payment(bank_transaction_name, sales_invoice_name):
 
     # Reconciliation writes the allocation onto the Bank Transaction, so write
     # rights there are the relevant gate; the invoice is only read.
-    frappe.has_permission("Bank Transaction", ptype="write", throw=True)
-
+    #
+    # Both checks are document-bound. A DocType-level check alone would let a
+    # user whose access is narrowed by a User Permission -- to one company, say
+    # -- read any bank transaction's unallocated amount and reconcile against it.
     transaction = frappe.get_doc("Bank Transaction", bank_transaction_name)
+    frappe.has_permission(
+        "Bank Transaction", ptype="write", doc=transaction, throw=True)
+
     invoice = frappe.get_doc("Sales Invoice", sales_invoice_name)
     frappe.has_permission("Sales Invoice", ptype="read", doc=invoice, throw=True)
 
