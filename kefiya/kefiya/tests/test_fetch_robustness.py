@@ -47,10 +47,10 @@ class TestUnsupportedSegmentsAreNotErrors(unittest.TestCase):
             "_optional_fetch and will keep spamming the Error Log.",
         )
         self.assertEqual(
-            source.count("_optional_fetch("), 6,
-            "All six optional retrievals (balance, pending entries, holdings, "
-            "scheduled debits, statements, credit card) must route through the "
-            "helper.",
+            source.count("_optional_fetch("), 7,
+            "All seven optional retrievals (balance, pending entries, "
+            "holdings, scheduled debits, statements, credit card, transfer "
+            "limit) must route through the helper.",
         )
 
 

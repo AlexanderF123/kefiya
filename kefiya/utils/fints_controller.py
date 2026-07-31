@@ -1061,6 +1061,77 @@ class FinTSController:
                 )
                 return conn._send_with_possible_retry(dialog, seg, _extract)
 
+    def get_fints_limits(self):
+        """What the bank allows this account to transfer, and over what period.
+
+        The limit sits on HIUPD, the account information the bank sends at
+        logon -- once as a limit for the account as a whole, and again per
+        business transaction (HKCCS, HKCCM, ...), which is the tighter and more
+        relevant one for a transfer. python-fints parses both but drops them:
+        get_information() never puts them in its result, so they are read off
+        the segment here.
+
+        FinTS Limitart: E per single order, T per day, W per week, M per month,
+        Z per period of ``days`` days.
+
+        :return: list of {"scope", "transaction", "limit_type", "amount",
+            "currency", "days"} -- empty when the bank names no limit, which
+            means unknown, NOT unlimited.
+        """
+        iban = (self.kefiya_login.account_iban or "").replace(" ", "").upper()
+
+        def _amount(value):
+            if value is None:
+                return None, None
+            return (self._amount_from(getattr(value, "amount", None)),
+                    getattr(value, "currency", None))
+
+        rows = []
+        with self.client_session() as conn:
+            upd = getattr(conn, "upd", None)
+            if not upd or not getattr(upd, "segments", None):
+                return rows
+
+            for seg in upd.find_segments("HIUPD"):
+                seg_iban = (getattr(seg, "iban", "") or "").replace(
+                    " ", "").upper()
+                # A login often carries several accounts; only this one's
+                # limit may be used to decide what this login may send.
+                if iban and seg_iban and seg_iban != iban:
+                    continue
+
+                account_limit = getattr(seg, "account_limit", None)
+                if account_limit is not None and getattr(
+                        account_limit, "limit_type", None):
+                    amount, currency = _amount(
+                        getattr(account_limit, "limit_amount", None))
+                    rows.append({
+                        "scope": "account",
+                        "transaction": None,
+                        "limit_type": str(account_limit.limit_type),
+                        "amount": amount,
+                        "currency": currency,
+                        "days": getattr(account_limit, "limit_days", None),
+                    })
+
+                for allowed in (getattr(seg, "allowed_transactions", None)
+                                or []):
+                    if not getattr(allowed, "limit_type", None):
+                        continue
+                    amount, currency = _amount(
+                        getattr(allowed, "limit_amount", None))
+                    rows.append({
+                        "scope": "transaction",
+                        "transaction": str(
+                            getattr(allowed, "transaction", "") or ""),
+                        "limit_type": str(allowed.limit_type),
+                        "amount": amount,
+                        "currency": currency,
+                        "days": getattr(allowed, "limit_days", None),
+                    })
+
+        return rows
+
     def get_fints_information(self):
         """Bank + account capabilities, limits and supported operations
         (FinTS get_information). Returns a nested dict."""

@@ -20,6 +20,12 @@
   "failed_connection",
   "skip_fetch",
   "allowed_sync_days_in_past",
+  "transfer_limit_section",
+  "transfer_limit_amount",
+  "transfer_limit_type",
+  "column_break_limit",
+  "transfer_limit_days",
+  "transfer_limit_checked_on",
   "column_break_ydzf",
   "dialog_state_updated",
   "client_state_updated",
@@ -213,6 +219,41 @@
    "fieldname": "allowed_sync_days_in_past",
    "fieldtype": "Int",
    "label": "Allowed Sync Days in the Past"
+  },
+  {
+   "fieldname": "transfer_limit_section",
+   "fieldtype": "Section Break",
+   "label": "Transfer Limit (from the bank)",
+   "description": "Read from the bank's HIUPD account information. Blank means the bank names no limit for this account -- which is not the same as no limit existing, so treat a blank as unknown."
+  },
+  {
+   "fieldname": "transfer_limit_amount",
+   "fieldtype": "Currency",
+   "label": "Limit Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transfer_limit_type",
+   "fieldtype": "Data",
+   "label": "Limit Type",
+   "read_only": 1,
+   "description": "FinTS Limitart: E per order, T per day, W per week, M per month, Z per period of the given number of days."
+  },
+  {
+   "fieldname": "column_break_limit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "transfer_limit_days",
+   "fieldtype": "Int",
+   "label": "Limit Period (days)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transfer_limit_checked_on",
+   "fieldtype": "Datetime",
+   "label": "Limit Read On",
+   "read_only": 1
   },
   {
    "fieldname": "stored_vop_state",

@@ -229,3 +229,83 @@ class TestSchedulerFrequencyGate(unittest.TestCase):
     def test_the_field_exists_on_the_doctype(self):
         self.assertTrue(
             frappe.get_meta("Kefiya Login").has_field("last_fetch_attempt"))
+
+
+class TestEveryEndpointIsGated(unittest.TestCase):
+    """A @frappe.whitelist() function is callable by any logged-in user.
+
+    Several of them contact the bank, read balances or move money, so each one
+    has to decide for itself who may call it -- the decorator does not. This
+    walks every whitelisted function in the app and insists on a gate.
+    """
+
+    #: A gate does not have to be written out in the function: these helpers
+    #: are gates, and delegating to them is the point of having them.
+    GATE_MARKERS = ("has_permission", "_require_login_read")
+
+    #: Endpoints that legitimately carry no gate of their own, each with the
+    #: reason. Anything not on this list must gate itself.
+    UNGATED_BY_DESIGN = {
+        # Overrides a core method; the core implementation does the checking.
+        "overrides/user.py::update_password",
+        # frappe.get_list applies read permissions and User Permissions, so a
+        # caller only ever sees the accesses they may read.
+        "utils/client.py::get_fetch_groups",
+        # Delegates every login to fetch_all, which gates each one.
+        "utils/client.py::fetch_group",
+        # Returns one boolean from a Settings single. No document data.
+        "utils/client.py::is_tan_enabled",
+        # Answering a permission question IS its job.
+        "utils/client.py::has_page_permission",
+        # frappe.desk.reportview.execute applies permissions itself.
+        "utils/client.py::get_bank_transaction_wizard_list",
+    }
+
+    def _whitelisted(self):
+        import ast
+
+        for base, dirs, files in os.walk(APP_ROOT):
+            dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git")]
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(base, name)
+                with open(path, encoding="utf-8") as handle:
+                    tree = ast.parse(handle.read())
+                for node in ast.walk(tree):
+                    if not isinstance(node, (ast.FunctionDef,
+                                             ast.AsyncFunctionDef)):
+                        continue
+                    decorated = any(
+                        (isinstance(d, ast.Call)
+                         and getattr(d.func, "attr", "") == "whitelist")
+                        or getattr(d, "attr", "") == "whitelist"
+                        for d in node.decorator_list)
+                    if decorated:
+                        rel = os.path.relpath(path, APP_ROOT)
+                        yield rel, node.name, ast.dump(node)
+
+    def test_no_whitelisted_endpoint_is_open(self):
+        open_endpoints = []
+        for rel, name, dumped in self._whitelisted():
+            key = "{0}::{1}".format(rel, name)
+            if key in self.UNGATED_BY_DESIGN:
+                continue
+            if not any(marker in dumped for marker in self.GATE_MARKERS):
+                open_endpoints.append(key)
+
+        self.assertEqual(
+            open_endpoints, [],
+            "These endpoints are callable by any logged-in user without a "
+            "permission check. Add frappe.has_permission(...), or add them to "
+            "UNGATED_BY_DESIGN with the reason.",
+        )
+
+    def test_the_allowlist_has_not_gone_stale(self):
+        """An entry that no longer names a real endpoint hides the next one."""
+        found = {"{0}::{1}".format(rel, name)
+                 for rel, name, _dump in self._whitelisted()}
+        self.assertEqual(
+            sorted(self.UNGATED_BY_DESIGN - found), [],
+            "The allowlist names endpoints that no longer exist.",
+        )

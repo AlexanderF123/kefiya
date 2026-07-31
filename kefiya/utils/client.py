@@ -514,6 +514,20 @@ def fetch_all(kefiya_login, user_scope=None):
         summary["credit_card"] = _optional_fetch(
             summary, "credit_card", "credit_card", _fetch_credit_card)
 
+        # 6) What the bank lets this account transfer. No extra command: the
+        #    limit rides on the account information sent at logon, so reading
+        #    it inside the shared session costs nothing -- and a limit read
+        #    once and never again is the one that silently goes stale and
+        #    starts rejecting payment runs.
+        def _fetch_limit():
+            from kefiya.utils.transfer_limit import refresh_transfer_limit
+
+            return refresh_transfer_limit(
+                kefiya_login, controller=FetchCtl(kefiya_login))
+
+        summary["transfer_limit"] = _optional_fetch(
+            summary, "transfer_limit", "transfer_limit", _fetch_limit)
+
         return summary
 
 
@@ -666,6 +680,10 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
 
     scheduled = _bank_holds_the_date(doc)
 
+    over = _refuse_over_limit([doc])
+    if over:
+        return over
+
     # Guard against a double click resending real money. Claimed atomically
     # just before the bank is contacted, see _claim_send_lock.
     lock_key = "kefiya_transfer_doc:" + transfer_name
@@ -792,6 +810,30 @@ def _announce_due_transfer(doc, due_on):
             "priority": "High",
             "description": description,
         }).insert(ignore_permissions=True)
+
+
+def _refuse_over_limit(docs):
+    """Stop an order the bank would refuse anyway -- and say what to do.
+
+    A bank rejects the WHOLE order when it exceeds the limit, not the part
+    above it. Finding that out from a rejection message means a payment run
+    that paid nothing, so it is checked here first. The whole selection is
+    measured at once: the limit applies to what leaves the account, not to one
+    document.
+
+    :return: an error dict to return to the caller, or None when it fits
+    """
+    from kefiya.utils.transfer_limit import check_batch
+
+    verdict = check_batch(docs)
+    if verdict["ok"]:
+        return None
+
+    return {"status": "error", "over_limit": True,
+            "limit": verdict.get("limit"),
+            "available": verdict.get("available"),
+            "message": verdict["reason"] + " " + _(
+                "Split it over several days, or reduce it.")}
 
 
 def _is_unsupported_schedule(exc):
@@ -980,6 +1022,13 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
         )}
     kefiya_login = docs[0].kefiya_login
 
+    # The bank's limit applies to what leaves the account, so the selection is
+    # measured as a whole. Checking each document on its own would wave through
+    # ten orders that each fit and together do not.
+    over = _refuse_over_limit(docs)
+    if over:
+        return over
+
     # Lock per document, not per account. The single-document endpoint locks
     # the same keys, so a document cannot be sent through both paths at once --
     # which would pay it twice.
@@ -1048,6 +1097,25 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
 
     result["sent"] = transfer_names
     return result
+
+
+@frappe.whitelist()
+def refresh_transfer_limit(kefiya_login, user_scope=None):
+    """Ask the bank what this account may transfer, and store it.
+
+    Reading the limit contacts the bank, and the answer decides whether a
+    payment run is allowed to leave -- so it takes the same write right on the
+    login that a fetch does.
+    """
+    frappe.has_permission("Kefiya Login", ptype="write",
+                          doc=kefiya_login, throw=True)
+
+    from kefiya.utils.fints_controller import FinTSController
+    from kefiya.utils.transfer_limit import refresh_transfer_limit as _refresh
+
+    interactive = {"docname": user_scope or kefiya_login, "enabled": True}
+    return _refresh(kefiya_login,
+                    controller=FinTSController(kefiya_login, interactive))
 
 
 @frappe.whitelist()
