@@ -95,6 +95,21 @@ class KefiyaTransfer(Document):
         if not self.execution_date:
             self.execution_date = now_datetime().date()
 
+        if getdate(self.execution_date) > now_datetime().date():
+            if cint(self.instant_payment):
+                # A real-time transfer is executed within seconds. A date on it
+                # is a contradiction, and no bank offers the combination.
+                frappe.throw(_(
+                    "An instant payment is executed immediately and cannot"
+                    " carry a future execution date."
+                ))
+        elif not cint(self.manage_due_date):
+            # Nothing to hand over: a bank cannot file an order for today or
+            # for a day gone by. Silently correcting this is better than an
+            # error, because the outcome the user wants -- pay it -- is the
+            # same either way.
+            self.manage_due_date = 1
+
         if not self.company and self.kefiya_login:
             self.company = frappe.db.get_value(
                 "Kefiya Login", self.kefiya_login, "company")

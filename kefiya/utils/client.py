@@ -648,6 +648,23 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
         return {"status": "error", "message": _(
             "This transfer was already sent to the bank."
         )}
+    if doc.status == "Scheduled at Bank":
+        return {"status": "error", "message": _(
+            "The bank already holds this transfer for {0}. Change or cancel it"
+            " with your bank."
+        ).format(frappe.utils.formatdate(doc.execution_date))}
+
+    # An order we manage ourselves must not be paid before its day just
+    # because someone pressed send: the date is the whole point of it.
+    if _not_due_yet(doc):
+        return {"status": "error", "message": _(
+            "{0} is due on {1} and is managed here, so it is presented for"
+            " release on that day. To pay it now set the execution date to"
+            " today; to let the bank hold it, untick \"Manage the due date"
+            " ourselves\"."
+        ).format(transfer_name, frappe.utils.formatdate(doc.execution_date))}
+
+    scheduled = _bank_holds_the_date(doc)
 
     # Guard against a double click resending real money. Claimed atomically
     # just before the bank is contacted, see _claim_send_lock.
@@ -676,19 +693,156 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
             payment_reference=transfer_name,
             multiple=count > 1,
             control_sum=control_sum if count > 1 else None,
+            scheduled=scheduled,
         )
-    except Exception:
+    except Exception as exc:
         # Release the lock so the user can retry deliberately; the audit log
         # and the bank statement remain the source of truth.
         frappe.cache().delete_value(lock_key)
+        if scheduled and _is_unsupported_schedule(exc):
+            # The bank cannot file a dated order. Nothing was sent, so the
+            # honest outcome is to keep it here and say so -- not to pay it
+            # today because the requested date could not be honoured.
+            doc.db_set("manage_due_date", 1)
+            return {"status": "error",
+                    "message": _unsupported_schedule_message(doc)}
         raise
 
     status = (result or {}).get("status")
     if status == "submitted":
-        doc.db_set("status", "Sent")
+        doc.db_set("status", "Scheduled at Bank" if scheduled else "Sent")
+        if result.get("task_id"):
+            doc.db_set("bank_task_id", result["task_id"])
     elif status == "vop_mismatch":
         doc.db_set("vop_pending", 1)
     return result
+
+
+def present_due_transfers():
+    """Put transfers whose day has come in front of somebody.
+
+    This is the half of "manage the due date ourselves" that actually happens
+    on the day. It deliberately does NOT send: a credit transfer needs a TAN,
+    and with a decoupled procedure (pushTAN) there is nobody to confirm it at
+    four in the morning -- the run would leave a parked challenge behind and
+    still not have paid anyone. So the order is marked Due and the people who
+    may release it get a ToDo.
+
+    Idempotent: an order already marked Due is not announced twice.
+
+    :return: {"due": int}
+    """
+    from frappe.utils import formatdate, nowdate
+
+    names = frappe.get_all(
+        "Kefiya Transfer",
+        filters={
+            "docstatus": 1,
+            "status": "Approved",
+            "manage_due_date": 1,
+            "on_hold": 0,
+            "execution_date": ("<=", nowdate()),
+        },
+        pluck="name",
+    )
+    for name in names:
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        doc.db_set("status", "Due")
+        try:
+            _announce_due_transfer(doc, formatdate(doc.execution_date))
+        except Exception:
+            # The status is what the outbox is read from; a failed ToDo must
+            # not hide a payment that is due.
+            frappe.log_error(
+                title="Kefiya: could not announce a due transfer",
+                message=frappe.get_traceback(),
+                reference_doctype="Kefiya Transfer",
+                reference_name=name,
+            )
+
+    return {"due": len(names)}
+
+
+def _announce_due_transfer(doc, due_on):
+    """One ToDo per person who may release the transfer."""
+    owners = set()
+    if doc.owner:
+        owners.add(doc.owner)
+    if doc.modified_by:
+        owners.add(doc.modified_by)
+
+    description = _(
+        "Transfer {0} over {1} is due on {2} and needs to be released."
+    ).format(doc.name, frappe.utils.fmt_money(doc.total_amount), due_on)
+
+    for owner in owners:
+        if frappe.db.exists("ToDo", {
+            "reference_type": "Kefiya Transfer",
+            "reference_name": doc.name,
+            "allocated_to": owner,
+            "status": "Open",
+        }):
+            continue
+        frappe.get_doc({
+            "doctype": "ToDo",
+            "allocated_to": owner,
+            "reference_type": "Kefiya Transfer",
+            "reference_name": doc.name,
+            "date": doc.execution_date,
+            "priority": "High",
+            "description": description,
+        }).insert(ignore_permissions=True)
+
+
+def _is_unsupported_schedule(exc):
+    """Did the bank simply not offer the dated-transfer segment?"""
+    try:
+        from fints.exceptions import FinTSUnsupportedOperation
+    except Exception:
+        return False
+    return isinstance(exc, FinTSUnsupportedOperation)
+
+
+def _bank_holds_the_date(doc):
+    """True when the BANK is to keep this order until its execution date.
+
+    Two ways to pay on a future day, and the user picks per transfer, the way
+    StarMoney does it:
+
+    * we keep it -- the order waits in the outbox and is presented for release
+      on the day. Nothing reaches the bank until then, so it can still be
+      changed or dropped here.
+    * the bank keeps it -- the order is handed over now as a dated transfer
+      (HKCSE) and the bank executes it on the day. From then on it can only be
+      changed at the bank, which is why it is not the default.
+
+    A date of today or earlier is never handed over: no bank files an order for
+    a day that has arrived.
+    """
+    from frappe.utils import cint, getdate, nowdate
+
+    if cint(doc.manage_due_date):
+        return False
+    return getdate(doc.execution_date or nowdate()) > getdate(nowdate())
+
+
+def _not_due_yet(doc):
+    """True for an order we manage that has not reached its day."""
+    from frappe.utils import cint, getdate, nowdate
+
+    if not cint(doc.manage_due_date):
+        return False
+    return getdate(doc.execution_date or nowdate()) > getdate(nowdate())
+
+
+def _unsupported_schedule_message(doc):
+    from frappe.utils import formatdate
+
+    return _(
+        "This bank does not offer transfers dated ahead, so it will not hold"
+        " {0} until {1}. The order stays here and is presented for release on"
+        " that day instead."
+    ).format(doc.name, formatdate(doc.execution_date))
 
 
 def _parse_transfer_names(transfer_names):
@@ -788,11 +942,36 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             return {"status": "error", "message": _(
                 "{0} was already sent to the bank."
             ).format(name)}
+        if doc.status == "Scheduled at Bank":
+            return {"status": "error", "message": _(
+                "{0} is already held by the bank for its execution date."
+            ).format(name)}
         if doc.on_hold:
             return {"status": "error", "message": _(
                 "{0} is held back. Release it first or deselect it."
             ).format(name)}
+        if _not_due_yet(doc):
+            return {"status": "error", "message": _(
+                "{0} is due on {1} and is managed here. It is presented for"
+                " release on that day; deselect it."
+            ).format(name, frappe.utils.formatdate(doc.execution_date))}
         docs.append(doc)
+
+    # One message carries one execution date, so a batch cannot mix orders the
+    # bank is to hold with orders that go out now -- the bank would apply one
+    # date to all of them.
+    scheduling = {_bank_holds_the_date(doc) for doc in docs}
+    if len(scheduling) > 1:
+        return {"status": "error", "message": _(
+            "Some of the selected transfers are to be held by the bank and"
+            " some are to go out now. Send them separately."
+        )}
+    scheduled = scheduling.pop() if scheduling else False
+    if scheduled and len({str(doc.execution_date) for doc in docs}) > 1:
+        return {"status": "error", "message": _(
+            "A collective order carries one execution date. The selected"
+            " transfers name different days -- send them separately."
+        )}
 
     logins = {doc.kefiya_login for doc in docs}
     if len(logins) > 1:
@@ -841,10 +1020,16 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             payment_reference=",".join(transfer_names)[:140],
             multiple=count > 1,
             control_sum=control_sum if count > 1 else None,
+            scheduled=scheduled,
         )
-    except Exception:
+    except Exception as exc:
         for key in lock_keys:
             frappe.cache().delete_value(key)
+        if scheduled and _is_unsupported_schedule(exc):
+            for doc in docs:
+                doc.db_set("manage_due_date", 1)
+            return {"status": "error",
+                    "message": _unsupported_schedule_message(docs[0])}
         raise
 
     status = (result or {}).get("status")
@@ -853,7 +1038,10 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
         # marked together -- leaving part of a batch as unsent would invite a
         # second send of money that is already gone.
         for doc in docs:
-            doc.db_set("status", "Sent")
+            doc.db_set("status",
+                       "Scheduled at Bank" if scheduled else "Sent")
+            if result.get("task_id"):
+                doc.db_set("bank_task_id", result["task_id"])
     elif status == "vop_mismatch":
         for doc in docs:
             doc.db_set("vop_pending", 1)

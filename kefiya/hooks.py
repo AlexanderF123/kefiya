@@ -149,7 +149,11 @@ scheduler_events = {
         ]
     },
     "daily": [
-        "kefiya.utils.planned_payment.expire_stale_planned_payments"
+        "kefiya.utils.planned_payment.expire_stale_planned_payments",
+        # Transfers whose due date we keep ourselves. They are presented, not
+        # sent: a credit transfer needs a TAN, and a pushTAN nobody answers
+        # would leave a challenge hanging instead of paying anybody.
+        "kefiya.utils.client.present_due_transfers",
     ]
 }
 
