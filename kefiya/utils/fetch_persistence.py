@@ -192,7 +192,7 @@ def store_credit_card_transactions(kefiya_login, entries):
 # Electronic account statements (documents)
 # --------------------------------------------------------------------------
 
-def download_statements(controller, kefiya_login, listing, limit=12):
+def download_statements(controller, kefiya_login, listing, limit=3):
     """Download the statement documents themselves, not just their names.
 
     The list from HKEKA only says which statements exist; each one has to be
@@ -204,7 +204,9 @@ def download_statements(controller, kefiya_login, listing, limit=12):
 
     :param controller: an initialised FinTSController (reuses the open dialog)
     :param limit: newest N statements per run -- a first fetch can otherwise
-        pull years of PDFs in one request
+        pull years of PDFs in one request, and each one is a separate command
+        on the bank dialog. Deliberately small: the backlog is worked off over
+        the next few runs rather than in one long request.
     :return: {"available": int, "downloaded": int, "already_present": int}
     """
     entries = [_as_dict(e) for e in (listing or [])]
@@ -238,13 +240,19 @@ def download_statements(controller, kefiya_login, listing, limit=12):
         try:
             content = controller.get_fints_statement(number=number, year=year)
         except Exception:
+            # Stop at the first failure instead of asking for the remaining
+            # eleven. Every statement rides the same dialog, so once it is
+            # broken each further request fails the same way -- one bad login
+            # produced 59 identical Error Log entries that way, from five
+            # accounts. One entry per login says the same thing.
+            result["failed_at"] = number
             frappe.log_error(
                 title="Kefiya: statement download failed",
                 message=frappe.get_traceback(),
                 reference_doctype="Kefiya Login",
                 reference_name=kefiya_login,
             )
-            continue
+            break
 
         payload = _statement_payload(content)
         if not payload:
