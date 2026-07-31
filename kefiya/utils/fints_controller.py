@@ -929,6 +929,13 @@ class FinTSController:
 
         :return: list of entries the bank has not booked yet
         """
+        from kefiya.utils.mt940_compat import ensure_optional_timezone_is_optional
+
+        # Without this the pending block of several Sparkassen cannot be parsed
+        # at all: its date carries an optional timezone, and the parser reads a
+        # missing one as int(None). See mt940_compat.
+        ensure_optional_timezone_is_optional()
+
         allowed_days = cint(self.kefiya_login.allowed_sync_days_in_past) or 90
         if start_date is None:
             start_date = now_datetime().date() - relativedelta(days=allowed_days)

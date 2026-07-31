@@ -243,6 +243,23 @@ def _claim_send_lock(lock_key, seconds=600):
         cache.make_key(lock_key), frappe.session.user, ex=seconds, nx=True))
 
 
+def _created_transactions(result):
+    """The bookings an import actually created.
+
+    Both controllers answer with {"transactions": [...], "payments": [...]},
+    where "payments" are the Bank Transactions that were created and
+    "transactions" is the raw material they were built from. A list is accepted
+    as well so a future controller returning one is counted, not miscounted.
+    """
+    if not result:
+        return []
+    if isinstance(result, dict):
+        return result.get("payments") or []
+    if isinstance(result, (list, tuple)):
+        return list(result)
+    return []
+
+
 def _optional_fetch(summary, key, label, fn):
     """Run one best-effort extra fetch, telling absent from broken apart.
 
@@ -271,6 +288,11 @@ def _optional_fetch(summary, key, label, fn):
                 exc, FinTSUnsupportedOperation):
             summary.setdefault("unsupported", []).append(label)
             return None
+        if _is_refused_by_the_bank(exc):
+            summary.setdefault("unsupported", []).append(label)
+            summary.setdefault("unsupported_details", {})[label] = _(
+                "the bank refuses this query for this account")
+            return None
         summary["errors"].append(label)
         # The label alone says WHICH retrieval failed, never why -- the reason
         # sat in the Error Log, where nobody running a collective fetch looks.
@@ -283,6 +305,37 @@ def _optional_fetch(summary, key, label, fn):
             message=frappe.get_traceback(),
         )
         return None
+
+
+def _is_refused_by_the_bank(exc):
+    """Did the bank simply decline the request, rather than anything breaking?
+
+    python-fints turns response code 9010 -- the bank's generic "cannot process
+    this order" -- into FinTSClientError("Error during dialog initialization,
+    could not fetch BPD. Please check that you passed the correct bank
+    identifier..."), no matter which segment was refused. The message is about
+    the wrong thing entirely: nothing is wrong with the bank identifier and the
+    dialog is not broken. In one collective run this single misreading produced
+    24 Error Log entries and told the user that every account had a defective
+    connection, when the truth was that none of them is a securities account
+    and none of them offers electronic statements.
+
+    That the dialog survives is not an assumption: every retrieval AFTER the
+    refused one answered normally in the same session.
+    """
+    try:
+        from fints.exceptions import (
+            FinTSClientError, FinTSClientPINError, FinTSSCARequiredError,
+        )
+    except Exception:
+        return False
+    # Both of these are FinTSClientError subclasses and neither is a refusal:
+    # a blocked PIN or a demand for strong authentication has to stay loud.
+    if isinstance(exc, (FinTSClientPINError, FinTSSCARequiredError)):
+        return False
+    if not isinstance(exc, FinTSClientError):
+        return False
+    return "could not fetch BPD" in str(exc)
 
 
 def _short_reason(exc, limit=180):
@@ -405,9 +458,15 @@ def fetch_all(kefiya_login, user_scope=None):
                 summary["message"] = str(e)
                 return summary
             raise
+        # import_fints_transactions answers with a DICT --
+        # {"transactions": [...], "payments": [...]} -- so len() of it counted
+        # its two keys. Every account in the collective log therefore reported
+        # "2 neu", whether the bank had sent nothing or eighteen bookings. The
+        # bookings that were actually created are the "payments".
+        created = _created_transactions(new_txns)
         summary["transactions"] = {
             "import": kefiya_import.name,
-            "new_count": len(new_txns) if new_txns else 0,
+            "new_count": len(created),
         }
 
         # The FinTS-capability reads (balance, scheduled debits, statements, credit
