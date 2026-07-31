@@ -751,9 +751,15 @@ class FinTSController:
                     dialog, hkcaz, account, start_date, end_date)
                 if isinstance(result, NeedRetryResponse):
                     return result
-                streams = list(result[0])
-                if include_pending and result[1]:
-                    streams += list(result[1])
+                streams = [x for x in result[0] if x]
+                if include_pending:
+                    # python-fints appends seg.statement_pending unfiltered, so
+                    # a bank that sends no pending block yields [None] -- which
+                    # is truthy. camt053_to_dict(None) then dies on the parser,
+                    # the shared dialog is retired, and every later command of
+                    # that login fails with "could not fetch BPD". One missing
+                    # optional field took out holdings and statements too.
+                    streams += [x for x in (result[1] or []) if x]
                 return [
                     Transaction(txn)
                     for stream in streams
