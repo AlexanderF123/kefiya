@@ -113,9 +113,14 @@ class TestMidFetchTanRequest(unittest.TestCase):
             "-- that unpacking is the bug being fixed.",
         )
         self.assertIn(
-            "booked_streams = result[0]", raw,
-            "Only a real result may be unpacked, and only after the challenge "
-            "has been ruled out.",
+            "if isinstance(result, NeedRetryResponse):", raw,
+            "The challenge has to be ruled out BEFORE the result is indexed; "
+            "indexing it first is exactly what killed the challenge.",
+        )
+        self.assertLess(
+            raw.index("isinstance(result, NeedRetryResponse)"),
+            raw.index("result[0]"),
+            "Order matters: the check must come before the first subscript.",
         )
 
     def test_library_drift_falls_back_to_the_public_call(self):

@@ -187,8 +187,14 @@ class TestSchedulerFrequencyGate(unittest.TestCase):
         source = self._source()
         self.assertIn("last_fetch_attempt", source)
         self.assertIn(
-            "max(seen)", source,
-            "The newer of last success and last attempt decides.",
+            "ATTEMPT_RETRY_GAP_DAYS", source,
+            "A failed run has to close the gate too, or a login that can never "
+            "succeed is retried three times an hour forever.",
+        )
+        self.assertIn(
+            "if last_attempt and (today - getdate(last_attempt)).days", source,
+            "Two separate gates: a success closes it for the configured "
+            "frequency, a bare attempt only until the next day.",
         )
 
     def test_the_attempt_is_recorded_on_both_paths(self):

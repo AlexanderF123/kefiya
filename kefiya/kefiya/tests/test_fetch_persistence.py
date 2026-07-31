@@ -201,8 +201,14 @@ class TestPendingFetchIsSafe(unittest.TestCase):
         raw = inspect.getsource(FinTSController._get_transactions_raw)
         self.assertIn("include_pending=False", raw)
         self.assertIn(
-            "if include_pending and result[1]:", raw,
+            "if include_pending:", raw,
             "The camt path has to add the pending streams, not ignore them.",
+        )
+        self.assertIn(
+            "streams += [x for x in (result[1] or []) if x]", raw,
+            "And it has to filter them: a bank that sends no pending block "
+            "yields [None], which is truthy, and the parser dies on it -- one "
+            "missing optional field took out holdings and statements too.",
         )
 
 

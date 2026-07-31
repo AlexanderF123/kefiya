@@ -166,8 +166,16 @@ class TestRetireOnFailure(unittest.TestCase):
         """Decided from the stored BPD without touching the dialog -- and it
         is the common case: twelve of them in one collective run."""
         source = inspect.getsource(FinTSController.client_session)
-        self.assertIn("FinTSUnsupportedOperation", source)
-        self.assertIn("if not (FinTSUnsupportedOperation", source)
+        self.assertIn(
+            "if not _is_unsupported_operation(exc):", source,
+            "A segment the bank does not offer must not retire the shared "
+            "dialog -- twelve of them in one collective run would tear it "
+            "down twelve times.",
+        )
+        self.assertIn(
+            "FinTSUnsupportedOperation",
+            inspect.getsource(fints_controller._is_unsupported_operation),
+        )
 
     def test_a_parked_dialog_is_removed_but_not_ended(self):
         source = inspect.getsource(fints_controller._retire_connection)
@@ -327,7 +335,11 @@ class TestFetchGroup(unittest.TestCase):
         return inspect.getsource(client.fetch_group)
 
     def test_the_group_runs_inside_one_session(self):
-        self.assertIn("with fints_session():", self._source())
+        """_fetch_session() is the session in legacy-safe form: it opens a
+        shared dialog where the whole fetch is session-aware and a no-op where
+        it is not. Asserting the raw context manager missed that rename."""
+        self.assertIn("with _fetch_session():", self._source())
+        self.assertIn("fints_session", inspect.getsource(client._fetch_session))
 
     def test_one_failure_does_not_abandon_the_rest(self):
         source = self._source()

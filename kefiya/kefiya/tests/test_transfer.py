@@ -172,7 +172,12 @@ class TestOutbox(unittest.TestCase):
         """Leaving part of an accepted batch unsent invites paying it twice."""
         source = inspect.getsource(client.send_transfer_outbox)
         self.assertIn("for doc in docs:", source)
-        self.assertIn('db_set("status", "Sent")', source)
+        self.assertIn(
+            '"Scheduled at Bank" if scheduled else "Sent"', source,
+            "Every document of an accepted batch is marked in the same pass. "
+            "Which of the two states it gets depends on whether the bank now "
+            "holds it for a later date or has already paid it.",
+        )
 
     def test_hold_is_permitted_after_approval(self):
         """Holding changes when an order is sent, not what it says."""
