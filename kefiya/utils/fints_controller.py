@@ -1014,7 +1014,8 @@ class FinTSController:
         the client's ``_send_with_possible_retry`` just like a statement fetch.
 
         :return: list of dicts, one per HISAL segment:
-            {iban, currency, balance, line_of_credit, available_amount}
+            {iban, currency, balance, balance_date, line_of_credit,
+             available_amount}
         """
         from fints.segments.saldo import HKSAL5, HKSAL6, HKSAL7
 
@@ -1025,14 +1026,22 @@ class FinTSController:
             rows = []
             for hisal in response.response_segments(command_seg, "HISAL"):
                 balance = None
+                # The booked balance carries the date it refers to. Without it
+                # a running balance on the bookings has no anchor: "the balance
+                # after this transaction" is only true if we know which
+                # transactions the bank had already counted.
+                balance_date = None
                 try:
-                    balance = hisal.balance_booked.as_mt940_Balance().amount.amount
+                    booked = hisal.balance_booked.as_mt940_Balance()
+                    balance = booked.amount.amount
+                    balance_date = getattr(booked, "date", None)
                 except Exception:
                     balance = None
                 rows.append({
                     "iban": iban,
                     "currency": getattr(hisal, "currency", None),
                     "balance": balance,
+                    "balance_date": balance_date,
                     "line_of_credit": self._amount_from(
                         getattr(hisal, "line_of_credit", None)),
                     "available_amount": self._amount_from(

@@ -54,6 +54,44 @@ class TestUnsupportedSegmentsAreNotErrors(unittest.TestCase):
         )
 
 
+class TestFailureReasonsReachTheUser(unittest.TestCase):
+    """"errors": ["statements"] says WHICH retrieval failed, never why.
+
+    The reason sat in the Error Log, where nobody running a collective fetch
+    looks -- and the browser log is asked to name a reason per account. It
+    travels with the summary now, shortened and without account identifiers:
+    a fetch report is exactly the place where an IBAN must not appear in full.
+    """
+
+    def test_the_reason_travels_with_the_summary(self):
+        source = inspect.getsource(client._optional_fetch)
+        self.assertIn('summary.setdefault("error_details", {})[label]', source)
+        self.assertIn("_short_reason(exc)", source)
+
+    def test_an_unsupported_segment_gets_no_reason(self):
+        """It is not a failure, so it must not read like one."""
+        source = inspect.getsource(client._optional_fetch)
+        before = source.index('summary.setdefault("unsupported"')
+        after = source.index('summary["errors"].append')
+        self.assertLess(
+            before, after,
+            "The unsupported branch returns before any reason is recorded.")
+
+    def test_account_identifiers_are_masked(self):
+        self.assertEqual(
+            client._short_reason(Exception("Konto DE02120300000000202051 fehlt")),
+            "Konto ...2051 fehlt")
+        self.assertEqual(
+            client._short_reason(Exception("Kontonummer 1234567890 unbekannt")),
+            "Kontonummer ...7890 unbekannt")
+
+    def test_it_is_bounded(self):
+        self.assertLessEqual(len(client._short_reason(Exception("x" * 500))), 180)
+
+    def test_a_message_less_exception_still_says_something(self):
+        self.assertEqual(client._short_reason(ValueError()), "ValueError")
+
+
 class TestMidFetchTanRequest(unittest.TestCase):
     """An expired SCA turns a statement fetch into a TAN challenge.
 

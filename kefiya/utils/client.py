@@ -272,11 +272,41 @@ def _optional_fetch(summary, key, label, fn):
             summary.setdefault("unsupported", []).append(label)
             return None
         summary["errors"].append(label)
+        # The label alone says WHICH retrieval failed, never why -- the reason
+        # sat in the Error Log, where nobody running a collective fetch looks.
+        # The log in the browser asks for a reason per account, so one short,
+        # masked line travels with the summary; the full traceback stays in the
+        # Error Log as before.
+        summary.setdefault("error_details", {})[label] = _short_reason(exc)
         frappe.log_error(
             title="Kefiya fetch_all: {0} failed".format(label),
             message=frappe.get_traceback(),
         )
         return None
+
+
+def _short_reason(exc, limit=180):
+    """One readable line for the UI -- without account identifiers in it.
+
+    An exception message from the bank can quote the account it was about, and
+    a fetch report is exactly the place where an IBAN must not appear in full.
+    Anything that looks like an IBAN or an account number is reduced to its
+    last four digits, the same rule the rest of the app follows.
+    """
+    import re
+
+    text = " ".join(str(exc or "").split()) or exc.__class__.__name__
+
+    def _mask_iban(match):
+        token = match.group(0)
+        return "..." + token[-4:]
+
+    text = re.sub(r"\b[A-Z]{2}\d{2}[A-Za-z0-9]{8,26}\b", _mask_iban, text)
+    text = re.sub(r"\b\d{8,}\b", _mask_iban, text)
+
+    if len(text) > limit:
+        text = text[:limit - 1].rstrip() + "…"
+    return text
 
 
 @frappe.whitelist()
@@ -393,6 +423,16 @@ def fetch_all(kefiya_login, user_scope=None):
             stored = fetch_persistence.store_balance(
                 kefiya_login, rows if isinstance(rows, list) else [])
             stored["rows"] = rows
+            # The same number, counted backwards over the bookings that were
+            # just fetched: each of them gets the balance as it stood after it.
+            # Runs here and not in store_balance because only the caller knows
+            # which window the bank was asked for -- outside that window the
+            # backward count has no guarantee of being gap-free.
+            if stored.get("stored"):
+                stored["running"] = fetch_persistence.apply_running_balance(
+                    kefiya_login, stored.get("balance"),
+                    balance_date=stored.get("balance_date"),
+                    from_date=kefiya_import.from_date)
             return stored
 
         summary["balance"] = _optional_fetch(
