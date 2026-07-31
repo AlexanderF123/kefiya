@@ -86,10 +86,90 @@ def store_balance(kefiya_login, rows):
         "stored": True,
         "bank_account": account.name,
         "balance": flt(balance),
+        "balance_date": row.get("balance_date"),
         "line_of_credit": row.get("line_of_credit"),
         "available_amount": row.get("available_amount"),
         "currency": row.get("currency"),
     }
+
+
+def apply_running_balance(kefiya_login, balance, balance_date=None,
+                          from_date=None):
+    """Write the balance as it stood after each booking onto the transactions.
+
+    The bank only ever states one number: the balance right now. The balance
+    after an individual booking is not sent, it has to be counted backwards --
+    start at the current balance and undo one transaction after the other,
+    newest first.
+
+    That subtraction is only correct while nothing is missing in between. So it
+    is deliberately bounded to the window that was just fetched from the bank
+    ([from_date .. balance_date]): inside it the bank delivered every booking,
+    outside it we cannot know. Older transactions keep an empty field rather
+    than a number that looks right and is not -- and each run fills its own
+    window, so the covered stretch grows by itself.
+
+    Two known limits, both accepted:
+      * Within one calendar day the booking order is not part of MT940, so the
+        intermediate values of a day may be attributed in the wrong order. The
+        value before the first and after the last booking of a day is right.
+      * Pending entries are not part of the booked balance and are not counted
+        here either -- which is exactly why they live in the forecast.
+
+    :return: {"updated": int, "from": date|None, "to": date|None}
+    """
+    result = {"updated": 0, "from": None, "to": None}
+    if balance is None:
+        result["reason"] = "no balance"
+        return result
+
+    bank_account = frappe.db.get_value(
+        "Kefiya Login", kefiya_login, "bank_account")
+    if not bank_account:
+        result["reason"] = "no bank account linked"
+        return result
+
+    # The field is a Custom Field on this instance, not part of ERPNext, so
+    # its absence must not fail a fetch that has already done its work.
+    if not frappe.get_meta("Bank Transaction").has_field("bank_balance"):
+        result["reason"] = "field bank_balance not installed"
+        return result
+
+    anchor = getdate(balance_date) if balance_date else now_datetime().date()
+    start = getdate(from_date) if from_date else None
+    if not start:
+        result["reason"] = "no fetch window"
+        return result
+
+    filters = {
+        "bank_account": bank_account,
+        "docstatus": 1,
+        "date": ("between", [start, anchor]),
+    }
+    rows = frappe.get_all(
+        "Bank Transaction", filters=filters,
+        fields=["name", "deposit", "withdrawal", "bank_balance"],
+        # Newest first: the counting starts at the known current balance.
+        order_by="date desc, creation desc, name desc")
+    if not rows:
+        result["reason"] = "no bookings in the window"
+        return result
+
+    running = flt(balance)
+    for row in rows:
+        if flt(row.bank_balance) != flt(running):
+            # A submitted document: db_set is the documented way to update one,
+            # and the alternative -- allow_on_submit on someone else's custom
+            # field -- would be a change to the site, not to this app. No
+            # amount, no accounting field is touched, only this snapshot.
+            frappe.get_doc("Bank Transaction", row.name).db_set(
+                "bank_balance", flt(running), update_modified=False)
+            result["updated"] += 1
+        running = flt(running) - flt(row.deposit) + flt(row.withdrawal)
+
+    result["from"] = start
+    result["to"] = anchor
+    return result
 
 
 def _coerce_amount(value):

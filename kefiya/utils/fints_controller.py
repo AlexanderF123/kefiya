@@ -1014,7 +1014,8 @@ class FinTSController:
         the client's ``_send_with_possible_retry`` just like a statement fetch.
 
         :return: list of dicts, one per HISAL segment:
-            {iban, currency, balance, line_of_credit, available_amount}
+            {iban, currency, balance, balance_date, line_of_credit,
+             available_amount}
         """
         from fints.segments.saldo import HKSAL5, HKSAL6, HKSAL7
 
@@ -1025,14 +1026,22 @@ class FinTSController:
             rows = []
             for hisal in response.response_segments(command_seg, "HISAL"):
                 balance = None
+                # The booked balance carries the date it refers to. Without it
+                # a running balance on the bookings has no anchor: "the balance
+                # after this transaction" is only true if we know which
+                # transactions the bank had already counted.
+                balance_date = None
                 try:
-                    balance = hisal.balance_booked.as_mt940_Balance().amount.amount
+                    booked = hisal.balance_booked.as_mt940_Balance()
+                    balance = booked.amount.amount
+                    balance_date = getattr(booked, "date", None)
                 except Exception:
                     balance = None
                 rows.append({
                     "iban": iban,
                     "currency": getattr(hisal, "currency", None),
                     "balance": balance,
+                    "balance_date": balance_date,
                     "line_of_credit": self._amount_from(
                         getattr(hisal, "line_of_credit", None)),
                     "available_amount": self._amount_from(
@@ -1051,6 +1060,77 @@ class FinTSController:
                     all_accounts=False,
                 )
                 return conn._send_with_possible_retry(dialog, seg, _extract)
+
+    def get_fints_limits(self):
+        """What the bank allows this account to transfer, and over what period.
+
+        The limit sits on HIUPD, the account information the bank sends at
+        logon -- once as a limit for the account as a whole, and again per
+        business transaction (HKCCS, HKCCM, ...), which is the tighter and more
+        relevant one for a transfer. python-fints parses both but drops them:
+        get_information() never puts them in its result, so they are read off
+        the segment here.
+
+        FinTS Limitart: E per single order, T per day, W per week, M per month,
+        Z per period of ``days`` days.
+
+        :return: list of {"scope", "transaction", "limit_type", "amount",
+            "currency", "days"} -- empty when the bank names no limit, which
+            means unknown, NOT unlimited.
+        """
+        iban = (self.kefiya_login.account_iban or "").replace(" ", "").upper()
+
+        def _amount(value):
+            if value is None:
+                return None, None
+            return (self._amount_from(getattr(value, "amount", None)),
+                    getattr(value, "currency", None))
+
+        rows = []
+        with self.client_session() as conn:
+            upd = getattr(conn, "upd", None)
+            if not upd or not getattr(upd, "segments", None):
+                return rows
+
+            for seg in upd.find_segments("HIUPD"):
+                seg_iban = (getattr(seg, "iban", "") or "").replace(
+                    " ", "").upper()
+                # A login often carries several accounts; only this one's
+                # limit may be used to decide what this login may send.
+                if iban and seg_iban and seg_iban != iban:
+                    continue
+
+                account_limit = getattr(seg, "account_limit", None)
+                if account_limit is not None and getattr(
+                        account_limit, "limit_type", None):
+                    amount, currency = _amount(
+                        getattr(account_limit, "limit_amount", None))
+                    rows.append({
+                        "scope": "account",
+                        "transaction": None,
+                        "limit_type": str(account_limit.limit_type),
+                        "amount": amount,
+                        "currency": currency,
+                        "days": getattr(account_limit, "limit_days", None),
+                    })
+
+                for allowed in (getattr(seg, "allowed_transactions", None)
+                                or []):
+                    if not getattr(allowed, "limit_type", None):
+                        continue
+                    amount, currency = _amount(
+                        getattr(allowed, "limit_amount", None))
+                    rows.append({
+                        "scope": "transaction",
+                        "transaction": str(
+                            getattr(allowed, "transaction", "") or ""),
+                        "limit_type": str(allowed.limit_type),
+                        "amount": amount,
+                        "currency": currency,
+                        "days": getattr(allowed, "limit_days", None),
+                    })
+
+        return rows
 
     def get_fints_information(self):
         """Bank + account capabilities, limits and supported operations
@@ -1226,7 +1306,7 @@ class FinTSController:
 
     def submit_sepa_transfer(self, pain_xml, instant_payment=False,
                              payment_reference=None, multiple=False,
-                             control_sum=None):
+                             control_sum=None, scheduled=False):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
         Requires a TAN: if the bank asks for one, the request is persisted and
@@ -1244,10 +1324,24 @@ class FinTSController:
         :param control_sum: total of all payments, which the bank checks a
             collective order against. Required by the standard whenever
             ``multiple`` is set.
-        :return: {"status": "submitted" | "tan_required", ...}
+        :param scheduled: hand the order to the BANK as a dated transfer
+            (HKCSE / HKCME) instead of sending it now. The date comes from the
+            pain message's ReqdExctnDt. Use this for "let the bank manage the
+            due date"; when we manage it ourselves the payment simply waits in
+            the outbox and is sent on the day as a normal transfer.
+        :return: {"status": "submitted" | "tan_required", ...}; a scheduled
+            order additionally carries the bank's order identifier as
+            ``task_id`` where the bank supplies one.
         """
         instant_payment = bool(cint(instant_payment))
         multiple = bool(cint(multiple))
+        scheduled = bool(cint(scheduled))
+        if scheduled and instant_payment:
+            # A real-time transfer is executed within seconds; a date on it is
+            # a contradiction, and no bank offers the combination.
+            frappe.throw(_(
+                "An instant payment cannot be scheduled for a later date."
+            ))
         if multiple and control_sum is None:
             frappe.throw(_(
                 "A collective transfer requires a control sum."
@@ -1264,8 +1358,13 @@ class FinTSController:
 
         with self.fints_connection:
             account = self._require_fints_account()
-            response = self.fints_connection.sepa_transfer(
-                account, pain_xml, **kwargs)
+            if scheduled:
+                response = self._send_scheduled_transfer(
+                    account, pain_xml, multiple=multiple,
+                    control_sum=control_sum)
+            else:
+                response = self.fints_connection.sepa_transfer(
+                    account, pain_xml, **kwargs)
             vop = self._vop_mismatch(response)
             if vop is not None:
                 # Verification of Payee mismatch: the bank could not confirm the
@@ -1294,7 +1393,72 @@ class FinTSController:
                     self.kefiya_login.name
                 ),
             )
-            return {"status": "submitted"}
+            result = {"status": "submitted"}
+            if scheduled:
+                # The identifier under which the bank now holds the dated
+                # order. Without it the order can never be changed or called
+                # back through us again, only in the banking app.
+                result["task_id"] = (
+                    getattr(response, "data", None) or {}).get("task_id")
+            return result
+
+    def _send_scheduled_transfer(self, account, pain_xml, multiple=False,
+                                 control_sum=None, currency="EUR"):
+        """Hand a dated transfer to the bank (HKCSE / HKCME).
+
+        python-fints stops at the immediate transfer, so this mirrors its
+        sepa_transfer internals with the segments defined in fints_segments --
+        the same approach get_fints_balance takes for HKSAL. TAN and
+        Verification of Payee are handled by the library's own send path, so a
+        dated order is authorised exactly like an immediate one.
+
+        The execution date is not passed here: it lives inside the pain.001 as
+        ReqdExctnDt, which is what makes the message a dated order at all.
+
+        Raises FinTSUnsupportedOperation when the account does not offer dated
+        transfers -- the caller turns that into "your bank will not hold this
+        one, so we will".
+        """
+        from kefiya.utils.fints_segments import HKCME1, HKCSE1, read_task_id
+
+        conn = self.fints_connection
+        pain_descriptor = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
+
+        with conn._get_dialog() as dialog:
+            command_class = HKCME1 if multiple else HKCSE1
+            # Deliberately without return_parameter_segment: reading
+            # parameter.sum_amount_required would need a typed HICMES class we
+            # do not define. The standard requires the control sum on every
+            # collective order anyway, and the caller already refuses to build
+            # one without it.
+            command = conn._find_highest_supported_command(command_class)
+
+            seg = command(
+                account=command._fields["account"].type.from_sepa_account(
+                    account),
+                sepa_descriptor=pain_descriptor,
+                sepa_pain_message=pain_xml.encode()
+                if isinstance(pain_xml, str) else pain_xml,
+            )
+            if multiple:
+                seg.sum_amount.amount = control_sum
+                seg.sum_amount.currency = currency
+                # request_single_booking is left at its default, exactly as the
+                # immediate collective order does it. Asking for it without
+                # being able to read single_booking_allowed from the bank's
+                # parameters is how a whole payment run gets rejected.
+
+            def _resume(command_seg, response):
+                # The library's own status mapping, so a dated order reports
+                # success and failure like an immediate one; only the order
+                # identifier is added on top.
+                result = conn._continue_sepa_transfer(command_seg, response)
+                task_id = read_task_id(response)
+                if task_id:
+                    result.data["task_id"] = task_id
+                return result
+
+            return conn._send_pay_with_possible_retry(dialog, seg, _resume)
 
     def import_fints_transactions(self, kefiya_import):
         """Create payment entries by FinTS transactions.

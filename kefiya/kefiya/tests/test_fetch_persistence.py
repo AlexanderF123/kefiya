@@ -59,6 +59,60 @@ class TestBalanceIsStored(unittest.TestCase):
         self.assertTrue(meta.has_field("custom_credit_line"))
 
 
+class TestBalanceOnTheBookings(unittest.TestCase):
+    """The bank states one number: the balance now. The balance after an
+    individual booking has to be counted backwards from it -- and that count is
+    only true where nothing is missing in between."""
+
+    def _source(self):
+        return inspect.getsource(fetch_persistence.apply_running_balance)
+
+    def test_it_counts_backwards_from_the_current_balance(self):
+        source = self._source()
+        self.assertIn('order_by="date desc', source)
+        self.assertIn(
+            "running = flt(running) - flt(row.deposit) + flt(row.withdrawal)",
+            source,
+            "Undoing a booking means subtracting what came in and adding back "
+            "what went out.",
+        )
+
+    def test_only_the_window_that_was_just_fetched_is_filled(self):
+        """Outside it a gap cannot be ruled out, and a wrong balance that
+        looks right is worse than an empty field."""
+        source = self._source()
+        self.assertIn('"date": ("between", [start, anchor])', source)
+        self.assertIn('result["reason"] = "no fetch window"', source)
+
+    def test_drafts_are_not_bookings(self):
+        source = self._source()
+        self.assertIn('"docstatus": 1', source)
+
+    def test_the_anchor_is_the_balance_date(self):
+        """A booking the bank had not counted yet must not be counted here."""
+        source = self._source()
+        self.assertIn("getdate(balance_date)", source)
+        controller = inspect.getsource(FinTSController.get_fints_balance)
+        self.assertIn('"balance_date": balance_date', controller)
+
+    def test_a_missing_custom_field_does_not_fail_the_fetch(self):
+        source = self._source()
+        self.assertIn('has_field("bank_balance")', source)
+
+    def test_it_is_reached_from_the_fetch(self):
+        source = inspect.getsource(client.fetch_all)
+        self.assertIn("apply_running_balance", source)
+        self.assertIn("from_date=kefiya_import.from_date", source)
+
+    def test_repeating_a_fetch_writes_nothing(self):
+        source = self._source()
+        self.assertIn("if flt(row.bank_balance) != flt(running):", source)
+
+    def test_the_field_exists_on_this_instance(self):
+        self.assertTrue(
+            frappe.get_meta("Bank Transaction").has_field("bank_balance"))
+
+
 class TestPendingEntriesGoIntoTheForecast(unittest.TestCase):
     """A pending entry is a payment the bank accepted but has not booked --
     which is what the forecast is for, and why payment_kind already carries a
@@ -147,8 +201,14 @@ class TestPendingFetchIsSafe(unittest.TestCase):
         raw = inspect.getsource(FinTSController._get_transactions_raw)
         self.assertIn("include_pending=False", raw)
         self.assertIn(
-            "if include_pending and result[1]:", raw,
+            "if include_pending:", raw,
             "The camt path has to add the pending streams, not ignore them.",
+        )
+        self.assertIn(
+            "streams += [x for x in (result[1] or []) if x]", raw,
+            "And it has to filter them: a bank that sends no pending block "
+            "yields [None], which is truthy, and the parser dies on it -- one "
+            "missing optional field took out holdings and statements too.",
         )
 
 

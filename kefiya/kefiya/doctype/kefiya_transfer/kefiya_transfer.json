@@ -12,6 +12,7 @@
   "company",
   "column_break_head",
   "execution_date",
+  "manage_due_date",
   "instant_payment",
   "status",
   "on_hold",
@@ -23,6 +24,7 @@
   "payment_count",
   "bank_section",
   "bank_reference",
+  "bank_task_id",
   "vop_pending",
   "amended_from"
  ],
@@ -55,9 +57,19 @@
    "fieldtype": "Column Break"
   },
   {
+   "description": "The day the money is to leave the account. Today means now.",
    "fieldname": "execution_date",
    "fieldtype": "Date",
    "label": "Execution Date"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.execution_date",
+   "description": "Ticked, the payment waits here and is presented for release on its execution date. Unticked, it is handed to the bank straight away and the BANK holds it until the date (FinTS HKCSE) -- it then cannot be changed here any more, only at the bank.",
+   "fieldname": "manage_due_date",
+   "fieldtype": "Check",
+   "label": "Manage the due date ourselves",
+   "allow_on_submit": 1
   },
   {
    "default": "0",
@@ -72,7 +84,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Draft\nApproved\nOn Hold\nSent\nFailed",
+   "options": "Draft\nApproved\nOn Hold\nDue\nScheduled at Bank\nSent\nFailed",
    "read_only": 1,
    "allow_on_submit": 1
   },
@@ -118,6 +130,14 @@
    "fieldname": "bank_reference",
    "fieldtype": "Small Text",
    "label": "Bank Response",
+   "read_only": 1,
+   "allow_on_submit": 1
+  },
+  {
+   "description": "The identifier the bank filed the dated order under. It is what a later change or cancellation at the bank refers to.",
+   "fieldname": "bank_task_id",
+   "fieldtype": "Data",
+   "label": "Bank Order Reference",
    "read_only": 1,
    "allow_on_submit": 1
   },

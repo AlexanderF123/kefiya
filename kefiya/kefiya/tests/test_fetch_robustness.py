@@ -47,11 +47,49 @@ class TestUnsupportedSegmentsAreNotErrors(unittest.TestCase):
             "_optional_fetch and will keep spamming the Error Log.",
         )
         self.assertEqual(
-            source.count("_optional_fetch("), 6,
-            "All six optional retrievals (balance, pending entries, holdings, "
-            "scheduled debits, statements, credit card) must route through the "
-            "helper.",
+            source.count("_optional_fetch("), 7,
+            "All seven optional retrievals (balance, pending entries, "
+            "holdings, scheduled debits, statements, credit card, transfer "
+            "limit) must route through the helper.",
         )
+
+
+class TestFailureReasonsReachTheUser(unittest.TestCase):
+    """"errors": ["statements"] says WHICH retrieval failed, never why.
+
+    The reason sat in the Error Log, where nobody running a collective fetch
+    looks -- and the browser log is asked to name a reason per account. It
+    travels with the summary now, shortened and without account identifiers:
+    a fetch report is exactly the place where an IBAN must not appear in full.
+    """
+
+    def test_the_reason_travels_with_the_summary(self):
+        source = inspect.getsource(client._optional_fetch)
+        self.assertIn('summary.setdefault("error_details", {})[label]', source)
+        self.assertIn("_short_reason(exc)", source)
+
+    def test_an_unsupported_segment_gets_no_reason(self):
+        """It is not a failure, so it must not read like one."""
+        source = inspect.getsource(client._optional_fetch)
+        before = source.index('summary.setdefault("unsupported"')
+        after = source.index('summary["errors"].append')
+        self.assertLess(
+            before, after,
+            "The unsupported branch returns before any reason is recorded.")
+
+    def test_account_identifiers_are_masked(self):
+        self.assertEqual(
+            client._short_reason(Exception("Konto DE02120300000000202051 fehlt")),
+            "Konto ...2051 fehlt")
+        self.assertEqual(
+            client._short_reason(Exception("Kontonummer 1234567890 unbekannt")),
+            "Kontonummer ...7890 unbekannt")
+
+    def test_it_is_bounded(self):
+        self.assertLessEqual(len(client._short_reason(Exception("x" * 500))), 180)
+
+    def test_a_message_less_exception_still_says_something(self):
+        self.assertEqual(client._short_reason(ValueError()), "ValueError")
 
 
 class TestMidFetchTanRequest(unittest.TestCase):
@@ -75,9 +113,14 @@ class TestMidFetchTanRequest(unittest.TestCase):
             "-- that unpacking is the bug being fixed.",
         )
         self.assertIn(
-            "booked_streams = result[0]", raw,
-            "Only a real result may be unpacked, and only after the challenge "
-            "has been ruled out.",
+            "if isinstance(result, NeedRetryResponse):", raw,
+            "The challenge has to be ruled out BEFORE the result is indexed; "
+            "indexing it first is exactly what killed the challenge.",
+        )
+        self.assertLess(
+            raw.index("isinstance(result, NeedRetryResponse)"),
+            raw.index("result[0]"),
+            "Order matters: the check must come before the first subscript.",
         )
 
     def test_library_drift_falls_back_to_the_public_call(self):
