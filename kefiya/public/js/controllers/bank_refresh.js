@@ -37,7 +37,9 @@ frappe.provide("kefiya");
 (function () {
     "use strict";
 
-    var IDLE_LABEL = __("Umsätze abrufen");
+    // Resolved when it is needed, not when the file loads: the bundle may be
+    // parsed before the translations for this session are in place.
+    function idleLabel() { return __("Fetch transactions"); }
     var run = null;
 
     // Colours come from the desk's own tokens, so the panel follows whatever
@@ -121,12 +123,12 @@ frappe.provide("kefiya");
 
         var head;
         if (run.busy) {
-            head = __("Kontenabruf läuft …") + " " + pct + " %";
+            head = __("Fetching accounts …") + " " + pct + " %";
         } else {
-            head = __("Kontenabruf abgeschlossen") + " · "
-                + __("{0} von {1} Zugängen", [run.done, total]);
-            if (run.fail) head += " · " + __("{0} Fehler", [run.fail]);
-            if (run.tan) head += " · " + __("{0}× Freigabe offen", [run.tan]);
+            head = __("Account fetch finished") + " · "
+                + __("{0} of {1} accesses", [run.done, total]);
+            if (run.fail) head += " · " + __("{0} failed", [run.fail]);
+            if (run.tan) head += " · " + __("{0}× awaiting release", [run.tan]);
         }
 
         var barColor = run.fail ? C_ERR : C_OK;
@@ -139,11 +141,11 @@ frappe.provide("kefiya");
         if (!run.busy) {
             links = "<div style='margin-top:6px'>"
                 + "<a href='#' data-kefiya='log' style='font-size:11px'>"
-                + esc(__("Protokoll anzeigen")) + "</a>";
+                + esc(__("Show log")) + "</a>";
             if (run.onRefreshView) {
                 links += " <span style='color:" + C_MUTED + "'>·</span> "
                     + "<a href='#' data-kefiya='upd' style='font-size:11px'>"
-                    + esc(__("Ansicht aktualisieren")) + "</a>";
+                    + esc(__("Refresh view")) + "</a>";
             }
             links += "</div>";
         }
@@ -175,56 +177,56 @@ frappe.provide("kefiya");
         // name = the identifier _optional_fetch uses on the server.
         function report(label, name, describe) {
             if (errs.indexOf(name) >= 0) {
-                add(label, __("Fehler") + ": "
-                    + (why[name] || __("Grund siehe Error Log")), "err");
+                add(label, __("Error") + ": "
+                    + (why[name] || __("reason in the Error Log")), "err");
                 return;
             }
             if (uns.indexOf(name) >= 0) {
                 // Some banks refuse the query for this account only, rather
                 // than not knowing it. Where the server could tell the two
                 // apart, the more precise reason stands here.
-                add(label, whyNot[name] || __("von der Bank nicht angeboten"),
+                add(label, whyNot[name] || __("not offered by the bank"),
                     "none");
                 return;
             }
             var d = describe();
-            add(label, d === null ? __("nichts geliefert") : d,
+            add(label, d === null ? __("nothing delivered") : d,
                 d === null ? "none" : "ok");
         }
 
         var t = x.transactions || {};
         if (x.skipped || t.status === "skipped") {
-            add(__("Abruf"), __("Zugang ist vom Abruf ausgenommen"), "none");
+            add(__("Fetch"), __("This access is excluded from the fetch"), "none");
             return lines;
         }
         if (t.status === "tan_required") {
-            add(__("Umsätze"),
-                x.message || __("Freigabe erforderlich, danach erneut abrufen"),
+            add(__("Transactions"),
+                x.message || __("Release required, then fetch again"),
                 "err");
             return lines;
         }
-        add(__("Umsätze"), __("{0} neu", [t.new_count || 0]));
+        add(__("Transactions"), __("{0} new", [t.new_count || 0]));
 
         if (x.account_kind) {
-            add(__("Kontoart"), x.account_kind, "none");
+            add(__("Account Kind"), x.account_kind, "none");
         }
 
-        report(__("Saldo"), "balance", function () {
+        report(__("Balance"), "balance", function () {
             var b = x.balance;
             if (!b) return null;
             if (!b.stored) {
-                return __("nicht gespeichert") + " ("
-                    + (b.reason || __("unbekannt")) + ")";
+                return __("not stored") + " ("
+                    + (b.reason || __("unknown")) + ")";
             }
             var cur = b.currency || undefined;
             var s = format_currency(b.balance, cur);
             if (b.line_of_credit) {
-                s += " · " + __("Kreditlinie") + " "
+                s += " · " + __("Credit line") + " "
                     + format_currency(b.line_of_credit, cur);
             }
             // The same balance, counted back over the bookings just fetched.
             if (b.running && b.running.updated) {
-                s += " · " + __("{0} Buchungen mit Saldo versehen",
+                s += " · " + __("{0} bookings given a balance",
                                 [b.running.updated]);
             } else if (b.running && b.running.reason) {
                 s += " · " + b.running.reason;
@@ -232,52 +234,52 @@ frappe.provide("kefiya");
             return s;
         });
 
-        report(__("Vorgemerkt"), "pending_transactions", function () {
+        report(__("Pending"), "pending_transactions", function () {
             var p = x.pending;
             if (!p) return null;
-            return __("{0} neu, {1} unverändert, {2} erledigt",
+            return __("{0} new, {1} unchanged, {2} settled",
                       [p.created || 0, p.updated || 0, p.cancelled || 0]);
         });
 
-        report(__("Depot"), "holdings", function () {
+        report(__("Securities"), "holdings", function () {
             var h = x.holdings;
             if (!h) return null;
-            return __("{0} neu, {1} aktualisiert",
+            return __("{0} new, {1} updated",
                       [h.created || 0, h.updated || 0]);
         });
 
-        report(__("Daueraufträge"), "scheduled_debits", function () {
+        report(__("Standing orders"), "scheduled_debits", function () {
             var p = x.planned;
             if (!p) return null;
-            return __("{0} neu, {1} unverändert, {2} storniert",
+            return __("{0} new, {1} unchanged, {2} cancelled",
                       [p.created || 0, p.updated || 0, p.cancelled || 0]);
         });
 
-        report(__("Kontoauszüge"), "statements", function () {
+        report(__("Statements"), "statements", function () {
             var s = x.statements;
             if (!s) return null;
             if (s.reason) return s.reason;
-            var txt = __("{0} geladen von {1} verfügbar",
+            var txt = __("{0} downloaded of {1} available",
                          [s.downloaded || 0, s.available || 0]);
             if (s.already_present) {
-                txt += ", " + __("{0} bereits vorhanden", [s.already_present]);
+                txt += ", " + __("{0} already present", [s.already_present]);
             }
             if (s.failed_at) {
-                txt += " · " + __("Abbruch bei Auszug {0}", [s.failed_at]);
+                txt += " · " + __("stopped at statement {0}", [s.failed_at]);
             }
             return txt;
         });
 
-        report(__("Kreditkarte"), "credit_card", function () {
+        report(__("Credit card"), "credit_card", function () {
             var c = x.credit_card;
             if (!c) return null;
             if (c.reason) return c.reason;
-            return __("{0} neu", [c.created || 0])
+            return __("{0} new", [c.created || 0])
                 + (c.skipped
-                    ? (", " + __("{0} bereits bekannt", [c.skipped])) : "");
+                    ? (", " + __("{0} already known", [c.skipped])) : "");
         });
 
-        report(__("Tageslimit"), "transfer_limit", function () {
+        report(__("Transfer limit"), "transfer_limit", function () {
             var l = x.transfer_limit;
             if (!l) return null;
             if (l.reason) return l.reason;
@@ -294,7 +296,7 @@ frappe.provide("kefiya");
         var body;
         if (!entries.length) {
             body = "<div style='color:" + C_MUTED + "'>"
-                + esc(__("Keine Einträge.")) + "</div>";
+                + esc(__("No entries.")) + "</div>";
         } else {
             body = entries.map(function (e) {
                 var icon = e.state === "err" ? "✗"
@@ -327,10 +329,10 @@ frappe.provide("kefiya");
             }).join("");
         }
         var dlg = new frappe.ui.Dialog({
-            title: __("Protokoll des Kontenabrufs"),
+            title: __("Log of the account fetch"),
             size: "large",
             fields: [{ fieldtype: "HTML", fieldname: "body", options: body }],
-            primary_action_label: __("Schließen"),
+            primary_action_label: __("Close"),
             primary_action: function () { dlg.hide(); }
         });
         dlg.show();
@@ -405,7 +407,7 @@ frappe.provide("kefiya");
                 silent: true,
                 error: function (r) {
                     frappe.show_alert({
-                        message: __("TAN-Freigabe fehlgeschlagen.") + " "
+                        message: __("TAN release failed.") + " "
                             + errText(r),
                         indicator: "red"
                     }, 10);
@@ -445,9 +447,9 @@ frappe.provide("kefiya");
                     res();
                 },
                 error: function (r) {
-                    var t = errText(r) || __("Fehler");
+                    var t = errText(r) || __("Error");
                     record(ln, "err",
-                        [{ label: __("Abruf"), text: __("fehlgeschlagen"),
+                        [{ label: __("Fetch"), text: __("failed"),
                            kind: "err" }],
                         t.slice(0, 600));
                     res();
@@ -460,14 +462,14 @@ frappe.provide("kefiya");
         options = options || {};
         var btn = options.btn || null;
         var label = options.buttonLabel || (btn && btn.textContent)
-            || IDLE_LABEL;
+            || idleLabel();
         var release = function () {
             if (btn) { btn.disabled = false; btn.textContent = label; }
         };
 
         if (run && run.busy) {
             frappe.show_alert({
-                message: __("Es läuft bereits ein Kontenabruf."),
+                message: __("An account fetch is already running."),
                 indicator: "orange"
             }, 5);
             return Promise.resolve(null);
@@ -478,15 +480,15 @@ frappe.provide("kefiya");
         if (frappe.model && frappe.model.can_read
                 && !frappe.model.can_read("Kefiya Login")) {
             frappe.msgprint({
-                title: __("Keine Berechtigung"),
-                message: __("Für den Abruf der Bankzugänge fehlt Ihnen die Berechtigung."),
+                title: __("No permission"),
+                message: __("You do not have permission to fetch the bank accesses."),
                 indicator: "red"
             });
             return Promise.resolve(null);
         }
 
         bindRealtime();
-        if (btn) { btn.disabled = true; btn.textContent = __("Prüfe …"); }
+        if (btn) { btn.disabled = true; btn.textContent = __("Checking …"); }
 
         return frappe.db.get_list("Kefiya Login", {
             fields: ["name", "account_iban"], limit: 200
@@ -496,7 +498,7 @@ frappe.provide("kefiya");
                 .map(function (r) { return r.name; });
             if (!logins.length) {
                 frappe.msgprint(
-                    __("Kein Bankzugang mit hinterlegtem Konto gefunden."));
+                    __("No bank access with an account configured."));
                 release();
                 return null;
             }
@@ -545,7 +547,7 @@ frappe.provide("kefiya");
                         chain = chain.then(function () {
                             if (!known[ln]) return;
                             if (btn) {
-                                btn.textContent = __("Rufe ab …") + " ("
+                                btn.textContent = __("Fetching …") + " ("
                                     + run.done + "/" + total + ")";
                             }
                             return fetchOne(ln);
@@ -562,15 +564,15 @@ frappe.provide("kefiya");
                     var summary = { total: run.tot, ok: run.ok, tan: run.tan,
                                     fail: run.fail, accounts: total };
                     frappe.show_alert({
-                        message: __("Kontenabruf fertig") + " · "
-                            + __("{0} neue Umsätze", [run.tot]) + " · "
+                        message: __("Account fetch done") + " · "
+                            + __("{0} new transactions", [run.tot]) + " · "
                             + run.ok + "/" + total + " "
-                            + __("Konten")
+                            + __("accounts")
                             + (run.tan
-                                ? (" · " + __("{0}× Freigabe offen", [run.tan]))
+                                ? (" · " + __("{0}× awaiting release", [run.tan]))
                                 : "")
                             + (run.fail
-                                ? (" · " + __("{0} Fehler", [run.fail])) : ""),
+                                ? (" · " + __("{0} failed", [run.fail])) : ""),
                         indicator: (run.tan || run.fail) ? "orange" : "green"
                     }, 9);
                     if (options.onDone) {
@@ -584,7 +586,7 @@ frappe.provide("kefiya");
             unmuteErrors();
             cleanupBackdrops();
             release();
-            frappe.msgprint(__("Der Kontenabruf wurde abgebrochen.") + " "
+            frappe.msgprint(__("The account fetch was aborted.") + " "
                 + errText(r));
             return null;
         });

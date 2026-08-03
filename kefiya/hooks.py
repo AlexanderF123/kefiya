@@ -24,7 +24,11 @@ app_license = "MIT"
 # one of them, and a Workspace page loads no doctype scripts. So it is loaded
 # once for the whole desk. Every caller checks that kefiya.bank_refresh is
 # there before using it.
-app_include_js = "/assets/kefiya/js/controllers/bank_refresh.js"
+#
+# Named as a bundle, not as a path: esbuild hashes the built file and records
+# it in assets.json, so a deploy actually reaches the browser. A plain
+# /assets/... path is served with a long cache and would not.
+app_include_js = "kefiya.bundle.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/kefiya/css/kefiya.css"

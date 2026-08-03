@@ -108,12 +108,12 @@
    "label": "Account IBAN"
   },
   {
-   "default": "Girokonto",
-   "description": "Was hinter diesem Zugang steht. Nur bei einem Zahlungskonto wird der Saldo über die Buchungen zurückgerechnet; bei Darlehen, Avalen, Geschäftsanteilen und Depots meldet die Bank eine Zahl, die keine Summe von Buchungen ist.",
+   "default": "Current Account",
+   "description": "What lies behind this access. Only a payment account has its balance counted back over the bookings; for a loan, a guarantee, cooperative shares or a securities account the bank reports a number that is not the sum of any bookings.",
    "fieldname": "account_kind",
    "fieldtype": "Select",
-   "label": "Kontoart",
-   "options": "Girokonto\nTagesgeld / Sparen\nKreditkarte\nDarlehen\nAval / Kreditlinie\nGeschäftsanteile\nDepot"
+   "label": "Account Kind",
+   "options": "Current Account\nSavings\nCredit Card\nLoan\nGuarantee / Credit Line\nCooperative Shares\nSecurities Account"
   },
   {
    "default": "0",

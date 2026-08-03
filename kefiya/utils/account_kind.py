@@ -42,13 +42,17 @@ take things out of the balance logic, never silently put something new in.
 
 import frappe
 
-GIRO = "Girokonto"
-SAVINGS = "Tagesgeld / Sparen"
-CREDIT_CARD = "Kreditkarte"
-LOAN = "Darlehen"
-GUARANTEE = "Aval / Kreditlinie"
-SHARES = "Geschäftsanteile"
-SECURITIES = "Depot"
+# The values are stored in the database, so they are English like every other
+# stored value in this app. What the user reads is the translation: the German
+# wording lives in locale/de.po, next to the rest of it. A German value here
+# would be data that changes meaning with the site language.
+GIRO = "Current Account"
+SAVINGS = "Savings"
+CREDIT_CARD = "Credit Card"
+LOAN = "Loan"
+GUARANTEE = "Guarantee / Credit Line"
+SHARES = "Cooperative Shares"
+SECURITIES = "Securities Account"
 
 KINDS = (GIRO, SAVINGS, CREDIT_CARD, LOAN, GUARANTEE, SHARES, SECURITIES)
 

@@ -5,8 +5,28 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 def after_migrate():
 	create_custom_fields(get_custom_fields())
 
+#: Fields this app declares but must not take away again. Deleting a Custom
+#: Field drops its column, and these carry values the site keeps using after
+#: the app is gone -- balances, credit lines, the balance after each booking,
+#: and a flag somebody set by hand. Uninstalling an app is not a reason to
+#: destroy figures that were fetched from a bank.
+KEEP_ON_UNINSTALL = {
+	("Bank Account", "custom_account_balance"),
+	("Bank Account", "custom_credit_line"),
+	("Bank Account", "custom_account_balance_section"),
+	("Bank Transaction", "bank_balance"),
+	("Bank Transaction", "kefiya_followup"),
+}
+
+
 def before_uninstall():
-	delete_custom_fields(get_custom_fields())
+	fields = {}
+	for doctype, rows in get_custom_fields().items():
+		keep = [r for r in rows
+			if (doctype, r.get("fieldname")) not in KEEP_ON_UNINSTALL]
+		if keep:
+			fields[doctype] = keep
+	delete_custom_fields(fields)
 
 def delete_custom_fields(custom_fields):
 	for doctype, fields in custom_fields.items():
