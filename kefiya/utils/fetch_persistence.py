@@ -22,6 +22,7 @@ import hashlib
 import json
 
 import frappe
+from frappe import _
 from frappe.utils import flt, getdate, now_datetime
 
 
@@ -319,19 +320,29 @@ def download_statements(controller, kefiya_login, listing, limit=3):
 
         try:
             content = controller.get_fints_statement(number=number, year=year)
-        except Exception:
+        except Exception as exc:
             # Stop at the first failure instead of asking for the remaining
             # eleven. Every statement rides the same dialog, so once it is
             # broken each further request fails the same way -- one bad login
             # produced 59 identical Error Log entries that way, from five
             # accounts. One entry per login says the same thing.
             result["failed_at"] = number
-            frappe.log_error(
-                title="Kefiya: statement download failed",
-                message=frappe.get_traceback(),
-                reference_doctype="Kefiya Login",
-                reference_name=kefiya_login,
-            )
+            from kefiya.utils.client import _is_refused_by_the_bank
+
+            if _is_refused_by_the_bank(exc):
+                # The bank declined to hand this statement over (response code
+                # 9010). That is an answer, not a malfunction, and writing it
+                # to the Error Log buried the real failures under twelve
+                # identical entries per run.
+                result["reason"] = _(
+                    "the bank does not hand out statements for this account")
+            else:
+                frappe.log_error(
+                    title="Kefiya: statement download failed",
+                    message=frappe.get_traceback(),
+                    reference_doctype="Kefiya Login",
+                    reference_name=kefiya_login,
+                )
             break
 
         payload = _statement_payload(content)
