@@ -5,8 +5,6 @@
 // wants them: right-click a row for that booking, or tick several and use the
 // bulk entry to mark them all at once.
 
-{% include "kefiya/public/js/controllers/transaction_actions.js" %}
-
 frappe.listview_settings["Bank Transaction"] = Object.assign(
     frappe.listview_settings["Bank Transaction"] || {},
     {
@@ -27,6 +25,7 @@ frappe.listview_settings["Bank Transaction"] = Object.assign(
         },
 
         onload: function (listview) {
+            if (typeof kefiya === "undefined") return;
             const actions = kefiya.transaction_actions;
             if (!actions) return;
 

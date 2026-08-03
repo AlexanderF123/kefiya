@@ -1,8 +1,12 @@
-{% include "kefiya/public/js/controllers/transaction_actions.js" %}
-
 frappe.ui.form.on("Bank Transaction", {
     refresh: function (frm) {
-        if (frm.is_new() || !kefiya.transaction_actions) return;
+        // The controller comes from app_include_js. Checked rather than
+        // assumed: a form that loads before it must open normally, without
+        // the actions, instead of throwing on a name that is not there yet.
+        if (frm.is_new() || typeof kefiya === "undefined"
+                || !kefiya.transaction_actions) {
+            return;
+        }
 
         const actions = kefiya.transaction_actions;
         const reload = function () { frm.reload_doc(); };

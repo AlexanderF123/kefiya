@@ -19,7 +19,14 @@ app_license = "MIT"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/kefiya/css/kefiya.css"
-# app_include_js = "/assets/kefiya/js/kefiya.js"
+
+# The booking actions are wanted in more than one place: on the Bank
+# Transaction form and list, and on the Workspace pages that show bookings in
+# their own tables (Online-Banking, Finance Overview). A Workspace does not
+# load doctype scripts, so the shared controller is loaded once for the whole
+# desk instead of being copied into each page. Every caller checks that
+# kefiya.transaction_actions is there before using it.
+app_include_js = "/assets/kefiya/js/controllers/transaction_actions.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/kefiya/css/kefiya.css"

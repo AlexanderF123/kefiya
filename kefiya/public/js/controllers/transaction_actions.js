@@ -127,6 +127,32 @@ frappe.provide("kefiya.transaction_actions");
         ];
     };
 
+    // Attach the menu to any table of bookings, wherever it is drawn. The
+    // Workspace pages (Online-Banking, Finance Overview) build their own rows
+    // and would otherwise each grow their own copy of this.
+    //
+    //   container  DOM element the rows live in
+    //   selector   what a row looks like, e.g. "tr.fr"
+    //   name_of    row element -> Bank Transaction name
+    //   flagged_of row element -> is it already marked? (optional)
+    //   after      called once something changed (optional)
+    ACTIONS.attach_to = function (container, options) {
+        if (!container || !options || !options.selector || !options.name_of) {
+            return;
+        }
+        const rows = container.querySelectorAll(options.selector);
+        Array.prototype.forEach.call(rows, function (row) {
+            row.oncontextmenu = function (event) {
+                const name = options.name_of(row);
+                if (!name) return;
+                const flagged = options.flagged_of
+                    ? !!options.flagged_of(row) : false;
+                ACTIONS.open_menu(
+                    event, ACTIONS.entries_for(name, flagged, options.after));
+            };
+        });
+    };
+
     function close_menu() {
         $(".kefiya-context-menu").remove();
         $(document).off(".kefiya-context-menu");
