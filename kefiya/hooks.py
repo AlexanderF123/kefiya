@@ -20,18 +20,11 @@ app_license = "MIT"
 # include js, css files in header of desk.html
 # app_include_css = "/assets/kefiya/css/kefiya.css"
 
-# The booking actions are wanted in more than one place: on the Bank
-# Transaction form and list, and on the Workspace pages that show bookings in
-# their own tables (Online-Banking, Finance Overview). A Workspace does not
-# load doctype scripts, so the shared controller is loaded once for the whole
-# desk instead of being copied into each page. Every caller checks that
-# kefiya.transaction_actions is there before using it.
-# The collective bank fetch is here for the same reason: it belongs to any
-# page that shows accounts, not to one of them.
-app_include_js = [
-    "/assets/kefiya/js/controllers/transaction_actions.js",
-    "/assets/kefiya/js/controllers/bank_refresh.js",
-]
+# The collective bank fetch belongs to any page that shows accounts, not to
+# one of them, and a Workspace page loads no doctype scripts. So it is loaded
+# once for the whole desk. Every caller checks that kefiya.bank_refresh is
+# there before using it.
+app_include_js = "/assets/kefiya/js/controllers/bank_refresh.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/kefiya/css/kefiya.css"
@@ -54,9 +47,7 @@ doctype_js = {
     "Purchase Invoice": "public/js/purchase_invoice.js",
 }
 # doctype_js = {"doctype" : "public/js/doctype.js"}
-doctype_list_js = {
-    "Bank Transaction": "public/js/bank_transaction_list.js",
-}
+# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 

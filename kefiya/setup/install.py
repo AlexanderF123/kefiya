@@ -83,7 +83,45 @@ def get_custom_fields():
 		},
 	]
 
+	# The balance and the credit line are written by this app -- store_balance()
+	# fills them after every fetch -- and were nevertheless declared nowhere but
+	# on one instance. Written out here exactly as they stand there, anchored on
+	# the standard field `company`, so installing this app describes them
+	# without moving anything on the way past.
+	custom_fields_bank_account = [
+		{
+			"label": "Account Balance",
+			"fieldname": "custom_account_balance_section",
+			"fieldtype": "Section Break",
+			"insert_after": "company",
+		},
+		{
+			"label": "Account Balance",
+			"fieldname": "custom_account_balance",
+			"fieldtype": "Currency",
+			"insert_after": "custom_account_balance_section",
+			"in_list_view": 1,
+			"description": (
+				"Der Saldo, den die Bank zuletzt gemeldet hat. Wird beim Abruf "
+				"gesetzt -- bei Avalen bleibt er leer, weil die Zahl dort eine "
+				"Linie ist und kein Guthaben."
+			),
+		},
+		{
+			"label": "Kreditlinie",
+			"fieldname": "custom_credit_line",
+			"fieldtype": "Currency",
+			"insert_after": "custom_account_balance",
+			"description": (
+				"Eingeräumte Kreditlinie / Dispo für den Liquiditäts-Forecast. "
+				"Wird aus der Bankmeldung (HISAL) gefüllt, wo die Bank eine "
+				"nennt."
+			),
+		},
+	]
+
 	return {
 		"Payment Request": custom_fields_payment_request,
 		"Bank Transaction": custom_fields_bank_transaction,
+		"Bank Account": custom_fields_bank_account,
 	}
