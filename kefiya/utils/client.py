@@ -11,6 +11,8 @@ import json
 # production yet, so the resulting NameError stayed latent.
 from frappe import _
 
+from kefiya.utils import account_kind
+
 
 def _use_tan_authentication() -> bool:
     """Helper: check Kefiya Settings for TAN toggle."""
@@ -408,6 +410,9 @@ def fetch_all(kefiya_login, user_scope=None):
             "planned": None,
             "statements": None,
             "credit_card": None,
+            # So the log can say what this account is, and the reader can see
+            # why a guarantee or a share deposit reports no running balance.
+            "account_kind": account_kind.kind_of(kefiya_login),
             "errors": [],
         }
 

@@ -17,6 +17,7 @@
   "import_settings_section",
   "get_accounts",
   "account_iban",
+  "account_kind",
   "failed_connection",
   "skip_fetch",
   "allowed_sync_days_in_past",
@@ -105,6 +106,14 @@
    "fieldname": "account_iban",
    "fieldtype": "Select",
    "label": "Account IBAN"
+  },
+  {
+   "default": "Girokonto",
+   "description": "Was hinter diesem Zugang steht. Nur bei einem Zahlungskonto wird der Saldo über die Buchungen zurückgerechnet; bei Darlehen, Avalen, Geschäftsanteilen und Depots meldet die Bank eine Zahl, die keine Summe von Buchungen ist.",
+   "fieldname": "account_kind",
+   "fieldtype": "Select",
+   "label": "Kontoart",
+   "options": "Girokonto\nTagesgeld / Sparen\nKreditkarte\nDarlehen\nAval / Kreditlinie\nGeschäftsanteile\nDepot"
   },
   {
    "default": "0",

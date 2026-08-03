@@ -45,6 +45,45 @@ def get_custom_fields():
 		}
 	]
 
+	# Bank Transaction is an ERPNext doctype, so anything this app needs on it
+	# is a Custom Field. bank_balance existed on the production instance and
+	# nowhere else, which meant a fresh install came up without it and the code
+	# that fills it quietly did nothing. It is written out here exactly as it
+	# stands there -- label, position, options and all -- so that installing
+	# this app describes that field without changing it on the way past.
+	custom_fields_bank_transaction = [
+		{
+			"label": "Banksaldo (laut Bank)",
+			"fieldname": "bank_balance",
+			"fieldtype": "Currency",
+			"options": "currency",
+			"insert_after": "company",
+			"read_only": 1,
+			# db_set writes this on submitted documents; nobody types it in.
+			"allow_on_submit": 0,
+			"description": (
+				"Der Saldo, wie er nach dieser Buchung stand. Zurueckgerechnet "
+				"aus dem Saldo, den die Bank meldet, und nur innerhalb des "
+				"abgerufenen Zeitraums gefuellt -- ausserhalb davon bleibt das "
+				"Feld leer, statt eine Zahl zu zeigen, die stimmen koennte."
+			),
+		},
+		{
+			"label": "Wiedervorlage",
+			"fieldname": "kefiya_followup",
+			"fieldtype": "Check",
+			"default": "0",
+			"insert_after": "bank_balance",
+			"allow_on_submit": 1,
+			"in_standard_filter": 1,
+			"description": (
+				"Von Hand gesetztes Kennzeichen: hier will jemand noch einmal "
+				"hinsehen. Traegt keine Buchungslogik."
+			),
+		},
+	]
+
 	return {
-		"Payment Request": custom_fields_payment_request
+		"Payment Request": custom_fields_payment_request,
+		"Bank Transaction": custom_fields_bank_transaction,
 	}

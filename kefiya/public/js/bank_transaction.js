@@ -1,3 +1,35 @@
+{% include "kefiya/public/js/controllers/transaction_actions.js" %}
+
+frappe.ui.form.on("Bank Transaction", {
+    refresh: function (frm) {
+        if (frm.is_new() || !kefiya.transaction_actions) return;
+
+        const actions = kefiya.transaction_actions;
+        const reload = function () { frm.reload_doc(); };
+        const entries = function () {
+            return actions.entries_for(
+                frm.doc.name, !!frm.doc.kefiya_followup, reload);
+        };
+
+        // Discoverable route: the standard menu. Someone who never thinks to
+        // right-click still finds all three.
+        entries().forEach(function (entry) {
+            frm.add_custom_button(entry.label, entry.action, __("Aktionen"));
+        });
+
+        // The StarMoney route: right-click anywhere on the document.
+        frm.$wrapper.off("contextmenu.kefiya")
+            .on("contextmenu.kefiya", ".form-layout", function (event) {
+                // Leave input fields alone -- cut/copy/paste belongs to the
+                // browser and taking it away would be a loss, not a feature.
+                if ($(event.target).is("input, textarea, select, [contenteditable]")) {
+                    return;
+                }
+                actions.open_menu(event, entries());
+            });
+    },
+});
+
 frappe.ui.form.on("Bank Transaction Payments", {
     payment_entry: function(frm, cdt, cdn){
         let row = locals[cdt][cdn];

@@ -25,6 +25,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, now_datetime
 
+from kefiya.utils import account_kind
+
 
 def _as_dict(entry):
     """FinTS results are objects, dicts or namedtuples depending on the bank."""
@@ -74,12 +76,20 @@ def store_balance(kefiya_login, rows):
     account = frappe.get_doc("Bank Account", login.bank_account)
     meta = account.meta
 
+    # On a guarantee the bank states the granted line, not money on an account.
+    # Writing it into the balance field would put a number nobody holds into
+    # every total that adds balances up.
+    is_a_line = account_kind.reports_a_credit_line(login)
+
     # The fields are Custom Fields on this instance; skip silently where they
     # are not installed rather than failing a fetch that already succeeded.
-    if meta.has_field("custom_account_balance"):
+    if meta.has_field("custom_account_balance") and not is_a_line:
         account.custom_account_balance = flt(balance)
-    if meta.has_field("custom_credit_line") and row.get("line_of_credit") is not None:
-        account.custom_credit_line = flt(row.get("line_of_credit"))
+    line = row.get("line_of_credit")
+    if line is None and is_a_line:
+        line = balance
+    if meta.has_field("custom_credit_line") and line is not None:
+        account.custom_credit_line = flt(line)
 
     account.save(ignore_permissions=True)
 
@@ -88,9 +98,11 @@ def store_balance(kefiya_login, rows):
         "bank_account": account.name,
         "balance": flt(balance),
         "balance_date": row.get("balance_date"),
-        "line_of_credit": row.get("line_of_credit"),
+        "line_of_credit": flt(line) if line is not None else None,
         "available_amount": row.get("available_amount"),
         "currency": row.get("currency"),
+        "account_kind": account_kind.kind_of(login),
+        "is_credit_line": is_a_line,
     }
 
 
@@ -122,6 +134,15 @@ def apply_running_balance(kefiya_login, balance, balance_date=None,
     result = {"updated": 0, "from": None, "to": None}
     if balance is None:
         result["reason"] = "no balance"
+        return result
+
+    # A guarantee line, a loan and a share deposit have no stream of bookings
+    # for the balance to be counted back over. Subtracting anyway would write a
+    # column of confident numbers that describe nothing.
+    if not account_kind.keeps_a_running_balance(kefiya_login):
+        result["reason"] = "no running balance for {0}".format(
+            account_kind.kind_of(kefiya_login))
+        result["account_kind"] = account_kind.kind_of(kefiya_login)
         return result
 
     bank_account = frappe.db.get_value(

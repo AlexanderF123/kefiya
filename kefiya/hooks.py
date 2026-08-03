@@ -42,7 +42,9 @@ doctype_js = {
     "Purchase Invoice": "public/js/purchase_invoice.js",
 }
 # doctype_js = {"doctype" : "public/js/doctype.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_list_js = {
+    "Bank Transaction": "public/js/bank_transaction_list.js",
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
