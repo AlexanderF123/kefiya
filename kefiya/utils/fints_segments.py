@@ -29,7 +29,7 @@ cannot hold this one, we will".
 """
 
 from fints.fields import DataElementField, DataElementGroupField
-from fints.formals import KTI1, Amount1
+from fints.formals import KTI1, Amount1, SupportedSEPAPainMessages1
 from fints.segments.base import FinTS3Segment
 
 
@@ -90,6 +90,50 @@ class HICME1(ScheduledTransferResponseBase):
     Source: FinTS Financial Transaction Services, Schnittstellenspezifikation,
     Messages -- Multibankfaehige Geschaeftsvorfaelle
     """
+
+
+class HKCDB1(FinTS3Segment):
+    """Bestand SEPA-Dauerauftrag anfordern, version 1
+
+    The library ships no standing-order segment at all -- not the query, not
+    the order. This is the query, and only the query: reading cannot move
+    money, and a request the bank does not understand is answered with a code,
+    not with a wrong payment.
+
+    Its shape is HKDBS1 without the date range, which is the segment the
+    library does ship for the neighbouring business transaction (the bestand of
+    scheduled direct debits). A standing order has no date window to ask for --
+    it has a cycle -- so those two elements are the only difference.
+
+    Source: FinTS Financial Transaction Services, Schnittstellenspezifikation,
+    Messages -- Multibankfaehige Geschaeftsvorfaelle
+    """
+
+    account = DataElementGroupField(
+        type=KTI1, _d="Kontoverbindung international")
+    supported_sepa_pain_messages = DataElementGroupField(
+        type=SupportedSEPAPainMessages1, _d="Unterstuetzte SEPA pain messages")
+    max_number_responses = DataElementField(
+        type="num", max_length=4, required=False,
+        _d="Maximale Anzahl Eintraege")
+    touchdown_point = DataElementField(
+        type="an", max_length=35, required=False, _d="Aufsetzpunkt")
+
+
+# HICDB is deliberately NOT declared.
+#
+# The answer carries the standing order's schedule -- cycle, rhythm, day of
+# execution, first and last run -- and the exact order of those elements is
+# the one thing about this business transaction that could not be checked
+# against anything the library ships. Declaring it would mean guessing, and a
+# guess that parses is worse than one that fails: it would put the day of
+# execution where the rhythm belongs and look perfectly plausible doing it.
+#
+# An undeclared segment keeps every element in `_additional_data`, groups
+# included, exactly as the bank sent them. So the answer is read positionally
+# for the part that is certain (account, descriptor, pain message) and kept raw
+# for the part that is not. The raw part is what will settle the field order
+# against real orders from real banks -- and only then is it safe to write one.
 
 
 def read_task_id(response):

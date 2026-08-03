@@ -280,3 +280,12 @@ msgstr "{0} von {1} Zugängen"
 
 msgid "{0}× awaiting release"
 msgstr "{0}× Freigabe offen"
+
+msgid "Scheduled debits"
+msgstr "Terminierte Lastschriften"
+
+msgid "{0} held by the bank"
+msgstr "{0} bei der Bank hinterlegt"
+
+msgid "cycle not yet verified"
+msgstr "Turnus noch nicht bestätigt"

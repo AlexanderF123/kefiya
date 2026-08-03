@@ -248,11 +248,23 @@ frappe.provide("kefiya");
                       [h.created || 0, h.updated || 0]);
         });
 
-        report(__("Standing orders"), "scheduled_debits", function () {
+        // HKDBS: money we collect once on a date. It was labelled "standing
+        // orders" here, which is a different business transaction entirely.
+        report(__("Scheduled debits"), "scheduled_debits", function () {
             var p = x.planned;
             if (!p) return null;
             return __("{0} new, {1} unchanged, {2} cancelled",
                       [p.created || 0, p.updated || 0, p.cancelled || 0]);
+        });
+
+        report(__("Standing orders"), "standing_orders", function () {
+            var o = x.standing_orders;
+            if (!o) return null;
+            var txt = __("{0} held by the bank", [o.count || 0]);
+            if (o.count && !o.schedule_confirmed) {
+                txt += " · " + __("cycle not yet verified");
+            }
+            return txt;
         });
 
         report(__("Statements"), "statements", function () {
