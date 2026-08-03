@@ -26,7 +26,12 @@ app_license = "MIT"
 # load doctype scripts, so the shared controller is loaded once for the whole
 # desk instead of being copied into each page. Every caller checks that
 # kefiya.transaction_actions is there before using it.
-app_include_js = "/assets/kefiya/js/controllers/transaction_actions.js"
+# The collective bank fetch is here for the same reason: it belongs to any
+# page that shows accounts, not to one of them.
+app_include_js = [
+    "/assets/kefiya/js/controllers/transaction_actions.js",
+    "/assets/kefiya/js/controllers/bank_refresh.js",
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/kefiya/css/kefiya.css"
