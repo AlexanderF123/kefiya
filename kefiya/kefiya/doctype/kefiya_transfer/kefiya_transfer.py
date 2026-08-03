@@ -24,6 +24,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate, now_datetime
 
+from kefiya.utils import own_transfer
+
 
 def normalize_iban(value):
     """Strip formatting and upper-case an IBAN."""
@@ -67,6 +69,11 @@ class KefiyaTransfer(Document):
 
         total = 0
         for row in self.items:
+            # A row that names one of our own accounts takes its IBAN from
+            # there. Filled on the server too, not only in the form: a row can
+            # arrive from an import or another script that never opened one.
+            own_transfer.fill_from_own_account(row)
+
             row.recipient_iban = normalize_iban(row.recipient_iban)
             if not is_valid_iban(row.recipient_iban):
                 frappe.throw(_(
@@ -91,6 +98,10 @@ class KefiyaTransfer(Document):
 
         self.total_amount = total
         self.payment_count = len(self.items)
+
+        # Paying the account the money is drawn from. The bank refuses it as
+        # well -- but only after the order went out and a TAN was spent on it.
+        own_transfer.refuse_paying_yourself(self)
 
         if not self.execution_date:
             self.execution_date = now_datetime().date()

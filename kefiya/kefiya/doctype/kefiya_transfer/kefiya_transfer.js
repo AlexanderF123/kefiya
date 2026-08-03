@@ -8,6 +8,18 @@
 frappe.ui.form.on("Kefiya Transfer", {
 	onload: function (frm) {
 		kefiya.interactive.progressbar(frm);
+		// Only the company's own accounts are offered, and never the one the
+		// money is drawn from: a transfer from an account to itself is not a
+		// transfer, and the bank only says so after a TAN was spent on it.
+		frm.set_query("own_account", "items", function () {
+			return {
+				query: "kefiya.utils.own_transfer.own_account_query",
+				filters: {
+					kefiya_login: frm.doc.kefiya_login,
+					company: frm.doc.company,
+				},
+			};
+		});
 	},
 
 	refresh: function (frm) {
@@ -61,6 +73,28 @@ frappe.ui.form.on("Kefiya Transfer", {
 frappe.ui.form.on("Kefiya Transfer Item", {
 	amount: function (frm) {
 		kefiya_recalculate(frm);
+	},
+	own_account: function (frm, cdt, cdn) {
+		// A Kontouebertrag: the recipient is one of our own accounts. Name and
+		// IBAN come from there so nobody types an IBAN they already own --
+		// that is where transposed digits come from, and a transposed digit
+		// pays a stranger just as reliably here as anywhere else.
+		const row = locals[cdt][cdn];
+		if (!row.own_account) {
+			return;
+		}
+		frappe.db.get_value("Bank Account", row.own_account,
+			["account_name", "iban"]).then(function (r) {
+			const a = (r && r.message) || {};
+			if (a.iban) {
+				frappe.model.set_value(cdt, cdn, "recipient_iban",
+					a.iban.replace(/[\s-]/g, "").toUpperCase());
+			}
+			if (a.account_name && !row.recipient_name) {
+				frappe.model.set_value(cdt, cdn, "recipient_name",
+					a.account_name);
+			}
+		});
 	},
 	items_remove: function (frm) {
 		kefiya_recalculate(frm);
