@@ -1146,11 +1146,40 @@ class FinTSController:
             return self.fints_connection.get_information()
 
     def get_fints_scheduled_debits(self, multiple=False):
-        """Standing orders / scheduled debits (Dauerauftraege /
-        Termin-Ueberweisungen) for the login's account."""
+        """The bestand of scheduled SEPA direct debits (HKDBS).
+
+        Money we collect once on a date -- NOT standing orders. Those are a
+        different business transaction and have their own method below.
+
+        The library's own get_scheduled_debits() filters the bank's answer by
+        the name of the request instead of the answer, so it returns nothing
+        at every bank. The single case is issued here with the right response
+        type; the collective one (HKDMB) is left to the library, which gets
+        that one right.
+        """
+        from kefiya.utils import standing_orders
+
         with self.client_session():
             account = self._require_fints_account()
-            return self.fints_connection.get_scheduled_debits(account, multiple)
+            if multiple:
+                return self.fints_connection.get_scheduled_debits(
+                    account, multiple)
+            return standing_orders.fetch_scheduled_debits(
+                self.fints_connection, account)
+
+    def get_fints_standing_orders(self):
+        """The bestand of SEPA standing orders (HKCDB).
+
+        Money we pay again and again on a cycle. The library ships no segment
+        for this at all, so the query is defined in kefiya.utils.fints_segments
+        and the answer read without a declared response segment.
+        """
+        from kefiya.utils import standing_orders
+
+        with self.client_session():
+            account = self._require_fints_account()
+            return standing_orders.fetch_standing_orders(
+                self.fints_connection, account)
 
     def get_fints_statements(self):
         """List available electronic account statements

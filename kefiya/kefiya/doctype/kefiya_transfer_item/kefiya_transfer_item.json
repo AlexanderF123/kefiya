@@ -5,6 +5,7 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "own_account",
   "recipient_name",
   "recipient_iban",
   "recipient_bic",
@@ -14,6 +15,13 @@
   "end_to_end_id"
  ],
  "fields": [
+  {
+   "description": "Pick one of the company's own accounts to move money between them. Name and IBAN are filled from it; both stay editable.",
+   "fieldname": "own_account",
+   "fieldtype": "Link",
+   "label": "Own Account",
+   "options": "Bank Account"
+  },
   {
    "columns": 2,
    "fieldname": "recipient_name",

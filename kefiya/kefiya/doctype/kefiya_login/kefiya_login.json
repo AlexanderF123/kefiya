@@ -17,6 +17,7 @@
   "import_settings_section",
   "get_accounts",
   "account_iban",
+  "account_kind",
   "failed_connection",
   "skip_fetch",
   "allowed_sync_days_in_past",
@@ -105,6 +106,14 @@
    "fieldname": "account_iban",
    "fieldtype": "Select",
    "label": "Account IBAN"
+  },
+  {
+   "default": "Current Account",
+   "description": "What lies behind this access. Only a payment account has its balance counted back over the bookings; for a loan, a guarantee, cooperative shares or a securities account the bank reports a number that is not the sum of any bookings.",
+   "fieldname": "account_kind",
+   "fieldtype": "Select",
+   "label": "Account Kind",
+   "options": "Current Account\nSavings\nCredit Card\nLoan\nGuarantee / Credit Line\nCooperative Shares\nSecurities Account"
   },
   {
    "default": "0",

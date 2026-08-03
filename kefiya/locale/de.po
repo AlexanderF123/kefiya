@@ -112,3 +112,180 @@ msgstr "TAN fehlgeschlagen"
 
 msgid "Unknown error"
 msgstr "Unbekannter Fehler"
+
+msgid "Account Kind"
+msgstr "Kontoart"
+
+msgid "Account fetch done"
+msgstr "Kontenabruf fertig"
+
+msgid "Account fetch finished"
+msgstr "Kontenabruf abgeschlossen"
+
+msgid "An account fetch is already running."
+msgstr "Es läuft bereits ein Kontenabruf."
+
+msgid "Balance"
+msgstr "Saldo"
+
+msgid "Checking …"
+msgstr "Prüfe …"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Cooperative Shares"
+msgstr "Geschäftsanteile"
+
+msgid "Credit Card"
+msgstr "Kreditkarte"
+
+msgid "Credit card"
+msgstr "Kreditkarte"
+
+msgid "Credit line"
+msgstr "Kreditlinie"
+
+msgid "Current Account"
+msgstr "Girokonto"
+
+msgid "Error"
+msgstr "Fehler"
+
+msgid "Fetch"
+msgstr "Abruf"
+
+msgid "Fetch transactions"
+msgstr "Umsätze abrufen"
+
+msgid "Fetching accounts …"
+msgstr "Kontenabruf läuft …"
+
+msgid "Fetching …"
+msgstr "Rufe ab …"
+
+msgid "Guarantee / Credit Line"
+msgstr "Aval / Kreditlinie"
+
+msgid "Loan"
+msgstr "Darlehen"
+
+msgid "Log of the account fetch"
+msgstr "Protokoll des Kontenabrufs"
+
+msgid "No bank access with an account configured."
+msgstr "Kein Bankzugang mit hinterlegtem Konto gefunden."
+
+msgid "No entries."
+msgstr "Keine Einträge."
+
+msgid "No permission"
+msgstr "Keine Berechtigung"
+
+msgid "Refresh view"
+msgstr "Ansicht aktualisieren"
+
+msgid "Release required, then fetch again"
+msgstr "Freigabe erforderlich, danach erneut abrufen"
+
+msgid "Savings"
+msgstr "Tagesgeld / Sparen"
+
+msgid "Securities"
+msgstr "Depot"
+
+msgid "Show log"
+msgstr "Protokoll anzeigen"
+
+msgid "Standing orders"
+msgstr "Daueraufträge"
+
+msgid "Statements"
+msgstr "Kontoauszüge"
+
+msgid "TAN release failed."
+msgstr "TAN-Freigabe fehlgeschlagen."
+
+msgid "The account fetch was aborted."
+msgstr "Der Kontenabruf wurde abgebrochen."
+
+msgid "This access is excluded from the fetch"
+msgstr "Zugang ist vom Abruf ausgenommen"
+
+msgid "Transactions"
+msgstr "Umsätze"
+
+msgid "Transfer limit"
+msgstr "Tageslimit"
+
+msgid "You do not have permission to fetch the bank accesses."
+msgstr "Für den Abruf der Bankzugänge fehlt Ihnen die Berechtigung."
+
+msgid "accounts"
+msgstr "Konten"
+
+msgid "failed"
+msgstr "fehlgeschlagen"
+
+msgid "not offered by the bank"
+msgstr "von der Bank nicht angeboten"
+
+msgid "not stored"
+msgstr "nicht gespeichert"
+
+msgid "nothing delivered"
+msgstr "nichts geliefert"
+
+msgid "reason in the Error Log"
+msgstr "Grund siehe Error Log"
+
+msgid "stopped at statement {0}"
+msgstr "Abbruch bei Auszug {0}"
+
+msgid "unknown"
+msgstr "unbekannt"
+
+msgid "{0} already known"
+msgstr "{0} bereits bekannt"
+
+msgid "{0} already present"
+msgstr "{0} bereits vorhanden"
+
+msgid "{0} bookings given a balance"
+msgstr "{0} Buchungen mit Saldo versehen"
+
+msgid "{0} downloaded of {1} available"
+msgstr "{0} geladen von {1} verfügbar"
+
+msgid "{0} failed"
+msgstr "{0} Fehler"
+
+msgid "{0} new"
+msgstr "{0} neu"
+
+msgid "{0} new transactions"
+msgstr "{0} neue Umsätze"
+
+msgid "{0} new, {1} unchanged, {2} cancelled"
+msgstr "{0} neu, {1} unverändert, {2} storniert"
+
+msgid "{0} new, {1} unchanged, {2} settled"
+msgstr "{0} neu, {1} unverändert, {2} erledigt"
+
+msgid "{0} new, {1} updated"
+msgstr "{0} neu, {1} aktualisiert"
+
+msgid "{0} of {1} accesses"
+msgstr "{0} von {1} Zugängen"
+
+msgid "{0}× awaiting release"
+msgstr "{0}× Freigabe offen"
+
+msgid "Scheduled debits"
+msgstr "Terminierte Lastschriften"
+
+msgid "{0} held by the bank"
+msgstr "{0} bei der Bank hinterlegt"
+
+msgid "cycle not yet verified"
+msgstr "Turnus noch nicht bestätigt"

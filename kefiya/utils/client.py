@@ -11,6 +11,8 @@ import json
 # production yet, so the resulting NameError stayed latent.
 from frappe import _
 
+from kefiya.utils import account_kind
+
 
 def _use_tan_authentication() -> bool:
     """Helper: check Kefiya Settings for TAN toggle."""
@@ -408,6 +410,9 @@ def fetch_all(kefiya_login, user_scope=None):
             "planned": None,
             "statements": None,
             "credit_card": None,
+            # So the log can say what this account is, and the reader can see
+            # why a guarantee or a share deposit reports no running balance.
+            "account_kind": account_kind.kind_of(kefiya_login),
             "errors": [],
         }
 
@@ -549,6 +554,24 @@ def fetch_all(kefiya_login, user_scope=None):
 
         summary["planned"] = _optional_fetch(
             summary, "planned", "scheduled_debits", _fetch_planned)
+
+        def _fetch_standing_orders():
+            rows = _to_jsonable(
+                FetchCtl(kefiya_login).get_fints_standing_orders())
+            rows = rows if isinstance(rows, list) else []
+            return {
+                "count": len(rows),
+                "orders": rows,
+                # Until the schedule's field order is confirmed against real
+                # orders, say so rather than let a number imply certainty.
+                "schedule_confirmed": False,
+            }
+
+        # Standing orders are a different business transaction from the
+        # scheduled debits above, and were never asked for at all.
+        summary["standing_orders"] = _optional_fetch(
+            summary, "standing_orders", "standing_orders",
+            _fetch_standing_orders)
 
         # 4) Electronic statements -> the documents themselves, attached to the
         #    login. The list alone only says which ones exist; each has to be
