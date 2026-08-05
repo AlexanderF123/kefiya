@@ -142,3 +142,170 @@ def transfer_from_transaction(name):
             "purpose": purpose,
         },
     }
+
+
+# --------------------------------------------------------------------------
+# Forwarding: four ways, and each one says which it is
+# --------------------------------------------------------------------------
+
+#: Money that arrived can be passed on in four directions, and they are not
+#: variations of one thing: who may receive it differs, and so does what has
+#: to be checked before it is offered.
+#:
+#:   own_same_company    another account of the same company -- moving money
+#:                       inside one book, the everyday case
+#:   own_other_company   an account of a DIFFERENT company -- that is a
+#:                       payment between two legal entities and wants to be
+#:                       named as such, not hidden among the internal moves
+#:   other_recipient     somebody else entirely; the recipient is typed in
+#:   back_to_sender      straight back where it came from
+#:
+#: Amount and purpose travel unchanged in all four. That is the point of
+#: forwarding: the same money, recognisable on the other side.
+FORWARD_OWN_SAME = "own_same_company"
+FORWARD_OWN_OTHER = "own_other_company"
+FORWARD_OTHER = "other_recipient"
+FORWARD_BACK = "back_to_sender"
+
+FORWARD_VARIANTS = (FORWARD_OWN_SAME, FORWARD_OWN_OTHER, FORWARD_OTHER,
+                    FORWARD_BACK)
+
+#: What each one is called where somebody reads it.
+FORWARD_LABELS = {
+    FORWARD_OWN_SAME: "To an own account, same company",
+    FORWARD_OWN_OTHER: "To an own account, different company",
+    FORWARD_OTHER: "To another recipient",
+    FORWARD_BACK: "Back to the sender",
+}
+
+#: The two variants that pick an account rather than typing one.
+FORWARD_PICKS_ACCOUNT = (FORWARD_OWN_SAME, FORWARD_OWN_OTHER)
+
+
+def _booking_company(txn):
+    """Whose book this booking sits in.
+
+    Taken from the bank account rather than from the login: an account belongs
+    to a company whether or not anybody set up a FinTS access for it.
+    """
+    account = txn.get("bank_account")
+    if not account:
+        return None
+    return frappe.db.get_value("Bank Account", account, "company")
+
+
+@frappe.whitelist()
+def forward_targets(name, variant):
+    """The accounts this variant may forward to.
+
+    Empty for the two variants that do not pick an account -- and empty is
+    then an answer, not a failure.
+
+    :param name: Bank Transaction name
+    :param variant: one of FORWARD_VARIANTS
+    :return: [{"name", "account_name", "bank", "iban", "company"}]
+    """
+    frappe.has_permission("Bank Transaction", ptype="read", doc=name,
+                          throw=True)
+    if variant not in FORWARD_PICKS_ACCOUNT:
+        return []
+
+    txn = frappe.get_doc("Bank Transaction", name)
+    company = _booking_company(txn)
+
+    # get_all applies read permissions and User Permissions, so nobody is
+    # offered an account they would not be allowed to open.
+    rows = frappe.get_all(
+        "Bank Account",
+        filters={"disabled": 0, "is_company_account": 1},
+        fields=["name", "account_name", "bank", "iban", "company"],
+        order_by="company, account_name")
+
+    out = []
+    for row in rows:
+        # Forwarding to the account the money is already on is not a
+        # forwarding. The bank says so too, but only after the TAN.
+        if row["name"] == txn.get("bank_account"):
+            continue
+        same = bool(company) and row.get("company") == company
+        if variant == FORWARD_OWN_SAME and not same:
+            continue
+        if variant == FORWARD_OWN_OTHER and same:
+            continue
+        out.append(row)
+    return out
+
+
+@frappe.whitelist()
+def forward_amount(name, variant=FORWARD_BACK, target_account=None):
+    """The beginning of a transfer that passes this booking's money on.
+
+    Nothing is created and nothing is sent: the caller receives values and
+    opens a new, unsaved Kefiya Transfer with them. Every field can still be
+    overwritten before anything reaches a bank.
+
+    The variant is checked rather than trusted. A picker that was filtered in
+    the browser is a convenience; the same rule has to hold here, or "same
+    company" is a label and not a fact.
+
+    :param name: Bank Transaction name
+    :param variant: one of FORWARD_VARIANTS
+    :param target_account: Bank Account, for the two variants that pick one
+    :return: the dict transfer_from_transaction returns, with the recipient
+        filled in according to the variant
+    """
+    if variant not in FORWARD_VARIANTS:
+        frappe.throw(_("Unknown way of forwarding: {0}").format(variant))
+
+    values = transfer_from_transaction(name)
+    txn = frappe.get_doc("Bank Transaction", name)
+
+    if variant == FORWARD_BACK:
+        # transfer_from_transaction already offers the counterparty.
+        values["variant"] = variant
+        return values
+
+    if variant == FORWARD_OTHER:
+        # Amount and purpose stay; the recipient is for a person to enter.
+        # Leaving the previous counterparty in would be the likeliest wrong
+        # payment of the four: it looks filled in and it is not the one meant.
+        values["item"]["recipient_name"] = ""
+        values["item"]["recipient_iban"] = ""
+        values["item"]["own_account"] = None
+        values["variant"] = variant
+        return values
+
+    if not target_account:
+        frappe.throw(_("Pick the account the money is to go to."))
+
+    frappe.has_permission("Bank Account", ptype="read", doc=target_account,
+                          throw=True)
+    target = frappe.get_doc("Bank Account", target_account)
+
+    if target.name == txn.get("bank_account"):
+        frappe.throw(_(
+            "That is the account the money is already on. A transfer from an"
+            " account to itself is not a transfer."))
+
+    company = _booking_company(txn)
+    same = bool(company) and target.get("company") == company
+    if variant == FORWARD_OWN_SAME and not same:
+        frappe.throw(_(
+            "{0} belongs to {1}, not to {2}. Use \"To an own account,"
+            " different company\" -- a payment between two companies is not an"
+            " internal move and should not look like one."
+        ).format(target.name, target.get("company") or _("no company"),
+                 company or _("no company")))
+    if variant == FORWARD_OWN_OTHER and same:
+        frappe.throw(_(
+            "{0} belongs to the same company. Use \"To an own account, same"
+            " company\"."
+        ).format(target.name))
+
+    values["item"]["own_account"] = target.name
+    values["item"]["recipient_name"] = (target.get("account_name") or "").strip()
+    values["item"]["recipient_iban"] = (
+        target.get("iban") or "").replace(" ", "").upper()
+    values["variant"] = variant
+    values["target_company"] = target.get("company")
+    return values

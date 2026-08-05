@@ -376,3 +376,33 @@ msgstr "Die Bank erlaubt \"{0}\" auf diesem Konto nicht. Das Senden würde nach 
 
 msgid "The bank does not accept dated orders on this account, so the date is managed here."
 msgstr "Die Bank nimmt auf diesem Konto keine terminierten Aufträge an, deshalb wird der Termin hier verwaltet."
+
+msgid "To an own account, same company"
+msgstr "Auf ein eigenes Konto, selbe Company"
+
+msgid "To an own account, different company"
+msgstr "Auf ein eigenes Konto, andere Company"
+
+msgid "To another recipient"
+msgstr "An einen anderen Empfänger"
+
+msgid "Back to the sender"
+msgstr "Zurück an den Absender"
+
+msgid "Unknown way of forwarding: {0}"
+msgstr "Unbekannte Art der Weiterleitung: {0}"
+
+msgid "Pick the account the money is to go to."
+msgstr "Wählen Sie das Konto, auf das das Geld gehen soll."
+
+msgid "That is the account the money is already on. A transfer from an account to itself is not a transfer."
+msgstr "Das ist das Konto, auf dem das Geld schon liegt. Eine Überweisung von einem Konto auf sich selbst ist keine Überweisung."
+
+msgid "{0} belongs to {1}, not to {2}. Use \"To an own account, different company\" -- a payment between two companies is not an internal move and should not look like one."
+msgstr "{0} gehört zu {1}, nicht zu {2}. Nutzen Sie „Auf ein eigenes Konto, andere Company“ — eine Zahlung zwischen zwei Companies ist keine interne Umbuchung und sollte auch nicht so aussehen."
+
+msgid "{0} belongs to the same company. Use \"To an own account, same company\"."
+msgstr "{0} gehört zur selben Company. Nutzen Sie „Auf ein eigenes Konto, selbe Company“."
+
+msgid "no company"
+msgstr "keiner Company"
