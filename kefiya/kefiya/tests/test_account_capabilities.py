@@ -331,6 +331,44 @@ class TestARepeatedAnswerIsNotAChange(unittest.TestCase):
         self.assertNotIn("business_transaction", caps.COMPARED)
 
 
+class TestTheLabelFollowsTheSiteNotTheSession(unittest.TestCase):
+    """A fetch normally runs as a background job, and a background job has no
+    user and therefore no language. Left to `_()` it would write English
+    labels onto a German site -- and they would stay, because a later fetch
+    only rewrites the table when something MEANINGFUL changed."""
+
+    def test_the_language_comes_from_the_site(self):
+        import inspect
+
+        source = inspect.getsource(caps._label)
+        self.assertIn('get_single_value("System Settings", "language")',
+                      source)
+
+    def test_the_rows_use_it(self):
+        import inspect
+
+        source = inspect.getsource(caps._rows_for)
+        self.assertIn("_label(label)", source)
+        self.assertIn('_label("Other business transaction")', source)
+
+    def test_an_older_signature_does_not_break_a_fetch(self):
+        """A label is not worth failing a fetch over."""
+        import inspect
+
+        source = inspect.getsource(caps._label)
+        self.assertIn("except TypeError:", source)
+
+    def test_the_catalogue_loop_does_not_shadow_it(self):
+        """`for _key, _segments, _label in CATALOGUE` at module level would
+        bind `_label` to a string. The def below happens to win, but nobody
+        should have to check the order of two unrelated lines."""
+        import inspect
+
+        source = inspect.getsource(caps)
+        self.assertNotIn("for _key, _segments, _label in CATALOGUE", source)
+        self.assertTrue(callable(caps._label))
+
+
 class TestTheIbanNeverEndsUpInAMessage(unittest.TestCase):
 
     def test_a_skipped_account_is_named_by_its_last_four_digits(self):
