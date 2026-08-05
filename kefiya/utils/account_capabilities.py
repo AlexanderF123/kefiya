@@ -86,14 +86,18 @@ CATALOGUE = (
 )
 
 #: key -> segments, built once.
-SEGMENTS_BY_KEY = {key: segments for key, segments, _label in CATALOGUE}
-LABEL_BY_KEY = {key: label for key, _segments, label in CATALOGUE}
+SEGMENTS_BY_KEY = {row[0]: row[1] for row in CATALOGUE}
+LABEL_BY_KEY = {row[0]: row[2] for row in CATALOGUE}
 
 #: segment -> key, for naming a segment the bank sent.
+#: The loop variables are named _cat_* on purpose: a plain `_label` here would
+#: leak into the module and collide with the function of that name below. It
+#: happens to work -- the def comes later and wins -- but a reader should not
+#: have to check the order of two unrelated lines to know what `_label` is.
 KEY_BY_SEGMENT = {}
-for _key, _segments, _label in CATALOGUE:
-    for _segment in _segments:
-        KEY_BY_SEGMENT[_segment] = _key
+for _cat_row in CATALOGUE:
+    for _cat_segment in _cat_row[1]:
+        KEY_BY_SEGMENT[_cat_segment] = _cat_row[0]
 
 ALLOWED = "allowed"
 REFUSED = "refused"
@@ -286,6 +290,32 @@ COMPARED = ("capability", "transaction", "allowed", "required_signatures",
             "limit_type", "limit_amount", "limit_days")
 
 
+def _label(text):
+    """The label in the site's language, not the session's.
+
+    A fetch normally runs as a background job, and a background job has no
+    user and therefore no language: `_()` would fall back to English and
+    write English labels onto a German site. They would stay English, too --
+    a later fetch only rewrites the table when something MEANINGFUL changed,
+    and the label is deliberately not part of that comparison.
+
+    So the language is taken from the site rather than from whoever (or
+    whatever) happens to be running.
+    """
+    try:
+        lang = frappe.db.get_single_value("System Settings", "language")
+    except Exception:
+        lang = None
+    if not lang:
+        return _(text)
+    try:
+        return frappe._(text, lang=lang)
+    except TypeError:
+        # Older signatures take no lang; the session's language is then the
+        # best available answer, and still better than failing.
+        return _(text)
+
+
 def _rows_for(segments):
     """The full list for one account: the catalogue, then anything extra."""
     segments = {normalize_segment(k): (v or {}) for k, v in
@@ -300,7 +330,7 @@ def _rows_for(segments):
             # Display only. The code never compares against this -- it asks by
             # `capability` or by `transaction` -- so translating it here gives
             # the reader German without turning stored data into a language.
-            "business_transaction": _(label),
+            "business_transaction": _label(label),
             "transaction": code or codes[0],
             "allowed": 1 if code else 0,
             "required_signatures": cint(detail.get("required_signatures")),
@@ -317,7 +347,7 @@ def _rows_for(segments):
         detail = segments[code]
         rows.append({
             "capability": "",
-            "business_transaction": _("Other business transaction"),
+            "business_transaction": _label("Other business transaction"),
             "transaction": code,
             "allowed": 1,
             "required_signatures": cint(detail.get("required_signatures")),
