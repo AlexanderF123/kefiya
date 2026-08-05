@@ -610,6 +610,23 @@ def fetch_all(kefiya_login, user_scope=None):
         summary["transfer_limit"] = _optional_fetch(
             summary, "transfer_limit", "transfer_limit", _fetch_limit)
 
+        # 7) What the bank ALLOWS on each account -- same segment as the limit,
+        #    same free ride inside the shared session. Read every time for the
+        #    same reason: a bank that enables (or withdraws) a transaction on
+        #    an account says so at the next logon and nowhere else, so a list
+        #    read once would keep hiding a button the bank has since offered.
+        def _fetch_capabilities():
+            from kefiya.utils.account_capabilities import (
+                refresh_account_capabilities,
+            )
+
+            return refresh_account_capabilities(
+                kefiya_login, controller=FetchCtl(kefiya_login))
+
+        summary["capabilities"] = _optional_fetch(
+            summary, "capabilities", "account_capabilities",
+            _fetch_capabilities)
+
         return summary
 
 
@@ -761,6 +778,10 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
         ).format(transfer_name, frappe.utils.formatdate(doc.execution_date))}
 
     scheduled = _bank_holds_the_date(doc)
+
+    unsupported = _refuse_unsupported([doc], scheduled)
+    if unsupported:
+        return unsupported
 
     over = _refuse_over_limit([doc])
     if over:
@@ -916,6 +937,45 @@ def _refuse_over_limit(docs):
             "available": verdict.get("available"),
             "message": verdict["reason"] + " " + _(
                 "Split it over several days, or reduce it.")}
+
+
+def _refuse_unsupported(docs, scheduled):
+    """Stop an order this account was never allowed to send.
+
+    The bank states its per-account business transactions at logon, long
+    before anybody presses send. Letting the order go anyway means the refusal
+    arrives as a return code in the middle of the dialog -- after the TAN was
+    spent, and worded by the bank rather than by us.
+
+    Only an explicit refusal stops anything: an account whose list has never
+    been fetched has no list, and that is answered with "unknown", which
+    passes. Nothing is blocked on a guess.
+
+    :return: an error dict to return to the caller, or None
+    """
+    from kefiya.utils import account_capabilities as caps
+
+    docs = [d for d in (docs or []) if d]
+    if not docs:
+        return None
+
+    bank_account = frappe.db.get_value(
+        "Kefiya Login", docs[0].kefiya_login, "bank_account")
+    if not bank_account:
+        return None
+
+    count = sum(len(d.items or []) for d in docs)
+    capability = caps.required_capability(
+        payment_count=count,
+        scheduled=bool(scheduled),
+        instant=bool(docs[0].instant_payment))
+
+    if not caps.refuses(bank_account, capability):
+        return None
+
+    return {"status": "error", "unsupported": True,
+            "capability": capability,
+            "message": caps.refusal_message(bank_account, capability)}
 
 
 def _is_unsupported_schedule(exc):
@@ -1103,6 +1163,13 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             "All selected transfers must be paid from the same account."
         )}
     kefiya_login = docs[0].kefiya_login
+
+    # Several orders leave as ONE collective message, so the transaction the
+    # bank has to allow is the collective one -- an account cleared for a
+    # single transfer is not thereby cleared for HKCCM.
+    unsupported = _refuse_unsupported(docs, scheduled)
+    if unsupported:
+        return unsupported
 
     # The bank's limit applies to what leaves the account, so the selection is
     # measured as a whole. Checking each document on its own would wave through

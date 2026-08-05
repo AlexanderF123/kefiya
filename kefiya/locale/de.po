@@ -289,3 +289,90 @@ msgstr "{0} bei der Bank hinterlegt"
 
 msgid "cycle not yet verified"
 msgstr "Turnus noch nicht bestätigt"
+
+msgid "Transfer"
+msgstr "Überweisung"
+
+msgid "Collective transfer"
+msgstr "Sammelüberweisung"
+
+msgid "Scheduled transfer"
+msgstr "Terminüberweisung"
+
+msgid "Scheduled collective transfer"
+msgstr "Terminierte Sammelüberweisung"
+
+msgid "Instant payment"
+msgstr "Echtzeitüberweisung"
+
+msgid "Collective instant payment"
+msgstr "Echtzeit-Sammelüberweisung"
+
+msgid "Read standing orders"
+msgstr "Daueraufträge lesen"
+
+msgid "Create standing order"
+msgstr "Dauerauftrag anlegen"
+
+msgid "Change standing order"
+msgstr "Dauerauftrag ändern"
+
+msgid "Delete standing order"
+msgstr "Dauerauftrag löschen"
+
+msgid "Read scheduled transfers"
+msgstr "Terminüberweisungen lesen"
+
+msgid "Direct debit"
+msgstr "Lastschrift"
+
+msgid "Collective direct debit"
+msgstr "Sammellastschrift"
+
+msgid "Read scheduled direct debits"
+msgstr "Terminierte Lastschriften lesen"
+
+msgid "Transactions"
+msgstr "Umsätze"
+
+msgid "Transactions as camt XML"
+msgstr "Umsätze als camt-XML"
+
+msgid "Balance"
+msgstr "Saldo"
+
+msgid "Portfolio"
+msgstr "Depotbestand"
+
+msgid "Electronic statements"
+msgstr "Elektronische Kontoauszüge"
+
+msgid "Status protocol"
+msgstr "Statusprotokoll"
+
+msgid "Credit-card transactions"
+msgstr "Kreditkartenumsätze"
+
+msgid "Other business transaction"
+msgstr "Weiterer Geschäftsvorfall"
+
+msgid "Business Transaction"
+msgstr "Geschäftsvorfall"
+
+msgid "Allowed"
+msgstr "Erlaubt"
+
+msgid "Segment"
+msgstr "Segment"
+
+msgid "Required Signatures"
+msgstr "Erforderliche Unterschriften"
+
+msgid "The bank does not allow \"{0}\" on the account {1}. That is what it sent for this account at logon, so the order would be refused after the TAN rather than before it. Use an account that allows it, or have the bank enable it."
+msgstr "Die Bank erlaubt \"{0}\" auf dem Konto {1} nicht. Das hat sie beim Anmelden für dieses Konto gemeldet — der Auftrag würde also nach der TAN abgelehnt statt vorher. Nutzen Sie ein Konto, das es erlaubt, oder lassen Sie es von der Bank freischalten."
+
+msgid "The bank does not allow \"{0}\" on this account. Sending would be refused after the TAN, so it is not offered here."
+msgstr "Die Bank erlaubt \"{0}\" auf diesem Konto nicht. Das Senden würde nach der TAN abgelehnt, deshalb wird es hier nicht angeboten."
+
+msgid "The bank does not accept dated orders on this account, so the date is managed here."
+msgstr "Die Bank nimmt auf diesem Konto keine terminierten Aufträge an, deshalb wird der Termin hier verwaltet."

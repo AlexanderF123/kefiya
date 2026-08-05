@@ -3,6 +3,7 @@
 
 {% include "kefiya/public/js/controllers/fints_progress_log.js" %}
 {% include "kefiya/public/js/controllers/fints_interactive.js" %}
+{% include "kefiya/public/js/controllers/account_capabilities.js" %}
 
 frappe.ui.form.on('Kefiya Login', {
 	onload: function(frm) {
@@ -73,6 +74,9 @@ frappe.ui.form.on('Kefiya Login', {
 						if (s.errors && s.errors.length) {
 							parts.push(__("Not available from this bank: {0}", [s.errors.join(", ")]));
 						}
+						// The fetch re-read what the bank allows here, so the
+						// page's cached answer is now the older one.
+						kefiya.capabilities.forget(frm.doc.name);
 						frappe.msgprint({
 							title: __("Abruf abgeschlossen"),
 							indicator: (s.errors && s.errors.length) ? "orange" : "green",
@@ -85,6 +89,17 @@ frappe.ui.form.on('Kefiya Login', {
 						$btn.prop("disabled", false).removeClass("disabled");
 					}
 				});
+			});
+
+			// The bank's own list decides whether the document button is
+			// offered: an account that does not do HKEKA answers the click
+			// with an empty dialog, every single time. The fetch below
+			// refreshes that list, so this is a button that can come back.
+			kefiya.capabilities.load(frm.doc.name).then(function (info) {
+				if (kefiya.capabilities.refuses(info, "statements")) {
+					frm.remove_custom_button(
+						__("Kontoauszüge / Dokumente"), __("FinTS"));
+				}
 			});
 
 			frm.add_custom_button(__("Kontoauszüge / Dokumente"), function() {
