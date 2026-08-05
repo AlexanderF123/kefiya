@@ -353,19 +353,36 @@ def _same_rows(stored, desired):
 # --------------------------------------------------------------------------
 
 def stored_rows(bank_account):
-    """The list as it stands on one Bank Account. Empty means never asked."""
+    """The list as it stands on one Bank Account. Empty means never asked.
+
+    Answers with an empty list rather than raising, whatever goes wrong. This
+    gate is an improvement on top of sending money, not a part of it: a
+    transfer that would have gone out before this module existed must still go
+    out when the module cannot answer. An empty list reads as "unknown", which
+    blocks nothing -- and the failure is recorded rather than swallowed.
+    """
     if not bank_account:
         return []
 
-    # `parent` names the doctype the rows hang under, not the record --
-    # querying a child table without it is refused, and the refusal would look
-    # like an account that answers nothing to everything.
-    return frappe.get_all(
-        CHILD_DOCTYPE,
-        parent="Bank Account",
-        filters={"parenttype": "Bank Account", "parent": bank_account,
-                 "parentfield": FIELD_TABLE},
-        fields=["capability", "transaction", "allowed"])
+    # The kwarg that names the owning doctype is `parent_doctype`, not
+    # `parent`: get_all() pops the former and passes anything else on to
+    # DatabaseQuery.execute(), which has no `parent` -- so the wrong spelling
+    # does not query the wrong thing, it raises TypeError. That mattered here
+    # because this function sits in the send path: every transfer would have
+    # died on it, and the traceback would have named a report query rather
+    # than the gate that asked.
+    try:
+        return frappe.get_all(
+            CHILD_DOCTYPE,
+            parent_doctype="Bank Account",
+            filters={"parenttype": "Bank Account", "parent": bank_account,
+                     "parentfield": FIELD_TABLE},
+            fields=["capability", "transaction", "allowed"])
+    except Exception:
+        frappe.log_error(
+            title="Kefiya: reading the account capabilities failed",
+            message=frappe.get_traceback())
+        return []
 
 
 def verdict(bank_account, capability, rows=None):

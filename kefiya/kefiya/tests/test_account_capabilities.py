@@ -242,6 +242,37 @@ class TestItIsReadAtEveryFetch(unittest.TestCase):
         self.assertIn("_optional_fetch", block)
 
 
+class TestTheGateNeverBreaksTheSendPath(unittest.TestCase):
+    """This module sits between a person and their bank. Whatever it cannot
+    answer, it must answer with "unknown" -- never with an exception."""
+
+    def test_the_child_table_is_queried_by_parent_doctype(self):
+        """`parent=` is not a query argument. get_all() pops `parent_doctype`
+        and passes everything else to DatabaseQuery.execute(), which has no
+        `parent` -- so the wrong spelling raises TypeError rather than
+        querying the wrong rows."""
+        import inspect
+
+        source = inspect.getsource(caps.stored_rows)
+        self.assertIn('parent_doctype="Bank Account"', source)
+        self.assertNotIn('parent="Bank Account"', source)
+
+    def test_a_failed_read_is_an_empty_list_not_an_exception(self):
+        import inspect
+
+        source = inspect.getsource(caps.stored_rows)
+        self.assertIn("except Exception:", source)
+        self.assertIn("return []", source.split("except Exception:")[1])
+
+    def test_and_the_failure_is_recorded(self):
+        """Silently swallowing it would hide a gate that has stopped
+        gating."""
+        import inspect
+
+        source = inspect.getsource(caps.stored_rows)
+        self.assertIn("frappe.log_error", source)
+
+
 class TestTheFieldsAreDeclaredByThisApp(unittest.TestCase):
     """A field that exists on one instance and nowhere else is a field that
     quietly does nothing after a fresh install."""
