@@ -1139,6 +1139,33 @@ class FinTSController:
 
         return rows
 
+    def get_fints_account_capabilities(self):
+        """Which business transactions the bank allows, per account.
+
+        The same HIUPD segment the limits are read from, asked the other way
+        round: not "what is capped" but "what is offered at all". Two accounts
+        of one customer differ routinely -- a savings account takes no
+        transfer, a guarantee line takes nothing -- and the bank states that
+        here, at logon, before anything is attempted.
+
+        Deliberately NOT filtered to this login's own account: what the bank
+        says holds for the account, and one login usually covers several. The
+        caller matches them to their Bank Account records.
+
+        python-fints exposes a narrower version of this through
+        get_information(), but only as booleans for the operations the library
+        itself implements -- which leaves out the dated transfer and the
+        standing orders, the two this app added segments for. So it is read
+        off the segment here.
+
+        :return: list of {"iban", "account_number", "subaccount", "segments"};
+            empty where the bank sent no HIUPD, which means unknown.
+        """
+        from kefiya.utils import account_capabilities
+
+        with self.client_session() as conn:
+            return account_capabilities.read_from_connection(conn)
+
     def get_fints_information(self):
         """Bank + account capabilities, limits and supported operations
         (FinTS get_information). Returns a nested dict."""

@@ -4,6 +4,7 @@
 {% include "kefiya/public/js/controllers/fints_progress_log.js" %}
 {% include "kefiya/public/js/controllers/fints_interactive.js" %}
 {% include "kefiya/public/js/controllers/fints_transfer_flow.js" %}
+{% include "kefiya/public/js/controllers/account_capabilities.js" %}
 
 frappe.ui.form.on("Kefiya Transfer", {
 	onload: function (frm) {
@@ -22,7 +23,24 @@ frappe.ui.form.on("Kefiya Transfer", {
 		});
 	},
 
+	kefiya_login: function (frm) {
+		kefiya_apply_capabilities(frm);
+	},
+
+	instant_payment: function (frm) {
+		kefiya_apply_capabilities(frm);
+	},
+
+	manage_due_date: function (frm) {
+		kefiya_apply_capabilities(frm);
+	},
+
 	refresh: function (frm) {
+		// What the bank allows on this account decides which of the options
+		// below are offered at all. Applied asynchronously: the answer comes
+		// from the server, and the form must not wait for it to render.
+		kefiya_apply_capabilities(frm);
+
 		// Sending is deliberately separate from submitting: approving a
 		// transfer must never move money as a side effect.
 		if (frm.doc.docstatus === 1 && frm.doc.status !== "Sent") {
@@ -148,6 +166,73 @@ function kefiya_recalculate(frm) {
 	frm.set_value("total_amount", total);
 	frm.set_value("payment_count", (frm.doc.items || []).length);
 	kefiya_render_summary(frm);
+	// One payment goes out as HKCCS, several as the collective HKCCM -- a
+	// different business transaction, which a bank may allow on this account
+	// or not. So the answer changes with the number of rows.
+	kefiya_apply_capabilities(frm);
+}
+
+/**
+ * Offer only what the bank allows on this account.
+ *
+ * Hides what was REFUSED and leaves everything else alone. An account that has
+ * never been fetched says "unknown" to every question, and unknown is not a
+ * reason to take a button away -- see account_capabilities.js.
+ */
+function kefiya_apply_capabilities(frm) {
+	if (!frm.doc.kefiya_login) {
+		return;
+	}
+	kefiya.capabilities.load(frm.doc.kefiya_login).then(function (info) {
+		if (!info || !info.capabilities) {
+			return;
+		}
+
+		const count = (frm.doc.items || []).length || 1;
+
+		// An instant payment is its own transaction (HKIPZ/HKIPM). Where the
+		// bank does not offer it here, the tick box is not just useless, it
+		// is a trap: it changes what is sent and the order fails at the bank.
+		const instant = kefiya.capabilities.required(count, false, true);
+		const instant_ok = kefiya.capabilities.allows(info, instant);
+		frm.toggle_display("instant_payment", instant_ok);
+		if (!instant_ok && frm.doc.instant_payment && frm.doc.docstatus === 0) {
+			frm.set_value("instant_payment", 0);
+		}
+
+		// Letting the bank hold the date is HKCSE/HKCME. Where it is refused,
+		// the date can still be managed here -- that is our own doing and
+		// needs nothing from the bank -- so the field stays and only the
+		// choice to hand the date over goes.
+		const dated = kefiya.capabilities.required(count, true, false);
+		const dated_ok = kefiya.capabilities.allows(info, dated);
+		if (!dated_ok && frm.doc.docstatus === 0) {
+			frm.set_df_property(
+				"manage_due_date", "description",
+				__("The bank does not accept dated orders on this account, so the date is managed here.")
+			);
+			if (!frm.doc.manage_due_date) {
+				frm.set_value("manage_due_date", 1);
+			}
+		}
+
+		// And the order itself. Saying so here rather than at the bank is the
+		// difference between a sentence and a spent TAN.
+		const needed = kefiya.capabilities.required(
+			count,
+			!frm.doc.manage_due_date && !!frm.doc.execution_date,
+			!!frm.doc.instant_payment
+		);
+		if (kefiya.capabilities.refuses(info, needed)) {
+			frm.remove_custom_button(__("Send to bank"));
+			frm.dashboard.set_headline_alert(
+				__("The bank does not allow \"{0}\" on this account. Sending would be refused after the TAN, so it is not offered here.", [
+					kefiya.capabilities.label(needed),
+				]),
+				"red"
+			);
+		}
+	});
 }
 
 function kefiya_render_summary(frm) {

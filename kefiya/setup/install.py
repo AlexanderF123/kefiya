@@ -138,6 +138,40 @@ def get_custom_fields():
 				"nennt."
 			),
 		},
+		# What the bank allows on this account, read from HIUPD at every fetch.
+		# Written by kefiya.utils.account_capabilities; nobody types it in,
+		# which is why the whole section is read-only.
+		{
+			"label": "Was die Bank hier erlaubt",
+			"fieldname": "custom_fints_capabilities_section",
+			"fieldtype": "Section Break",
+			"insert_after": "custom_credit_line",
+			"collapsible": 1,
+		},
+		{
+			"label": "Geschäftsvorfälle",
+			"fieldname": "custom_fints_capabilities",
+			"fieldtype": "Table",
+			"options": "Kefiya Account Capability",
+			"insert_after": "custom_fints_capabilities_section",
+			"read_only": 1,
+			"description": (
+				"Die Geschäftsvorfälle, die die Bank für dieses Konto beim "
+				"Anmelden nennt (HIUPD). Wird bei jedem Abruf neu geschrieben. "
+				"Leer heißt: noch nicht abgerufen — nicht: nicht erlaubt."
+			),
+		},
+		{
+			"label": "Fähigkeiten geprüft am",
+			"fieldname": "custom_capabilities_checked_on",
+			"fieldtype": "Datetime",
+			"insert_after": "custom_fints_capabilities",
+			"read_only": 1,
+			"description": (
+				"Wann die Liste zuletzt von der Bank gelesen wurde. Ohne "
+				"Datum wurde nie gefragt, und dann wird nichts ausgeblendet."
+			),
+		},
 	]
 
 	return {
