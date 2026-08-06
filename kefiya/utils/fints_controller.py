@@ -32,6 +32,21 @@ class InitFailedException(Exception):
 class TanInteractionRequired(InitFailedException):
     pass
 
+
+def _mask_iban(value):
+    """Shorten an IBAN for diagnostic output.
+
+    Error messages end up in the Error Log, which is broadly readable. Keeping
+    the country code and the last four digits is enough to tell the accounts of
+    one login apart without writing full account numbers into the log.
+    """
+    if not value:
+        return "<no IBAN>"
+    value = str(value)
+    if len(value) <= 6:
+        return value
+    return "{0}***{1}".format(value[:2], value[-4:])
+
 class FinTSController:
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
         self.kefiya_login = frappe.get_doc("Kefiya Login", kefiya_login_docname)
@@ -465,6 +480,30 @@ class FinTSController:
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
                 self.kefiya_login.account_iban)
+            if account is None:
+                # python-fints dereferences `account.iban` unguarded, so a
+                # None surfaces as a bare "'NoneType' object has no attribute
+                # 'iban'" with no hint at which login is misconfigured. Fail
+                # here instead, naming the login and what the bank did offer.
+                # Typical cause: a login whose account carries no IBAN at all
+                # (credit cards), which cannot be fetched via HKKAZ/HKCAZ.
+                # `fints_accounts` is only set once __fetch_fints_accounts()
+                # succeeded, so read it defensively: this is the error path and
+                # must not raise an AttributeError of its own.
+                offered = []
+                for acc in (getattr(self, "fints_accounts", None) or []):
+                    iban = acc.get("iban") if isinstance(acc, dict) \
+                        else getattr(acc, "iban", None)
+                    offered.append(_mask_iban(iban))
+                frappe.throw(_(
+                    "No FinTS account matching IBAN {0} for login {1}. "
+                    "The bank offered: {2}. Accounts without an IBAN "
+                    "(e.g. credit cards) cannot be fetched this way."
+                ).format(
+                    _mask_iban(self.kefiya_login.account_iban),
+                    self.kefiya_login.name,
+                    ", ".join(offered) or "<none>",
+                ))
             return json.loads(
                 json.dumps(
                     self.fints_connection.get_transactions(
