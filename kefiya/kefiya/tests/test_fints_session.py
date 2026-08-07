@@ -108,14 +108,20 @@ class TestDialogReuse(unittest.TestCase):
         )
 
     def test_the_session_closes_what_it_opened(self):
+        # Closing moved into _end_dialog_unless_paused, which both teardown
+        # paths now share -- the session used to end dialogs itself and so
+        # ended parked ones too. What this test is about is unchanged: the
+        # session closes what it opened, on the error path as well, and a bank
+        # that dropped the line does not become a second exception.
         source = inspect.getsource(fints_controller.fints_session)
-        self.assertIn("conn.__exit__(None, None, None)", source)
+        self.assertIn("_end_dialog_unless_paused(conn", source)
         self.assertIn(
             "finally:", source,
             "The dialog has to be closed on the error path as well.",
         )
         self.assertIn(
-            "except Exception:", source,
+            "except Exception:",
+            inspect.getsource(fints_controller._end_dialog_unless_paused),
             "A bank that dropped the connection must not turn into a second "
             "exception on the way out.",
         )
@@ -178,7 +184,14 @@ class TestRetireOnFailure(unittest.TestCase):
         )
 
     def test_a_parked_dialog_is_removed_but_not_ended(self):
-        source = inspect.getsource(fints_controller._retire_connection)
+        # The paused check now lives in _end_dialog_unless_paused so that the
+        # session teardown obeys it too; _retire_connection still has to go
+        # through it.
+        self.assertIn(
+            "_end_dialog_unless_paused(conn",
+            inspect.getsource(fints_controller._retire_connection),
+        )
+        source = inspect.getsource(fints_controller._end_dialog_unless_paused)
         self.assertIn('getattr(dialog, "paused", False)', source)
         self.assertIn(
             "return", source,

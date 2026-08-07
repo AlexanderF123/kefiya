@@ -38,6 +38,72 @@ class TanInteractionRequired(InitFailedException):
 OFFERED_IBAN_PREVIEW = 10
 
 
+#: (connect, read) timeout for every FinTS message, in seconds.
+#:
+#: python-fints posts each message with ``requests.Session.post()`` and passes
+#: no timeout at all, so a gateway that accepts the connection and then says
+#: nothing blocks the worker for as long as the operating system lets it. That
+#: is not a theoretical concern: it leaves no error, no log line and no commit
+#: -- the request simply never ends, the browser keeps showing the last
+#: progress step, and everything the request had written is lost. A collective
+#: fetch walks 57 logins, so one silent gateway is a site-wide hazard.
+#:
+#: The read value is the gap BETWEEN bytes, not the total duration, so a slow
+#: statement fetch is unaffected; two minutes of complete silence is a dead
+#: connection by any reading.
+FINTS_TIMEOUT = (15, 120)
+
+
+def _apply_connection_timeout(client):
+    """Give a FinTS client's HTTP session a timeout it does not bring itself.
+
+    Patches the bound ``request`` of the session python-fints created, which is
+    what ``post()`` goes through. Best-effort and idempotent: a library version
+    that arranges its connection differently simply keeps its own behaviour
+    rather than failing the fetch on the way in.
+    """
+    try:
+        session = client.connection.session
+    except AttributeError:
+        return
+    if getattr(session, "_kefiya_timeout_applied", False):
+        return
+
+    original_request = session.request
+
+    def request_with_timeout(*args, **kwargs):
+        kwargs.setdefault("timeout", FINTS_TIMEOUT)
+        return original_request(*args, **kwargs)
+
+    try:
+        session.request = request_with_timeout
+        session._kefiya_timeout_applied = True
+    except Exception:
+        frappe.logger("kefiya").exception(
+            "Kefiya: could not put a timeout on the FinTS connection")
+
+
+def _end_dialog_unless_paused(conn, context=""):
+    """End a FinTS dialog -- unless a TAN request parked it.
+
+    A paused dialog is somebody's half-finished authentication: the bank is
+    holding a challenge open, and the user is on their way to release it in the
+    banking app. Sending HKEND throws that challenge away, so the release, when
+    it comes, unlocks nothing and the next attempt starts a fresh one -- which
+    is a loop the user cannot get out of by trying harder.
+    """
+    dialog = getattr(conn, "_standing_dialog", None)
+    if dialog is not None and getattr(dialog, "paused", False):
+        return
+
+    try:
+        conn.__exit__(None, None, None)
+    except Exception:
+        frappe.logger("kefiya").exception(
+            "Kefiya: closing a {0}FinTS dialog failed".format(
+                context + " " if context else ""))
+
+
 #: Key under which the active fetch session lives on ``frappe.local``. Request
 #: scoped by construction: frappe.local is rebuilt for every request and every
 #: background job, so a session can never outlive the work it belongs to.
@@ -98,15 +164,7 @@ def _retire_connection(session, conn):
     if conn in session.get("open", []):
         session["open"].remove(conn)
 
-    dialog = getattr(conn, "_standing_dialog", None)
-    if dialog is not None and getattr(dialog, "paused", False):
-        return
-
-    try:
-        conn.__exit__(None, None, None)
-    except Exception:
-        frappe.logger("kefiya").exception(
-            "Kefiya: closing a failed FinTS dialog failed")
+    _end_dialog_unless_paused(conn, "failed")
 
 
 @contextlib.contextmanager
@@ -145,12 +203,14 @@ def fints_session():
         # Close every dialog this session opened. Guarded per connection: the
         # session ends on the error path too, and a bank that dropped the
         # connection must not turn into a second exception on the way out.
+        #
+        # A dialog a TAN request parked is left standing. _retire_connection
+        # has always spared those; this loop did not, so a challenge parked
+        # inside a fetch session was ended again on the way out -- and the
+        # release the user then gave in their banking app had nothing left to
+        # unlock.
         for conn in session.get("open", []):
-            try:
-                conn.__exit__(None, None, None)
-            except Exception:
-                frappe.logger("kefiya").exception(
-                    "Kefiya: closing a shared FinTS dialog failed")
+            _end_dialog_unless_paused(conn, "shared")
 
 
 def _mask_iban(value):
@@ -263,6 +323,10 @@ class FinTSController:
             frappe.throw(
                 _("Could not conntect to fints server with error<br>{0}").format(e)
             )
+
+        # The library posts every message without a timeout; give it one before
+        # the first message goes out.
+        _apply_connection_timeout(self.fints_connection)
 
         # Offer it to the rest of the session, so the next login of this access
         # joins this client instead of opening its own.
@@ -584,6 +648,30 @@ class FinTSController:
     def ask_for_tan(self, response, *, decoupled=None, possible_tan_modes=None, possible_tan_mediums=None):
         if response:
             self.__persist_fints_state(response)
+            # A parked challenge is a fact about the outside world: the bank is
+            # now holding a dialog open and waiting. Whether that fact survives
+            # must not depend on the rest of this request finishing -- and it
+            # did. Everything below writes to the transaction and is committed
+            # only when the request returns cleanly, so a bank that stops
+            # answering afterwards (python-fints sends without a timeout, so
+            # that means the worker simply stops) took the parked challenge
+            # down with it. The user then confirmed in the app, the next
+            # attempt found no stored state, opened a fresh dialog and asked
+            # for a fresh release -- the same three steps over and over, with
+            # nothing in the Error Log to show for it.
+            #
+            # Committing here costs a partially finished fetch nothing: the
+            # only thing in flight at this point is the empty draft import,
+            # which the caller removes on this very path.
+            try:
+                frappe.db.commit()
+            except Exception:
+                frappe.log_error(
+                    title="Kefiya: committing the parked TAN challenge failed",
+                    message=frappe.get_traceback(),
+                    reference_doctype="Kefiya Login",
+                    reference_name=self.kefiya_login.name,
+                )
 
         if response.decoupled if decoupled is None else decoupled:
             self.interactive.request_mfa_confirmation(possible_tan_modes=possible_tan_modes, possible_tan_mediums=possible_tan_mediums)
