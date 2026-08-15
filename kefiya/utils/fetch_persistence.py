@@ -75,6 +75,7 @@ def store_balance(kefiya_login, rows):
 
     account = frappe.get_doc("Bank Account", login.bank_account)
     meta = account.meta
+    values = {}
 
     # On a guarantee the bank states the granted line, not money on an account.
     # Writing it into the balance field would put a number nobody holds into
@@ -84,14 +85,29 @@ def store_balance(kefiya_login, rows):
     # The fields are Custom Fields on this instance; skip silently where they
     # are not installed rather than failing a fetch that already succeeded.
     if meta.has_field("custom_account_balance") and not is_a_line:
-        account.custom_account_balance = flt(balance)
+        values["custom_account_balance"] = flt(balance)
     line = row.get("line_of_credit")
     if line is None and is_a_line:
         line = balance
     if meta.has_field("custom_credit_line") and line is not None:
-        account.custom_credit_line = flt(line)
+        values["custom_credit_line"] = flt(line)
 
-    account.save(ignore_permissions=True)
+    # db_set, not save(): a full save runs Bank Account.validate(), and its
+    # update_default_bank_account() issues an UPDATE over every account of the
+    # same company at once ("clear is_default on all the others"). That is a
+    # range lock on rows this write has no business touching, and when two
+    # accesses are fetched side by side -- which is the normal case, the
+    # collective fetch runs the groups in parallel -- two such range updates
+    # grab the same rows in opposite order and MariaDB kills one of them with
+    # 1213, "Deadlock found when trying to get lock", which is how a
+    # collective run lost a balance it had already fetched.
+    #
+    # Two custom fields carrying a number the bank just stated need none of
+    # that validation: nothing in Bank Account.validate() reads them, and
+    # db_set writes the single row by its primary key. It is the same reason
+    # apply_running_balance() below writes through db_set rather than save.
+    if values:
+        account.db_set(values, update_modified=True)
 
     return {
         "stored": True,

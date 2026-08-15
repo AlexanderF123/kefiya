@@ -46,6 +46,8 @@ FinTS segments, for the ones this app can actually issue:
     DKKKU           credit-card transactions
 """
 
+import time
+
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, now_datetime
@@ -272,15 +274,76 @@ def store_for_account(bank_account, segments):
     # tracked changes records that as a change -- once per account per fetch,
     # for a list that hardly ever moves. So it is only rewritten when it says
     # something different; when the bank repeats itself, only the date does.
-    if not _same_rows(doc.get(FIELD_TABLE), desired):
+    changed = not _same_rows(doc.get(FIELD_TABLE), desired)
+
+    # ... and when only the date moves, it is written as a field, not through a
+    # save. A save runs Bank Account.validate(), whose
+    # update_default_bank_account() clears is_default across every account of
+    # the company in one UPDATE -- a range lock, taken here for a timestamp.
+    # The bank repeats its capability list on nearly every fetch, so this was
+    # the common case: dozens of range locks per collective run, on rows the
+    # write never meant to touch. Two accesses fetched side by side then took
+    # them in opposite order and MariaDB killed one with 1213 ("Deadlock
+    # found") -- five accounts in a single observed run.
+    if not changed:
+        if doc.meta.has_field(FIELD_CHECKED_ON):
+            # Only the "last checked" stamp: no field the form validates, and
+            # not worth a version entry either.
+            doc.db_set(FIELD_CHECKED_ON, now_datetime(), update_modified=False)
+        return True
+
+    # The list itself changed, so the child table has to be written and that
+    # needs the document lifecycle. Rare -- a bank changes what it allows on an
+    # account maybe twice a year -- but it is the one path that can still meet
+    # the range lock above, so it is the one path that retries.
+    _write_rows_through_deadlock(bank_account, desired)
+    return True
+
+
+def _write_rows_through_deadlock(bank_account, desired, attempts=3):
+    """Write the capability list onto one Bank Account, giving way when
+    another fetch holds the lock.
+
+    A deadlock is not a broken document, it is two writers that arrived in an
+    unlucky order -- MariaDB picks one, rolls its statement back and reports
+    1213 to it. The losing side's correct answer is to try again, not to give
+    up: giving up is what left an account without its capability list for a
+    whole day.
+
+    The document is re-read on every attempt rather than re-saved from memory.
+    A save that was rolled back leaves the in-memory copy holding child rows
+    the database no longer has and a `modified` stamp it never got, so saving
+    that same object again invites a timestamp mismatch on top of the deadlock.
+    Reading it back costs one query and starts from what is actually stored.
+
+    Two things this deliberately does NOT do:
+
+      * It does not call frappe.db.rollback(). That would discard the whole
+        transaction -- the transactions this fetch imported above all -- to fix
+        one account's capability list.
+      * It does not swallow the last failure. After the final attempt the
+        exception travels on to _optional_fetch, which records the account as
+        failed and logs it, exactly as before.
+    """
+    for attempt in range(attempts):
+        doc = frappe.get_doc("Bank Account", bank_account)
         doc.set(FIELD_TABLE, [])
         for row in desired:
             doc.append(FIELD_TABLE, row)
+        if doc.meta.has_field(FIELD_CHECKED_ON):
+            doc.set(FIELD_CHECKED_ON, now_datetime())
 
-    if doc.meta.has_field(FIELD_CHECKED_ON):
-        doc.set(FIELD_CHECKED_ON, now_datetime())
-    doc.save(ignore_permissions=True)
-    return True
+        try:
+            doc.save(ignore_permissions=True)
+            return
+        except frappe.QueryDeadlockError:
+            if attempt == attempts - 1:
+                raise
+            # Short and rising, so the two writers do not walk back into each
+            # other on the next attempt. The winner needs a fraction of a
+            # second to finish; anything longer would hold the bank dialog
+            # open waiting on a timestamp.
+            time.sleep(0.2 * (attempt + 1))
 
 
 #: The fields that carry meaning. `business_transaction` is left out on
