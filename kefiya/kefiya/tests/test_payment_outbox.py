@@ -266,6 +266,42 @@ class TestTheSelectionCannotOutliveItsRows(unittest.TestCase):
         self.assertIn("if (!alive[name]) delete view.selected[name];", body)
 
 
+class TestTheStylesheetReachesThePage(unittest.TestCase):
+    """A Custom HTML Block renders inside a shadow root.
+
+    That is why the block is handed a `root_element` instead of reaching for
+    document, and why it has a style field of its own. A stylesheet appended
+    to document.head does not cross that boundary -- the page came up with
+    every rule silently matching nothing, which is exactly what happened the
+    first time this moved out of the block.
+    """
+
+    def test_the_stylesheet_goes_where_the_list_lives(self):
+        body = _source().split("kefiya.outbox_style = function (root) {")[1]
+        body = body.split("\nkefiya.payment_outbox")[0]
+        self.assertIn("root.getRootNode()", body,
+                      "getRootNode answers the shadow root inside a block and "
+                      "the document outside one.")
+        self.assertIn("holder.appendChild(el)", body)
+        self.assertNotIn("document.head.appendChild", body)
+
+    def test_it_is_given_the_element_it_has_to_reach(self):
+        self.assertIn("kefiya.outbox_style(root);", _source(),
+                      "Called without the element it cannot find the shadow "
+                      "root, and it is back to document.head.")
+
+    def test_it_is_not_put_inside_the_element_that_gets_rewritten(self):
+        """render() replaces #zk's innerHTML on every draw."""
+        body = _source().split("kefiya.outbox_style = function (root) {")[1]
+        body = body.split("\nkefiya.payment_outbox")[0]
+        self.assertNotIn("root.appendChild(el)", body)
+
+    def test_the_block_keeps_no_second_copy_of_it(self):
+        """Two stylesheets for one list is the split this move undid."""
+        block = _source("../blocks/payment_outbox_block.js")
+        self.assertNotIn("#zk .zk-", block)
+
+
 class TestTheTanPromptIsTheSharedOne(unittest.TestCase):
 
     def test_the_outbox_does_not_build_its_own_prompt(self):

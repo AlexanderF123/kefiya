@@ -130,9 +130,24 @@ kefiya.outbox_settings = {
 // The look travels with the list. It used to sit in the block's style field,
 // one database row away from the markup it applies to, which is how the two
 // drift apart: a class renamed here stayed styled there until somebody
-// noticed. Injected once, keyed by id so a second call does not stack it.
-kefiya.outbox_style = function () {
-	if (document.getElementById("kefiya-outbox-style")) return;
+// noticed.
+//
+// Where it goes is not a detail. A Custom HTML Block renders inside a SHADOW
+// ROOT -- that is the whole reason the block has a style field of its own,
+// and why its script is handed a `root_element` instead of reaching for
+// document. A stylesheet appended to document.head does not cross that
+// boundary: the page came up completely unstyled, every rule silently
+// matching nothing.
+//
+// So it is appended to the node the list actually lives in. getRootNode()
+// answers the shadow root inside a block and the document outside one, so the
+// same function is right in both. Next to #zk rather than inside it: render()
+// rewrites that element's innerHTML on every draw and would take the
+// stylesheet with it.
+kefiya.outbox_style = function (root) {
+	const home = (root && root.getRootNode && root.getRootNode()) || document;
+	const holder = home === document ? document.head : home;
+	if (!holder || holder.querySelector("#kefiya-outbox-style")) return;
 	const el = document.createElement("style");
 	el.id = "kefiya-outbox-style";
 	el.textContent = [
@@ -179,12 +194,12 @@ kefiya.outbox_style = function () {
 		"padding-top:10px;border-top:2px solid var(--border-color)}",
 		"#zk .zk-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
 	].join("");
-	document.head.appendChild(el);
+	holder.appendChild(el);
 };
 
 kefiya.payment_outbox = function (root) {
 	if (!root) return null;
-	kefiya.outbox_style();
+	kefiya.outbox_style(root);
 
 	const esc = frappe.utils.escape_html;
 	const kept = kefiya.outbox_settings.read();
