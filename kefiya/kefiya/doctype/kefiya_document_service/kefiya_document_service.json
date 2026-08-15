@@ -10,6 +10,16 @@
   "column_break_cfg",
   "base_url",
   "api_key",
+  "credential_section",
+  "credential_source",
+  "credential_doctype",
+  "credential_docname",
+  "credential_child_table",
+  "column_break_cred",
+  "credential_match_field",
+  "credential_match_value",
+  "credential_token_field",
+  "credential_url_field",
   "scope_section",
   "document_type_filter",
   "lookback_days",
@@ -52,7 +62,75 @@
    "description": "Created at the service under \"API access\". Stored encrypted and never written to a log.",
    "fieldname": "api_key",
    "fieldtype": "Password",
-   "label": "API Key"
+   "label": "API Key",
+   "depends_on": "eval:!doc.credential_source || doc.credential_source=='Inline'"
+  },
+  {
+   "fieldname": "credential_section",
+   "fieldtype": "Section Break",
+   "label": "Credentials"
+  },
+  {
+   "default": "Inline",
+   "fieldname": "credential_source",
+   "fieldtype": "Select",
+   "label": "Credential Source",
+   "options": "Inline\nExternal DocType",
+   "description": "Inline keeps the key in the field below. External DocType reads it from wherever this instance already keeps its API credentials, so there is one place for them instead of two."
+  },
+  {
+   "fieldname": "credential_doctype",
+   "fieldtype": "Link",
+   "label": "Credential DocType",
+   "options": "DocType",
+   "depends_on": "eval:doc.credential_source=='External DocType'"
+  },
+  {
+   "fieldname": "credential_docname",
+   "fieldtype": "Data",
+   "label": "Credential Document",
+   "description": "Leave empty for a Single DocType.",
+   "depends_on": "eval:doc.credential_source=='External DocType'"
+  },
+  {
+   "fieldname": "credential_child_table",
+   "fieldtype": "Data",
+   "label": "Child Table Fieldname",
+   "description": "Fieldname of the table holding one row per service. Empty means the fields sit on the document itself.",
+   "depends_on": "eval:doc.credential_source=='External DocType'"
+  },
+  {
+   "fieldname": "column_break_cred",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "service",
+   "fieldname": "credential_match_field",
+   "fieldtype": "Data",
+   "label": "Match Field",
+   "depends_on": "eval:doc.credential_source=='External DocType' && doc.credential_child_table"
+  },
+  {
+   "fieldname": "credential_match_value",
+   "fieldtype": "Data",
+   "label": "Match Value",
+   "description": "Value identifying this service's row, e.g. its short name.",
+   "depends_on": "eval:doc.credential_source=='External DocType' && doc.credential_child_table"
+  },
+  {
+   "default": "api_token",
+   "fieldname": "credential_token_field",
+   "fieldtype": "Data",
+   "label": "Token Field",
+   "description": "Password field holding the key.",
+   "depends_on": "eval:doc.credential_source=='External DocType'"
+  },
+  {
+   "fieldname": "credential_url_field",
+   "fieldtype": "Data",
+   "label": "Base URL Field",
+   "description": "Optional. When set, the endpoint is taken from there instead of the Base URL above.",
+   "depends_on": "eval:doc.credential_source=='External DocType'"
   },
   {
    "fieldname": "scope_section",

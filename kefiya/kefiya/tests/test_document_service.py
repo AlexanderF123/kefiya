@@ -24,10 +24,19 @@ class TestTheKeyStaysWhereItBelongs(unittest.TestCase):
     exists to keep it from leaking back out the side."""
 
     def test_the_key_is_read_through_the_encrypted_field(self):
-        source = inspect.getsource(ds._call)
-        self.assertIn('get_password("api_key")', source,
+        source = inspect.getsource(ds._credentials)
+        self.assertIn("get_password(", source,
                       "Reading it as a plain field would return the cipher "
                       "text, and storing it as one would defeat the point.")
+        self.assertEqual(source.count("get_password("), 2,
+                         "One read per source -- inline and external.")
+
+    def test_the_key_is_not_held_on_the_settings_document_in_between(self):
+        """It is fetched at the moment of the call and passed straight into
+        the body, so there is no attribute anyone can print later."""
+        source = inspect.getsource(ds._call)
+        self.assertIn('body["api_key"] = key', source)
+        self.assertNotIn("self.api_key", source)
 
     def test_a_failed_call_does_not_carry_the_request_body(self):
         """requests puts the body on some exceptions. The body is where the
@@ -59,6 +68,53 @@ class TestTheKeyStaysWhereItBelongs(unittest.TestCase):
     def test_the_summary_never_contains_the_key(self):
         source = inspect.getsource(ds.fetch_statements)
         self.assertNotIn("api_key", source)
+
+
+class TestTheKeyMayLiveWhereTheInstanceKeepsItsKeys(unittest.TestCase):
+    """An instance that already has a place for API credentials should not
+    grow a second one. A key kept in two places is a key that gets rotated in
+    one of them, and the failure then looks like the service is down."""
+
+    def test_this_app_names_nobodys_particular_setup(self):
+        """Where the credentials live is a fact about the instance and
+        belongs in its configuration, not in this app."""
+        source = inspect.getsource(ds).lower()
+        for name in ("axessio", "propms"):
+            self.assertNotIn(name, source)
+
+    def test_an_external_doctype_can_supply_the_key(self):
+        source = inspect.getsource(ds._credentials)
+        for part in ("credential_doctype", "credential_child_table",
+                     "credential_match_field", "credential_token_field"):
+            self.assertIn(part, source)
+
+    def test_a_single_and_a_named_document_are_both_reachable(self):
+        source = inspect.getsource(ds._credentials)
+        self.assertIn("meta.issingle", source)
+        self.assertIn("frappe.get_single(doc.credential_doctype)", source)
+        self.assertIn("credential_docname", source)
+
+    def test_a_missing_row_is_named_not_silently_empty(self):
+        """An empty key produces an authentication error at the service,
+        which reads like the key is wrong rather than absent."""
+        source = inspect.getsource(ds._credentials)
+        self.assertIn("if holder is None:", source)
+        self.assertIn("frappe.throw", source)
+
+    def test_a_switched_off_credential_row_is_not_used(self):
+        source = inspect.getsource(ds._credentials)
+        self.assertIn('not holder.get("enabled")', source)
+
+    def test_an_absent_key_stops_the_run_before_the_call(self):
+        source = inspect.getsource(ds._settings)
+        self.assertIn("if not key:", source)
+        self.assertLess(source.index("if not key:"), source.index("return doc"))
+
+    def test_the_endpoint_may_come_from_the_same_row(self):
+        """Endpoint and key belong together; splitting them across two places
+        is how a key ends up sent to the wrong host."""
+        source = inspect.getsource(ds._credentials)
+        self.assertIn("credential_url_field", source)
 
 
 class TestPlainHttpIsRefused(unittest.TestCase):

@@ -25,10 +25,12 @@ that do speak FinTS.
 
 Two things this module is careful about:
 
-  * The API key never leaves the settings document. It is a Password field, so
-    Frappe stores it encrypted, and no code path here puts it into a message,
-    a summary or the Error Log -- a traceback that quotes the request body
-    would otherwise publish the key to everyone who may read an error.
+  * The API key is read at the moment of the call and goes nowhere else. It
+    lives in a Password field -- either here or, where the instance already
+    keeps its API credentials, in that place instead, so a rotated key is
+    rotated once. No code path puts it into a message, a summary or the Error
+    Log; a traceback quoting the request body would otherwise publish the key
+    to everyone who may read an error.
   * A run writes nothing until it is asked to. The default is a dry run that
     reports what it found.
 """
@@ -55,18 +57,79 @@ _NAME_KEYS = ("file_name", "fileName", "filename", "document_number",
 _DATE_KEYS = ("document_date", "documentDate", "date", "created")
 
 
+def _credentials(doc):
+    """Endpoint and key -- from here, or from wherever this instance keeps
+    its API credentials already.
+
+    An instance that has a place for API credentials should not grow a second
+    one just because this app arrived. A key kept in two places is a key that
+    gets rotated in one of them, and the failure then looks like the service
+    is down.
+
+    So the settings say WHERE to read rather than holding the value: a
+    DocType, optionally a row in one of its child tables picked by a field
+    value, and the name of the Password field. Which DocType that is, is a
+    fact about the instance and stays in its configuration -- this app is not
+    written against anybody's particular setup.
+
+    :return: (base_url, api_key)
+    """
+    source = doc.credential_source or "Inline"
+    base = (doc.base_url or "").strip()
+
+    if source == "Inline":
+        return base, doc.get_password("api_key")
+
+    if not doc.credential_doctype:
+        frappe.throw(_("No credential DocType is configured."))
+
+    meta = frappe.get_meta(doc.credential_doctype)
+    if meta.issingle:
+        holder = frappe.get_single(doc.credential_doctype)
+    else:
+        if not doc.credential_docname:
+            frappe.throw(_("No credential document is named."))
+        holder = frappe.get_doc(doc.credential_doctype, doc.credential_docname)
+
+    if doc.credential_child_table:
+        rows = holder.get(doc.credential_child_table) or []
+        field = doc.credential_match_field or "service"
+        wanted = str(doc.credential_match_value or "").strip()
+        holder = next(
+            (r for r in rows
+             if str(r.get(field) or "").strip() == wanted), None)
+        if holder is None:
+            # Named rather than silently falling back to an empty key: an
+            # empty key produces an authentication error at the service,
+            # which reads like the key is wrong rather than absent.
+            frappe.throw(_(
+                "No credential row where {0} is {1}.").format(field, wanted))
+        # A row that is switched off is a decision, not an oversight.
+        if "enabled" in (holder.as_dict() or {}) and not holder.get("enabled"):
+            frappe.throw(_("The credential row {0} is not active.").format(
+                wanted))
+
+    if doc.credential_url_field:
+        base = str(holder.get(doc.credential_url_field) or base).strip()
+
+    return base, holder.get_password(doc.credential_token_field or "api_token")
+
+
 def _settings():
     doc = frappe.get_single(SETTINGS)
     if not doc.enabled:
         frappe.throw(_("The document service is switched off."))
-    if not doc.api_key:
+
+    base, key = _credentials(doc)
+    if not key:
         frappe.throw(_("No API key is configured for the document service."))
-    base = (doc.base_url or "").strip().rstrip("/")
+
+    base = (base or "").rstrip("/")
     if not base.startswith("https://"):
         # An API key travels in the body of every one of these calls. Over
         # plain http it travels in the clear.
         frappe.throw(_("The base URL must be an https address."))
-    return doc, base
+    return doc, base, key
 
 
 def _call(path, payload=None):
@@ -79,9 +142,9 @@ def _call(path, payload=None):
     """
     import requests
 
-    doc, base = _settings()
+    _doc, base, key = _settings()
     body = dict(payload or {})
-    body["api_key"] = doc.get_password("api_key")
+    body["api_key"] = key
 
     try:
         response = requests.post(
@@ -151,7 +214,7 @@ def probe(limit=1):
     site: the values are not returned, only the names and their types.
     """
     frappe.only_for("System Manager")
-    doc, _base = _settings()
+    doc, _base, _key = _settings()
 
     response = _call("/listDocuments", _list_filters(doc, None))
     documents = _documents_in(response)
@@ -217,7 +280,7 @@ def fetch_statements(dry_run=1):
         "already_present": int, "failed": int, "dry_run": bool}
     """
     frappe.only_for("System Manager")
-    doc, _base = _settings()
+    doc, _base, _key = _settings()
     dry = bool(cint(dry_run))
 
     summary = {"accounts": [], "found": 0, "stored": 0,
