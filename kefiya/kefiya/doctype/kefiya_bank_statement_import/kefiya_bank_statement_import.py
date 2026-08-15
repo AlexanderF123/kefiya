@@ -94,15 +94,32 @@ class KefiyaBankStatementImport(Document):
 		self.db_set('payload_count', plan.get("total") or 0)
 
 		created = 0
+		# One file, many accounts, and therefore many companies. A StarMoney
+		# export covers every access the program knows -- twenty accounts
+		# across a dozen companies in the case at hand. Taking the company
+		# from the form would file every one of those bookings under whichever
+		# company happened to be selected, and a booking under the wrong
+		# company is worse than no booking: it lands in someone else's
+		# accounts and reconciles against nothing.
+		#
+		# The Bank Account already knows its company. That is the answer, and
+		# the form's company is only the fallback for a row that resolved to
+		# no account of its own.
+		companies = {}
 		for index, entry in enumerate(entries):
 			try:
+				target = entry.get("bank_account") or bank_account
+				if target not in companies:
+					companies[target] = frappe.db.get_value(
+						"Bank Account", target, "company") or company
+
 				booking = frappe.new_doc("Bank Transaction")
 				booking.update({
 					"date": str(entry["date"]),
 					"deposit": entry["amount"] if entry["amount"] > 0 else 0,
 					"withdrawal": -entry["amount"] if entry["amount"] < 0 else 0,
-					"bank_account": bank_account,
-					"company": company,
+					"bank_account": target,
+					"company": companies[target],
 					"description": " ".join(
 						x for x in (entry.get("counterparty"),
 									entry.get("description")) if x),

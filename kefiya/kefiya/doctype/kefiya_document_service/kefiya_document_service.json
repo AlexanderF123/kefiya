@@ -68,7 +68,7 @@
   {
    "fieldname": "credential_section",
    "fieldtype": "Section Break",
-   "label": "Credentials"
+   "label": "Access credentials"
   },
   {
    "default": "Inline",
@@ -164,13 +164,13 @@
   {
    "fieldname": "accounts_section",
    "fieldtype": "Section Break",
-   "label": "Accounts"
+   "label": "Account mapping"
   },
   {
    "description": "Which Bank Account a fetched document belongs to. Without an entry here nothing is filed -- a statement with no account has nowhere to go.",
    "fieldname": "accounts",
    "fieldtype": "Table",
-   "label": "Accounts",
+   "label": "Assigned accounts",
    "options": "Kefiya Document Account"
   },
   {

@@ -1,6 +1,32 @@
 // Copyright (c) 2026, Phamos GmbH and contributors
 // For license information, please see license.txt
 
+frappe.provide("kefiya");
+
+// A call that fails on the server resolves here with no message at all, and
+// every handler below started with "if (!result) return". The result was a
+// button that did nothing visible -- the worst possible answer, because it
+// looks like the button is broken rather than the service. Whatever went
+// wrong, something is said.
+kefiya.saySomethingWentWrong = function (title, r) {
+	const server = (r && r._server_messages) || "";
+	let detail = "";
+	try {
+		const parsed = JSON.parse(server);
+		detail = parsed.map((m) => {
+			try { return JSON.parse(m).message; } catch (e) { return m; }
+		}).join(" ");
+	} catch (e) {
+		detail = String(server || "");
+	}
+	frappe.msgprint({
+		title: title,
+		indicator: "red",
+		message: frappe.utils.escape_html(detail)
+			|| __("The call returned nothing. See the Error Log for details."),
+	});
+};
+
 frappe.ui.form.on("Kefiya Document Service", {
 	refresh(frm) {
 		frm.add_custom_button(__("Test connection"), () =>
@@ -9,7 +35,10 @@ frappe.ui.form.on("Kefiya Document Service", {
 				freeze: true,
 				freeze_message: __("Asking the service …"),
 			}).then((r) => {
-				if (!r.message) return;
+				if (!r || !r.message) {
+					kefiya.saySomethingWentWrong(__("Connection failed"), r);
+					return;
+				}
 				frappe.msgprint({
 					title: __("Connection"),
 					message: __("The service answered."),
@@ -27,7 +56,13 @@ frappe.ui.form.on("Kefiya Document Service", {
 			frappe.call({
 				method: "kefiya.utils.document_service.probe",
 				freeze: true,
-			}).then((r) => kefiya.show_probe(r.message))
+			}).then((r) => {
+				if (!r || !r.message) {
+					kefiya.saySomethingWentWrong(__("Field names"), r);
+					return;
+				}
+				kefiya.show_probe(r.message);
+			})
 		);
 
 		frm.add_custom_button(__("Dry run"), () =>
@@ -36,7 +71,13 @@ frappe.ui.form.on("Kefiya Document Service", {
 				args: { dry_run: 1 },
 				freeze: true,
 				freeze_message: __("Looking, writing nothing …"),
-			}).then((r) => kefiya.show_document_run(r.message))
+			}).then((r) => {
+				if (!r || !r.message) {
+					kefiya.saySomethingWentWrong(__("Dry run failed"), r);
+					return;
+				}
+				kefiya.show_document_run(r.message);
+			})
 		);
 
 		frm.add_custom_button(__("Fetch now"), () =>
@@ -48,7 +89,11 @@ frappe.ui.form.on("Kefiya Document Service", {
 					freeze: true,
 					freeze_message: __("Fetching …"),
 				}).then((r) => {
-					kefiya.show_document_run(r.message);
+					if (!r || !r.message) {
+						kefiya.saySomethingWentWrong(__("Fetch failed"), r);
+					} else {
+						kefiya.show_document_run(r.message);
+					}
 					frm.reload_doc();
 				})
 			)
@@ -126,8 +171,8 @@ kefiya.show_document_run = function (summary) {
 				<th class="text-right">${summary.dry_run
 					? __("Would file") : __("Filed")}</th>
 				<th class="text-right">${__("Already present")}</th>
-				<th class="text-right">${__("Failed")}</th>
-				<th>${__("Note")}</th></tr></thead>
+				<th class="text-right">${__("Failures")}</th>
+				<th>${__("Remark")}</th></tr></thead>
 				<tbody>${rows}</tbody>
 			</table>`,
 	});
