@@ -144,6 +144,54 @@ def party_for_iban(iban):
 # The one traversal
 # --------------------------------------------------------------------------
 
+def _token(entry):
+    """What `already_booked` compares, as a hashable value.
+
+    Day and signed amount -- deposit and withdrawal kept apart by the sign, so
+    a 250,00 credit never cancels a 250,00 debit of the same day.
+    """
+    return (str(entry["date"])[:10], int(round(flt(entry["amount"]) * 100)))
+
+
+def _existing_budget(bank_account, entries):
+    """How many bookings of each day-and-amount this account ALREADY has.
+
+    A counter, not a set, and this is the whole point. The content check exists
+    because a booking the bank delivered carries the bank's reference, so the
+    hash comparison cannot recognise it. But asking "does one like this exist?"
+    per entry counts every further identical entry of the same run as a
+    duplicate too -- and identical here means only same day, same amount.
+
+    That is not a theoretical loss. The April/May statement of one account
+    holds nine separate fees of 5,10 € from the Landratsamt on 26 May, each
+    with its own invoice number, and three invoices of 178,50 € from one
+    craftsman on 2 April. Under "does one exist?" the account would have
+    received one of each: 41 real bookings across the file, silently gone.
+
+    So the existing bookings are a budget. Each entry that matches consumes
+    one; once the budget is spent, the next identical entry is what it looks
+    like -- a booking that is not here yet.
+
+    Read only across the days the file actually covers for this account: an
+    account with ten years of history has no business being loaded to import
+    two months.
+    """
+    days = [str(e["date"])[:10] for e in entries]
+    if not days:
+        return {}
+
+    budget = {}
+    for row in frappe.get_all(
+            "Bank Transaction",
+            filters={"bank_account": bank_account,
+                     "date": ["between", [min(days), max(days)]]},
+            fields=["date", "deposit", "withdrawal"], limit_page_length=0):
+        amount = flt(row.get("deposit")) - flt(row.get("withdrawal"))
+        key = (str(row["date"])[:10], int(round(amount * 100)))
+        budget[key] = budget.get(key, 0) + 1
+    return budget
+
+
 def book_entries(entries, dry_run=True, sample_size=5):
     """Walk canonical entries once, deciding and counting the same way for all.
 
@@ -161,6 +209,16 @@ def book_entries(entries, dry_run=True, sample_size=5):
     seen = set()
     companies = {}
 
+    # What each account already holds, counted once before anything is booked.
+    # Per account rather than globally: two accounts of one house see the same
+    # rent on the same day, and they are two bookings, not one.
+    by_account = {}
+    for entry in entries:
+        if entry.get("bank_account"):
+            by_account.setdefault(entry["bank_account"], []).append(entry)
+    budgets = {target: _existing_budget(target, rows)
+               for target, rows in by_account.items()}
+
     for entry in entries:
         target = entry.get("bank_account")
         if not target:
@@ -172,7 +230,21 @@ def book_entries(entries, dry_run=True, sample_size=5):
         reference = entry.get("reference_number") or reference_number(
             target, entry)
 
-        if reference in seen or is_already_booked(target, entry, reference):
+        # Three ways this can already be here. The first two are identity --
+        # this exact entry, twice in the file or written by an earlier run.
+        # The third is the budget: a booking that looks like this one and was
+        # not written by us, which is how a bank-delivered booking is
+        # recognised at all.
+        budget = budgets.get(target, {})
+        token = _token(entry)
+        duplicate = (reference in seen
+                     or frappe.db.exists("Bank Transaction",
+                                         {"reference_number": reference}))
+        if not duplicate and budget.get(token):
+            budget[token] -= 1
+            duplicate = True
+
+        if duplicate:
             result["duplicates"] += 1
             per["duplicates"] += 1
             continue

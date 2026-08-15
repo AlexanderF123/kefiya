@@ -214,10 +214,13 @@ class TestADuplicateIsNotOnlyAKnownReference(unittest.TestCase):
             self.assertIn("book_entries(", inspect.getsource(fn),
                           fn.__name__ + " must not count for itself.")
 
-    def test_that_one_traversal_asks_the_single_duplicate_question(self):
+    def test_that_one_traversal_asks_both_questions(self):
         import inspect
         source = inspect.getsource(persist.book_entries)
-        self.assertIn("is_already_booked(target, entry, reference)", source)
+        self.assertIn('"reference_number": reference', source,
+                      "The reference recognises what this app wrote.")
+        self.assertIn("budget.get(token)", source,
+                      "The content check recognises what the bank delivered.")
 
     def test_the_single_question_covers_reference_and_content(self):
         """Reference alone misses everything the bank itself delivered."""
@@ -442,3 +445,135 @@ class TestTheSameFileTwiceIsHarmless(unittest.TestCase):
         source = inspect.getsource(si.reference_number)
         for forbidden in ("index", "row_number", "idx"):
             self.assertNotIn(forbidden, source)
+
+
+class _FakeDB:
+    """A database that only remembers reference numbers."""
+
+    def __init__(self):
+        self.references = set()
+
+    def exists(self, doctype, filters):
+        return filters.get("reference_number") in self.references
+
+    def get_value(self, *args, **kwargs):
+        return "Some Company"
+
+
+class _FakeFrappe:
+    """Enough of frappe for book_entries: what an account already holds, and
+    what gets written."""
+
+    ValidationError = Exception
+
+    def __init__(self, existing=()):
+        self.db = _FakeDB()
+        self.existing = list(existing)
+        self.written = []
+
+    def get_all(self, doctype, filters=None, fields=None, **kwargs):
+        low, high = (filters or {}).get("date", [None, [None, None]])[1]
+        return [r for r in self.existing if low <= r["date"] <= high]
+
+    def get_doc(self, doc):
+        self.written.append(doc)
+        return _FakeDoc(self, doc)
+
+    def log_error(self, **kwargs):
+        return None
+
+    def get_traceback(self):
+        return ""
+
+
+class _FakeDoc:
+    def __init__(self, app, doc):
+        self.app = app
+        self.doc = doc
+        self.name = "BT-{0}".format(len(app.written))
+        self.party = self.party_type = None
+
+    def insert(self, **kwargs):
+        self.app.db.references.add(self.doc.get("reference_number"))
+        return self
+
+
+class TestTwoRealBookingsOfOneDayAndAmountBothArrive(unittest.TestCase):
+    """The content check is a budget, not a yes/no question.
+
+    Asking "does a booking like this exist?" per entry counts every FURTHER
+    identical entry of the same run as a duplicate too -- and identical means
+    only same account, same day, same amount. The April/May statement that
+    prompted this holds nine separate fees of 5,10 € from one authority on one
+    day, each with its own invoice number, and three invoices of 178,50 € from
+    one craftsman on another. Under the old question the account would have
+    received one of each: 41 real bookings across that file, silently gone.
+    """
+
+    @staticmethod
+    def _entries(count, amount=-178.5, day="2026-04-02"):
+        return [{"bank_account": "ACC", "date": day, "amount": amount,
+                 "description": "invoice {0}".format(i), "counterparty": "Bau",
+                 "iban": None, "reference": None} for i in range(count)]
+
+    def _run(self, entries, existing=(), dry_run=True):
+        original = persist.frappe
+        fake = _FakeFrappe(existing)
+        persist.frappe = fake
+        try:
+            return persist.book_entries(entries, dry_run=dry_run), fake
+        finally:
+            persist.frappe = original
+
+    def test_three_distinct_invoices_of_one_amount_are_three_bookings(self):
+        result, _ = self._run(self._entries(3))
+        self.assertEqual(result["would_create"], 3)
+        self.assertEqual(result["duplicates"], 0)
+
+    def test_one_that_is_already_there_holds_back_exactly_one(self):
+        existing = [{"date": "2026-04-02", "deposit": 0, "withdrawal": 178.5}]
+        result, _ = self._run(self._entries(3), existing)
+        self.assertEqual(result["duplicates"], 1)
+        self.assertEqual(result["would_create"], 2)
+
+    def test_an_account_that_holds_them_all_takes_none(self):
+        existing = [{"date": "2026-04-02", "deposit": 0, "withdrawal": 178.5}
+                    for _ in range(3)]
+        result, _ = self._run(self._entries(3), existing)
+        self.assertEqual(result["duplicates"], 3)
+        self.assertEqual(result["would_create"], 0)
+
+    def test_the_side_of_the_booking_is_still_part_of_it(self):
+        """A credit of 178,50 does not cover a debit of 178,50."""
+        existing = [{"date": "2026-04-02", "deposit": 178.5, "withdrawal": 0}]
+        result, _ = self._run(self._entries(1), existing)
+        self.assertEqual(result["would_create"], 1)
+
+    def test_the_same_file_twice_still_books_nothing_the_second_time(self):
+        """The budget must not undo what the reference check is for."""
+        entries = self._entries(3)
+        original = persist.frappe
+        fake = _FakeFrappe()
+        persist.frappe = fake
+        try:
+            first = persist.book_entries(entries, dry_run=False)
+            second = persist.book_entries(entries, dry_run=False)
+        finally:
+            persist.frappe = original
+        self.assertEqual(first["created"], 3)
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["duplicates"], 3)
+
+    def test_another_accounts_bookings_are_not_counted_against_this_one(self):
+        """Two accounts of one house see the same rent on the same day."""
+        entries = (self._entries(1)
+                   + [dict(e, bank_account="OTHER") for e in self._entries(1)])
+        result, _ = self._run(entries)
+        self.assertEqual(result["would_create"], 2)
+
+    def test_the_window_read_is_the_one_the_file_covers(self):
+        """An account with ten years of history is not loaded to import two
+        months of it."""
+        import inspect
+        source = inspect.getsource(persist._existing_budget)
+        self.assertIn('"date": ["between", [min(days), max(days)]]', source)

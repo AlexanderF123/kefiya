@@ -88,3 +88,95 @@ Failures,Fehlgeschlagen
 Remark,Hinweis
 Assigned accounts,Zugeordnete Konten
 Access credentials,Zugangsdaten
+Open document,Im Dokument öffnen
+As soon as possible,So bald wie möglich
+On {0} — held here until then,Am {0} — bis dahin hier gehalten
+On {0} — the bank holds the order,Am {0} — die Bank hält den Auftrag
+Paying account,Abgehendes Konto
+Execution,Ausführung
+Instant payment,Echtzeitüberweisung
+Yes — sent as a SEPA instant payment,Ja — geht als SEPA-Echtzeitüberweisung
+No — ordinary SEPA transfer,Nein — gewöhnliche SEPA-Überweisung
+"Kept here, released on the day",Wird hier gehalten und am Tag freigegeben
+Left with the bank,Liegt bei der Bank
+Payee verification,Empfängerprüfung
+still open,noch offen
+Bank response,Rückmeldung der Bank
+Receipts,Belege
+The attachments could not be read.,Die Anhänge konnten nicht gelesen werden.
+No receipt is attached to this order.,An diesem Auftrag hängt kein Beleg.
+Correct,Korrigieren
+Correct transfer,Überweisung korrigieren
+New transfer,Neue Überweisung
+Enter,Erfassen
+On a date — the bank holds the order,Zu einem Termin — die Bank hält den Auftrag
+On a date — held here until then,Zu einem Termin — bis dahin hier gehalten
+The order goes out with the next send.,Der Auftrag geht mit der nächsten Sendung raus.
+"Sent now, executed by the bank on the day. The bank must support dated transfers for this account.","Geht sofort raus, die Bank führt ihn am Termin aus. Die Bank muss Terminüberweisungen für dieses Konto anbieten."
+Stays in the outbox and is offered for sending on the day. Use this where the bank takes no dated order.,"Bleibt im Ausgangskorb und wird am Termin zum Senden angeboten. Für Banken, die keinen Terminauftrag annehmen."
+No account available,Kein Konto verfügbar
+"No bank access is set up that a transfer can start from. A loan, a guarantee or a credit card cannot send money.","Es ist kein Bankzugang eingerichtet, von dem eine Überweisung ausgehen kann. Ein Darlehen, ein Aval oder eine Kreditkarte kann kein Geld senden."
+The paying account cannot be changed on an existing order. Delete it and enter a new one instead.,Das abgehende Konto lässt sich an einem bestehenden Auftrag nicht ändern. Stattdessen löschen und neu erfassen.
+"Free text. Known payees are suggested while you type, but any name may be entered.","Freitext. Bekannte Empfänger werden beim Tippen vorgeschlagen, eingeben lässt sich jeder Name."
+Checked against its checksum before it is stored.,Wird vor dem Speichern gegen ihre Prüfsumme geprüft.
+Execution date,Ausführungstermin
+"Arrives within seconds. The bank must offer it for this account, and it is usually capped.","Kommt binnen Sekunden an. Die Bank muss es für dieses Konto anbieten, meist gilt eine Betragsgrenze."
+Date missing,Termin fehlt
+A dated transfer needs a date.,Eine Terminüberweisung braucht einen Termin.
+Transfer saved.,Überweisung gespeichert.
+Transfer entered.,Überweisung erfasst.
+Not saved,Nicht gespeichert
+The transfer could not be saved.,Die Überweisung konnte nicht gespeichert werden.
+Please choose a paying account.,Bitte ein abgehendes Konto wählen.
+When,Wann
+Reference,Verwendungszweck
+Order state,Zustand
+Recipient / Reference,Empfänger / Verwendungszweck
+Due on,Fällig
+Failed to send,Fehlgeschlagen
+Held back,Zurückgestellt
+Sent to the bank,Abgesendet
+At the bank,Bei der Bank
+Approved for sending,Freigegeben
+Unknown error.,Unbekannter Fehler.
+Loading …,Lädt …
+The outgoing payments could not be loaded.,Der Zahlungsausgang konnte nicht geladen werden.
+"Search — recipient, IBAN, reference, amount","Suchen — Empfänger, IBAN, Verwendungszweck, Betrag"
+show sent,abgesendete zeigen
+Select all listed orders,Alle angezeigten Aufträge markieren
+"Sort by this column. Clicking the sorted column again reverses it, once more restores the default order.","Nach dieser Spalte sortieren. Ein zweiter Klick kehrt die Richtung um, ein dritter stellt die Standardreihenfolge wieder her."
+{0} recipients,{0} Empfänger
+as soon as possible,so bald wie möglich
+held here,bei uns gehalten
+dated at the bank,Termin bei der Bank
+Open this order,Diesen Auftrag öffnen
+Selected: {0} orders · {1},Markiert: {0} Aufträge · {1}
+Approved and still here: {0},Freigegeben und noch hier: {0}
+Cancel hold,Zurückstellung aufheben
+Hold back,Zurückstellen
+Approve for sending,Freigeben
+Sending needs the right to approve.,"Absenden darf nur, wer Freigaberecht hat."
+Nothing found.,Nichts gefunden.
+There is nothing to send. Transfers collect here until they go out.,"Der Zahlungsausgang ist leer. Erfasste Überweisungen sammeln sich hier, bis sie abgesendet werden."
+Approve {0} orders over {1}?,{0} Aufträge über {1} freigeben?
+"Approving locks the amounts and the recipients. No money moves: sending is the next, separate step and the bank asks for a TAN then.","Mit der Freigabe stehen Beträge und Empfänger fest. Es fließt kein Geld: Absenden ist der nächste, eigene Schritt, und dann verlangt die Bank eine TAN."
+Approving …,Gebe frei …
+Approved: {0},Freigegeben: {0}
+Not approved,Nicht freigegeben
+Held back: {0},Zurückgestellt: {0}
+Released again: {0},Zurückstellung aufgehoben: {0}
+Not changed,Nicht geändert
+Delete {0} drafts? They are gone afterwards.,{0} Entwürfe löschen? Sie sind danach weg.
+Deleted: {0},Gelöscht: {0}
+Not deleted,Nicht gelöscht
+One account at a time,Nur ein Konto auf einmal
+Orders from several accounts are selected. A collective order always leaves from exactly one account — please send them one account at a time.,Es sind Aufträge von mehreren Konten markiert. Ein Sammelauftrag geht immer von genau einem Konto ab — bitte je Konto einzeln senden.
+{0} orders over {1} go from {2} to the bank.,{0} Aufträge über {1} gehen von {2} an die Bank.
+"{0} selected orders are not being sent — they are drafts, held back or already sent.","{0} markierte Aufträge gehen nicht mit — sie sind Entwürfe, zurückgestellt oder schon abgesendet."
+The bank will usually ask for a release (TAN or a confirmation in its app). Nothing is debited until then.,Die Bank verlangt in aller Regel eine Freigabe (TAN oder Bestätigung in ihrer App). Bis dahin ist nichts abgebucht.
+Sending to the bank …,Sende an die Bank …
+Not sent,Nicht abgesendet
+The bank asks for a release.,Die Bank verlangt eine Freigabe.
+Handed to the bank: {0} orders,An die Bank übergeben: {0} Aufträge
+Not a draft any more.,Kein Entwurf mehr.
+No transfers selected.,Keine Überweisungen markiert.

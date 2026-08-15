@@ -1,0 +1,782 @@
+// Copyright (c) 2026, Phamos GmbH and contributors
+// For license information, please see license.txt
+
+// The outgoing-payments list: every order between "entered" and "at the bank".
+//
+// This used to live as a 19 KB script inside a stored Custom HTML Block on one
+// site. That made it invisible to review, untestable, unversioned, and every
+// change a 19 KB round trip through the database. It is the page that moves
+// money -- of everything in this app it had the weakest safety net. So it lives
+// here now and the block is a bootstrap of a few lines.
+//
+// What the list does beyond showing rows:
+//
+//   * sorts by any column, and remembers that per user;
+//   * opens an order by clicking anywhere in its row, rather than through a
+//     row of small buttons that repeated on every line;
+//   * acts on a selection: approve, hold, release, delete, send.
+//
+// The batch actions are the reason the selection exists at all. Approving
+// thirty orders one at a time is thirty identical decisions; approving them
+// together is the one decision that was actually made. Sending stays a
+// separate, confirmed step -- approval locks an order, it does not move money.
+
+frappe.provide("kefiya");
+
+//: The columns, as data: the header, the sort key and the cell all read from
+//: the same entry, so a column cannot be sortable by something other than what
+//: it shows.
+kefiya.OUTBOX_COLUMNS = [
+	{
+		key: "state", label: __("Order state"),
+		sort: function (r) { return kefiya.outbox_state(r).rank; },
+	},
+	{
+		key: "account", label: __("Paying account"),
+		sort: function (r) { return (r.bank_account || "").toLowerCase(); },
+	},
+	{
+		key: "recipient", label: __("Recipient / Reference"),
+		sort: function (r) {
+			return kefiya.outbox_recipient(r).toLowerCase();
+		},
+	},
+	{
+		key: "due", label: __("Due on"),
+		// No date means "as soon as possible", which is sooner than any date.
+		sort: function (r) { return r.execution_date || "0000-00-00"; },
+	},
+	{
+		key: "amount", label: __("Amount"), right: true,
+		sort: function (r) { return Number(r.total_amount || 0); },
+	},
+	{
+		key: "note", label: __("Remark"),
+		sort: function (r) { return (r.blocked || "").toLowerCase(); },
+	},
+];
+
+//: The state of an order in one word, plus the colours it is shown in and the
+//: rank it sorts by. The rank follows the life of an order rather than the
+//: alphabet: a draft comes before an approved order, and a sent one is done.
+kefiya.outbox_state = function (r) {
+	if (!r) return { key: "draft", label: "", rank: 0, fg: "", bg: "" };
+	if (r.docstatus === 0) {
+		return { key: "draft", label: __("Draft"), rank: 0,
+			fg: "#854F0B", bg: "#FDF3E3" };
+	}
+	if (r.status === "Failed") {
+		return { key: "failed", label: __("Failed to send"), rank: 1,
+			fg: "#A32D2D", bg: "#FBEDED" };
+	}
+	if (r.on_hold) {
+		return { key: "hold", label: __("Held back"), rank: 2,
+			fg: "#A32D2D", bg: "#FBEDED" };
+	}
+	if (r.status === "Sent") {
+		return { key: "sent", label: __("Sent to the bank"), rank: 5,
+			fg: "#3B6D11", bg: "#EFF6E8" };
+	}
+	if (r.status === "Scheduled at Bank") {
+		return { key: "bank", label: __("At the bank"), rank: 4,
+			fg: "#14532d", bg: "#EDF3EE" };
+	}
+	return { key: "approved", label: __("Approved for sending"), rank: 3,
+		fg: "#14532d", bg: "#EDF3EE" };
+};
+
+kefiya.outbox_recipient = function (r) {
+	const items = (r && r.items) || [];
+	if (items.length > 1) {
+		return items.map(function (i) { return i.recipient_name || ""; })
+			.join(", ");
+	}
+	return (items[0] && items[0].recipient_name) || "";
+};
+
+// What the user chose, kept for the next visit.
+//
+// Written to both stores on purpose. The framework's user settings follow the
+// user to another browser, which is what "remembered" should mean; localStorage
+// is what still answers when the framework has not loaded settings for this
+// DocType yet. Reading prefers the framework, so the two cannot disagree for
+// long.
+kefiya.outbox_settings = {
+	doctype: "Kefiya Transfer",
+	key: "kefiya_payment_outbox",
+
+	read: function () {
+		try {
+			const stored = (frappe.model.user_settings || {})[this.doctype];
+			if (stored && stored[this.key]) return stored[this.key];
+		} catch (ignored) {}
+		try {
+			const raw = window.localStorage.getItem(this.key);
+			if (raw) return JSON.parse(raw);
+		} catch (ignored) {}
+		return {};
+	},
+
+	write: function (value) {
+		try {
+			window.localStorage.setItem(this.key, JSON.stringify(value));
+		} catch (ignored) {}
+		try {
+			frappe.model.user_settings.save(this.doctype, this.key, value);
+		} catch (ignored) {}
+	},
+};
+
+// The look travels with the list. It used to sit in the block's style field,
+// one database row away from the markup it applies to, which is how the two
+// drift apart: a class renamed here stayed styled there until somebody
+// noticed. Injected once, keyed by id so a second call does not stack it.
+kefiya.outbox_style = function () {
+	if (document.getElementById("kefiya-outbox-style")) return;
+	const el = document.createElement("style");
+	el.id = "kefiya-outbox-style";
+	el.textContent = [
+		"#zk{font-size:13px;color:var(--text-color)}",
+		"#zk .zk-load,#zk .zk-empty{padding:24px;color:var(--text-muted)}",
+		"#zk .zk-err{padding:16px;background:#FBEDED;color:#A32D2D;",
+		"border-radius:6px}",
+		"#zk .zk-bar{display:flex;gap:8px;align-items:center;",
+		"flex-wrap:wrap;margin-bottom:10px}",
+		"#zk .zk-bar input[data-act='q']{flex:1;min-width:240px;padding:5px 8px;",
+		"border:1px solid var(--border-color);border-radius:5px;font-size:13px}",
+		"#zk button{padding:5px 10px;border:1px solid var(--border-color);",
+		"background:var(--card-bg);border-radius:5px;cursor:pointer;",
+		"font-size:12px}",
+		"#zk button:hover:not([disabled]){background:var(--fg-hover-color)}",
+		"#zk button[disabled]{opacity:.45;cursor:not-allowed}",
+		"#zk .zk-primary,#zk .zk-send{background:#14532d;color:#fff;",
+		"border-color:#14532d;font-weight:600}",
+		"#zk .zk-send{padding:8px 22px;font-size:14px}",
+		"#zk .zk-send[disabled]{background:#c8d3cb;border-color:#c8d3cb;",
+		"color:#fff;opacity:1}",
+		"#zk .zk-chk{font-size:12px;color:var(--text-muted);white-space:nowrap}",
+		"#zk .zk-tb{width:100%;border-collapse:collapse}",
+		"#zk .zk-tb th{text-align:left;font-weight:600;font-size:11px;",
+		"color:var(--text-muted);border-bottom:2px solid var(--border-color);",
+		"padding:6px}",
+		"#zk .zk-tb th.zk-sortable{cursor:pointer;user-select:none}",
+		"#zk .zk-tb th.zk-sortable:hover{color:var(--text-color)}",
+		"#zk .zk-tb td{padding:7px 6px;",
+		"border-bottom:1px solid var(--border-color);vertical-align:top}",
+		"#zk .zk-tb .r{text-align:right;white-space:nowrap}",
+		"#zk .zk-cx{width:26px}",
+		"#zk tr.zk-row{cursor:pointer}",
+		"#zk tr.zk-row:hover{background:var(--fg-hover-color)}",
+		"#zk tr.zk-row:focus{outline:2px solid var(--primary);",
+		"outline-offset:-2px}",
+		"#zk .zk-sub{color:var(--text-muted);font-size:11px}",
+		"#zk .zk-iban{font-family:ui-monospace,Menlo,monospace;font-size:11px;",
+		"color:var(--text-muted)}",
+		"#zk .zk-badge{display:inline-block;padding:2px 7px;border-radius:9px;",
+		"font-size:11px;font-weight:600;white-space:nowrap}",
+		"#zk .zk-foot{display:flex;align-items:center;",
+		"justify-content:space-between;gap:12px;margin-top:12px;",
+		"padding-top:10px;border-top:2px solid var(--border-color)}",
+		"#zk .zk-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
+	].join("");
+	document.head.appendChild(el);
+};
+
+kefiya.payment_outbox = function (root) {
+	if (!root) return null;
+	kefiya.outbox_style();
+
+	const esc = frappe.utils.escape_html;
+	const kept = kefiya.outbox_settings.read();
+
+	const view = {
+		rows: [], payers: [], can: {}, today: "",
+		query: "", selected: {},
+		showSent: !!kept.show_sent,
+		sortBy: kept.sort_by || null,
+		sortDir: kept.sort_dir === "desc" ? "desc" : "asc",
+		busy: false,
+	};
+
+	function money(v) { return format_currency(Number(v || 0)); }
+
+	function dmy(d) { return d ? frappe.datetime.str_to_user(d) : ""; }
+
+	function ibanPretty(v) {
+		return (v || "").replace(/\s+/g, "").toUpperCase()
+			.replace(/(.{4})/g, "$1 ").trim();
+	}
+
+	function errText(r) {
+		const fromServer = kefiya.server_message && kefiya.server_message(r);
+		if (fromServer) return fromServer;
+		const m = (r && r.message) || "";
+		return typeof m === "string" && m ? m : __("Unknown error.");
+	}
+
+	function remember() {
+		kefiya.outbox_settings.write({
+			sort_by: view.sortBy, sort_dir: view.sortDir,
+			show_sent: view.showSent ? 1 : 0,
+		});
+	}
+
+	// --- data ---------------------------------------------------------------
+
+	function load() {
+		root.innerHTML = "<div class='zk-load'>" + __("Loading …") + "</div>";
+		return frappe.call({
+			method: "zk_outbox_data",
+			args: { q: view.query, show_sent: view.showSent ? 1 : 0 },
+		}).then(function (r) {
+			const m = (r && r.message) || {};
+			view.rows = m.rows || [];
+			view.payers = m.payers || [];
+			view.can = m.can || {};
+			view.today = m.today || "";
+			// An order that is gone must not stay selected: it would be
+			// counted in the footer sum and sent to an endpoint that then
+			// refuses the whole batch.
+			const alive = {};
+			view.rows.forEach(function (row) { alive[row.name] = 1; });
+			Object.keys(view.selected).forEach(function (name) {
+				if (!alive[name]) delete view.selected[name];
+			});
+			render();
+		}).catch(function (r) {
+			root.innerHTML = "<div class='zk-err'>"
+				+ __("The outgoing payments could not be loaded.")
+				+ "<br>" + esc(errText(r)) + "</div>";
+		});
+	}
+
+	function sorted() {
+		if (!view.sortBy) return view.rows.slice();
+		const column = kefiya.OUTBOX_COLUMNS.find(function (c) {
+			return c.key === view.sortBy;
+		});
+		if (!column) return view.rows.slice();
+		const sign = view.sortDir === "desc" ? -1 : 1;
+		return view.rows.slice().sort(function (a, b) {
+			const x = column.sort(a);
+			const y = column.sort(b);
+			if (x < y) return -sign;
+			if (x > y) return sign;
+			return 0;
+		});
+	}
+
+	function rowOf(name) {
+		return view.rows.find(function (r) { return r.name === name; }) || null;
+	}
+
+	function selection() {
+		return view.rows.filter(function (r) { return view.selected[r.name]; });
+	}
+
+	// What a given action may actually touch. Every batch button reads its
+	// count from here, so a button can never offer more than it will do.
+	function applicable(what) {
+		return selection().filter(function (r) {
+			if (what === "approve") return r.docstatus === 0;
+			if (what === "delete") return r.docstatus === 0;
+			if (what === "hold") {
+				return r.docstatus === 1 && !r.on_hold && r.status !== "Sent";
+			}
+			if (what === "release") {
+				return r.docstatus === 1 && !!r.on_hold;
+			}
+			if (what === "send") return !!r.sendable;
+			return false;
+		});
+	}
+
+	// --- rendering ----------------------------------------------------------
+
+	function header() {
+		let h = "<div class='zk-bar'>";
+		if (view.can.create) {
+			h += "<button class='zk-primary' data-act='new'>"
+				+ __("New transfer") + "</button>";
+		}
+		h += "<input data-act='q' placeholder='"
+			+ esc(__("Search — recipient, IBAN, reference, amount")) + "'"
+			+ " value=\"" + esc(view.query) + "\">";
+		h += "<label class='zk-chk'><input type='checkbox' data-act='sent'"
+			+ (view.showSent ? " checked" : "") + "> "
+			+ __("show sent") + "</label>";
+		h += "<button data-act='reload'>" + __("Refresh") + "</button></div>";
+		return h;
+	}
+
+	function table() {
+		const arrow = function (key) {
+			if (view.sortBy !== key) return "";
+			return view.sortDir === "asc" ? " ▲" : " ▼";
+		};
+		let h = "<table class='zk-tb'><thead><tr>";
+		h += "<th class='zk-cx'><input type='checkbox' data-act='all'"
+			+ " title=\"" + esc(__("Select all listed orders")) + "\"></th>";
+		kefiya.OUTBOX_COLUMNS.forEach(function (c) {
+			h += "<th class='zk-sortable" + (c.right ? " r" : "") + "'"
+				+ " data-col='" + esc(c.key) + "'"
+				+ " title=\"" + esc(__("Sort by this column. Clicking the"
+					+ " sorted column again reverses it, once more restores"
+					+ " the default order.")) + "\">"
+				+ esc(c.label) + arrow(c.key) + "</th>";
+		});
+		h += "</tr></thead><tbody>";
+
+		sorted().forEach(function (r) {
+			const st = kefiya.outbox_state(r);
+			const items = r.items || [];
+			const many = items.length > 1;
+			const who = many
+				? __("{0} recipients", [items.length])
+				: (kefiya.outbox_recipient(r) || "—");
+			const sub = many
+				? esc(kefiya.outbox_recipient(r)).slice(0, 110)
+				: (esc((items[0] && items[0].purpose) || "")
+					+ (items[0] && items[0].recipient_iban
+						? "<br><span class='zk-iban'>"
+							+ esc(ibanPretty(items[0].recipient_iban))
+							+ "</span>"
+						: ""));
+			let due;
+			if (!r.execution_date) {
+				due = "<span class='zk-sub'>" + __("as soon as possible")
+					+ "</span>";
+			} else {
+				due = dmy(r.execution_date) + "<div class='zk-sub'>"
+					+ (r.manage_due_date
+						? __("held here")
+						: __("dated at the bank"))
+					+ "</div>";
+			}
+
+			h += "<tr class='zk-row' data-n='" + esc(r.name) + "' tabindex='0'"
+				+ " title=\"" + esc(__("Open this order")) + "\">"
+				+ "<td class='zk-cx'><input type='checkbox' data-pick='"
+					+ esc(r.name) + "'"
+					+ (view.selected[r.name] ? " checked" : "") + "></td>"
+				+ "<td><span class='zk-badge' style='color:" + st.fg
+					+ ";background:" + st.bg + "'>" + esc(st.label)
+					+ "</span></td>"
+				+ "<td>" + esc(r.bank_account || "")
+					+ "<div class='zk-sub'>" + esc(r.company || "")
+					+ "</div></td>"
+				+ "<td><b>" + esc(who) + "</b><div class='zk-sub'>" + sub
+					+ "</div></td>"
+				+ "<td>" + due + "</td>"
+				+ "<td class='r'>" + money(r.total_amount) + "</td>"
+				+ "<td class='zk-sub'>" + esc(r.blocked || "")
+					+ (r.instant_payment
+						? "<div>" + __("Instant payment") + "</div>" : "")
+					+ "</td></tr>";
+		});
+		return h + "</tbody></table>";
+	}
+
+	function footer() {
+		const sel = selection();
+		let sum = 0;
+		sel.forEach(function (r) { sum += Number(r.total_amount || 0); });
+		let open = 0;
+		view.rows.forEach(function (r) {
+			if (r.docstatus === 1 && r.status !== "Sent") {
+				open += Number(r.total_amount || 0);
+			}
+		});
+
+		let h = "<div class='zk-foot'><div class='zk-sums'>"
+			+ "<div>" + __("Selected: {0} orders · {1}",
+				[sel.length, money(sum)]) + "</div>"
+			+ "<div class='zk-sub'>"
+			+ __("Approved and still here: {0}", [money(open)])
+			+ "</div></div><div class='zk-acts'>";
+
+		const button = function (act, label, count, cls) {
+			return "<button data-act='" + act + "' class='" + (cls || "") + "'"
+				+ (count ? "" : " disabled") + ">"
+				+ esc(label) + (count ? " (" + count + ")" : "") + "</button>";
+		};
+
+		if (view.can.delete) {
+			h += button("delete", __("Delete"), applicable("delete").length);
+		}
+		if (view.can.submit) {
+			h += button("release", __("Cancel hold"),
+				applicable("release").length);
+			h += button("hold", __("Hold back"), applicable("hold").length);
+			h += button("approve", __("Approve for sending"),
+				applicable("approve").length);
+			h += button("send", __("Send"), applicable("send").length,
+				"zk-send");
+		} else {
+			h += "<div class='zk-sub'>"
+				+ __("Sending needs the right to approve.") + "</div>";
+		}
+		return h + "</div></div>";
+	}
+
+	function render() {
+		let h = header();
+		if (!view.rows.length) {
+			h += "<div class='zk-empty'>" + (view.query
+				? __("Nothing found.")
+				: __("There is nothing to send. Transfers collect here until"
+					+ " they go out.")) + "</div>";
+			root.innerHTML = h;
+			bind();
+			return;
+		}
+		root.innerHTML = h + table() + footer();
+		bind();
+	}
+
+	// --- events -------------------------------------------------------------
+
+	function bind() {
+		const q = root.querySelector("[data-act='q']");
+		if (q) {
+			// stopPropagation: the desk binds single keys as shortcuts, and
+			// typing an IBAN would otherwise trigger them.
+			q.onkeydown = function (e) {
+				e.stopPropagation();
+				if (e.key === "Enter") { view.query = q.value; load(); }
+			};
+			q.onchange = function () { view.query = q.value; load(); };
+		}
+
+		root.querySelectorAll("[data-act]").forEach(function (el) {
+			const act = el.getAttribute("data-act");
+			if (act === "q") return;
+			if (act === "sent") {
+				el.onchange = function () {
+					view.showSent = el.checked;
+					remember();
+					load();
+				};
+				return;
+			}
+			if (act === "all") {
+				el.onchange = function () {
+					view.rows.forEach(function (r) {
+						if (el.checked) view.selected[r.name] = true;
+						else delete view.selected[r.name];
+					});
+					render();
+				};
+				return;
+			}
+			el.onclick = function () { act_on(act); };
+		});
+
+		root.querySelectorAll("[data-pick]").forEach(function (el) {
+			el.onchange = function () {
+				const name = el.getAttribute("data-pick");
+				if (el.checked) view.selected[name] = true;
+				else delete view.selected[name];
+				render();
+			};
+		});
+
+		root.querySelectorAll("th.zk-sortable").forEach(function (th) {
+			th.onclick = function () { sortBy(th.getAttribute("data-col")); };
+		});
+
+		root.querySelectorAll("tr.zk-row").forEach(function (tr) {
+			const open = function (e) {
+				// The checkbox is in the row and does something else.
+				if (e.target && e.target.closest
+						&& e.target.closest(".zk-cx")) return;
+				details(tr.getAttribute("data-n"));
+			};
+			tr.onclick = open;
+			tr.onkeydown = function (e) {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					open(e);
+				}
+			};
+		});
+	}
+
+	// Three states, not two: ascending, descending, and back to the order the
+	// server sends -- which is the useful one (drafts first, then by due date)
+	// and would otherwise be unreachable once a column had been clicked.
+	function sortBy(key) {
+		if (view.sortBy !== key) {
+			view.sortBy = key;
+			view.sortDir = "asc";
+		} else if (view.sortDir === "asc") {
+			view.sortDir = "desc";
+		} else {
+			view.sortBy = null;
+			view.sortDir = "asc";
+		}
+		remember();
+		render();
+	}
+
+	function act_on(act) {
+		if (act === "reload") return load();
+		if (act === "new") return newTransfer();
+		if (act === "approve") return approve();
+		if (act === "delete") return remove();
+		if (act === "hold") return hold(1);
+		if (act === "release") return hold(0);
+		if (act === "send") return send();
+	}
+
+	function details(name) {
+		const r = rowOf(name);
+		if (!r) return;
+		kefiya.transfer_details(r, {
+			payers: view.payers,
+			canWrite: !!view.can.write,
+			onChanged: load,
+		});
+	}
+
+	function newTransfer() {
+		kefiya.transfer_form({ payers: view.payers, onSaved: load });
+	}
+
+	// --- the actions --------------------------------------------------------
+
+	// Approving is the step the page is asked about most often, so it says
+	// what it does rather than asking "are you sure": amounts and recipients
+	// are locked from here on, and nothing is paid yet.
+	function approve() {
+		const rows = applicable("approve");
+		if (!rows.length || view.busy) return;
+		const names = rows.map(function (r) { return r.name; });
+		let sum = 0;
+		rows.forEach(function (r) { sum += Number(r.total_amount || 0); });
+
+		frappe.confirm(
+			"<div>" + __("Approve {0} orders over {1}?",
+				[rows.length, money(sum)]) + "</div>"
+			+ "<div class='text-muted small' style='margin-top:8px'>"
+			+ __("Approving locks the amounts and the recipients. No money"
+				+ " moves: sending is the next, separate step and the bank"
+				+ " asks for a TAN then.") + "</div>",
+			function () {
+				view.busy = true;
+				frappe.call({
+					method: "kefiya.utils.client.approve_transfers",
+					args: { transfer_names: JSON.stringify(names) },
+					freeze: true,
+					freeze_message: __("Approving …"),
+				}).then(function (r) {
+					view.busy = false;
+					const m = (r && r.message) || {};
+					reportBatch(m.approved || [], m.refused || [],
+						__("Approved: {0}", [(m.approved || []).length]),
+						__("Not approved"));
+					load();
+				}).catch(function (r) {
+					view.busy = false;
+					frappe.msgprint({ title: __("Not approved"),
+						indicator: "red", message: esc(errText(r)) });
+					load();
+				});
+			});
+	}
+
+	function hold(on) {
+		const rows = applicable(on ? "hold" : "release");
+		if (!rows.length || view.busy) return;
+		const names = rows.map(function (r) { return r.name; });
+		view.busy = true;
+		frappe.call({
+			method: "kefiya.utils.client.set_transfer_hold",
+			args: { transfer_names: JSON.stringify(names), on_hold: on ? 1 : 0 },
+		}).then(function () {
+			view.busy = false;
+			frappe.show_alert({
+				message: on
+					? __("Held back: {0}", [names.length])
+					: __("Released again: {0}", [names.length]),
+				indicator: "green",
+			}, 4);
+			load();
+		}).catch(function (r) {
+			view.busy = false;
+			frappe.msgprint({ title: __("Not changed"), indicator: "red",
+				message: esc(errText(r)) });
+			load();
+		});
+	}
+
+	// Deleting is one call per document -- there is no batch endpoint for it,
+	// and inventing one would mean writing a second delete path past the
+	// framework's permission checks. They run in sequence so a refusal names
+	// the order it belongs to.
+	function remove() {
+		const rows = applicable("delete");
+		if (!rows.length || view.busy) return;
+
+		frappe.confirm(
+			__("Delete {0} drafts? They are gone afterwards.", [rows.length]),
+			function () {
+				view.busy = true;
+				const gone = [];
+				const failed = [];
+				let chain = Promise.resolve();
+				rows.forEach(function (r) {
+					chain = chain.then(function () {
+						return frappe.call({
+							method: "frappe.client.delete",
+							args: { doctype: "Kefiya Transfer", name: r.name },
+						}).then(function () {
+							gone.push(r.name);
+							delete view.selected[r.name];
+						}).catch(function (e) {
+							failed.push({ name: r.name, reason: errText(e) });
+						});
+					});
+				});
+				chain.then(function () {
+					view.busy = false;
+					reportBatch(gone, failed,
+						__("Deleted: {0}", [gone.length]),
+						__("Not deleted"));
+					load();
+				});
+			});
+	}
+
+	function send() {
+		const rows = applicable("send");
+		if (!rows.length || view.busy) return;
+
+		// A collective order always leaves from exactly one account. Refusing
+		// beats picking one, which would debit the wrong account for the rest.
+		const accounts = {};
+		rows.forEach(function (r) { accounts[r.kefiya_login] = 1; });
+		if (Object.keys(accounts).length > 1) {
+			frappe.msgprint({
+				title: __("One account at a time"), indicator: "orange",
+				message: __("Orders from several accounts are selected. A"
+					+ " collective order always leaves from exactly one"
+					+ " account — please send them one account at a time."),
+			});
+			return;
+		}
+
+		const skipped = selection().length - rows.length;
+		let sum = 0;
+		rows.forEach(function (r) { sum += Number(r.total_amount || 0); });
+		const list = rows.map(function (r) {
+			const items = r.items || [];
+			const who = items.length > 1
+				? __("{0} recipients", [items.length])
+				: ((items[0] && items[0].recipient_name) || "");
+			return "<tr><td>" + esc(who) + "</td>"
+				+ "<td style='text-align:right'>" + money(r.total_amount)
+				+ "</td></tr>";
+		}).join("");
+
+		let message = "<div>"
+			+ __("{0} orders over {1} go from {2} to the bank.",
+				[rows.length, money(sum), esc(rows[0].bank_account || "")])
+			+ "</div><table style='width:100%;border-collapse:collapse;"
+			+ "margin-top:8px'>" + list + "</table>";
+		if (skipped > 0) {
+			message += "<div class='text-muted small' style='margin-top:8px'>"
+				+ __("{0} selected orders are not being sent — they are"
+					+ " drafts, held back or already sent.", [skipped])
+				+ "</div>";
+		}
+		message += "<div class='text-muted small' style='margin-top:8px'>"
+			+ __("The bank will usually ask for a release (TAN or a"
+				+ " confirmation in its app). Nothing is debited until then.")
+			+ "</div>";
+
+		frappe.confirm(message, function () {
+			const names = rows.map(function (r) { return r.name; });
+			view.busy = true;
+			frappe.call({
+				method: "kefiya.utils.client.send_transfer_outbox",
+				args: { transfer_names: JSON.stringify(names),
+					user_scope: rows[0].kefiya_login, confirmed: 1 },
+				freeze: true,
+				freeze_message: __("Sending to the bank …"),
+			}).then(function (r) {
+				view.busy = false;
+				const m = (r && r.message) || {};
+				if (m.status === "error") {
+					frappe.msgprint({ title: __("Not sent"), indicator: "red",
+						message: esc(m.message || "") });
+				} else if (m.status === "tan_required") {
+					frappe.show_alert({
+						message: __("The bank asks for a release."),
+						indicator: "orange" }, 8);
+				} else {
+					view.selected = {};
+					frappe.show_alert({
+						message: __("Handed to the bank: {0} orders",
+							[(m.sent || []).length || names.length]),
+						indicator: "green" }, 8);
+				}
+				load();
+			}).catch(function (r) {
+				view.busy = false;
+				frappe.msgprint({ title: __("Not sent"), indicator: "red",
+					message: esc(errText(r)) });
+				load();
+			});
+		});
+	}
+
+	// One message for a batch, and it names what did not work. A batch that
+	// reports only its successes is how half a selection goes missing without
+	// anybody noticing.
+	function reportBatch(done, failed, okText, failTitle) {
+		if (!failed.length) {
+			frappe.show_alert({ message: okText, indicator: "green" }, 5);
+			return;
+		}
+		const lines = failed.map(function (f) {
+			return "<tr><td>" + esc(f.name) + "</td><td>"
+				+ esc(f.reason || "") + "</td></tr>";
+		}).join("");
+		frappe.msgprint({
+			title: failTitle, indicator: "orange",
+			message: "<div>" + okText + "</div>"
+				+ "<table style='width:100%;border-collapse:collapse;"
+				+ "margin-top:8px'>" + lines + "</table>",
+		});
+	}
+
+	// The bank asks for its release over the live connection. Without this the
+	// send would sit there silently. The prompt itself is the shared one -- it
+	// names the bank and the account, which a second copy here did not.
+	//
+	// Bound once per page load, but reading kefiya._outbox rather than this
+	// closure: the page is rebuilt on every visit, and a handler holding the
+	// first view would answer for a list nobody is looking at any more.
+	// frappe.realtime.off() is not an option -- it would take the account
+	// fetch's prompt with it.
+	function bindTan() {
+		if (kefiya._outbox_tan_bound) return;
+		kefiya._outbox_tan_bound = true;
+		try {
+			frappe.realtime.on("fints_tan_interaction_required",
+				function (data) {
+					const live = kefiya._outbox;
+					if (!live || !live.busy) return;
+					if (kefiya.tan_prompt) kefiya.tan_prompt(data, live.load);
+				});
+		} catch (ignored) {}
+	}
+
+	view.load = load;
+	view.render = render;
+	kefiya._outbox = view;
+	bindTan();
+	load();
+	return view;
+};

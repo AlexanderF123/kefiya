@@ -14,3 +14,12 @@
 // a cost; the bar is that it must be needed by more than one page.
 
 import "./controllers/bank_refresh";
+// Opened from the outgoing-payments page, and from anywhere else that wants
+// to show one transfer without navigating away from what the reader is doing.
+import "./controllers/transfer_details";
+// Entering and correcting one transfer, with the execution options the
+// document has always carried.
+import "./controllers/transfer_form";
+// The outgoing-payments list. It used to be a stored script on one site; the
+// page there is now a bootstrap that calls kefiya.payment_outbox().
+import "./controllers/payment_outbox";

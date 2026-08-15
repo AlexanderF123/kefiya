@@ -63,6 +63,19 @@ PAYMENT_KINDS = (GIRO, SAVINGS, CREDIT_CARD)
 #: Accounts where the reported amount is a granted line, not money held.
 CREDIT_LINE_KINDS = (GUARANTEE,)
 
+#: Accounts a SEPA transfer can START from. Narrower than PAYMENT_KINDS,
+#: because a credit card is a payment account that cannot originate one: the
+#: card pays merchants, the settlement account pays the card.
+#:
+#: What made this necessary: the payer dropdown offered loans, guarantees and
+#: securities accounts. Three filters were meant to prevent that -- the
+#: Bank Account's account_type, a link to a Property Loan, and the bank's own
+#: HIUPD capability list -- and all three missed, because account_type is not
+#: maintained on those records, the loan link is not either, and HIUPD is
+#: never fetched for an account nobody fetches. The kind was right on every
+#: one of them the whole time; nothing asked.
+TRANSFER_SOURCE_KINDS = (GIRO, SAVINGS)
+
 
 def kind_of(kefiya_login):
     """The account kind of a login, defaulting to a payment account.
@@ -106,3 +119,52 @@ def counts_towards_liquidity(kefiya_login):
     belong in an overview, none of them belongs in its sum.
     """
     return kind_of(kefiya_login) in PAYMENT_KINDS
+
+
+def can_send_transfers(kefiya_login):
+    """May a SEPA transfer start from this account?
+
+    The one question the payer dropdown has to ask. A loan, a guarantee, a
+    share deposit and a securities account cannot send money; a credit card
+    cannot either -- it is paid, it does not pay.
+    """
+    return kind_of(kefiya_login) in TRANSFER_SOURCE_KINDS
+
+
+@frappe.whitelist()
+def transfer_sources():
+    """Every Kefiya Login a transfer may be entered against.
+
+    The canonical answer, so a page does not have to reimplement it -- and so
+    a page that asks gets the same list the app itself would use.
+
+    get_list, not get_all: these are offered for selection, and an access the
+    caller may not see must not appear in a dropdown.
+
+    :return: [{"login", "bank_account", "company", "kind"}]
+    """
+    if not frappe.get_meta("Kefiya Login").has_field("account_kind"):
+        # Before the field exists every login is a payment account, which is
+        # what kind_of() answers anyway. Say so rather than return nothing.
+        rows = frappe.get_list(
+            "Kefiya Login", filters={"bank_account": ["is", "set"]},
+            fields=["name", "bank_account", "company"], limit_page_length=0)
+        return [{"login": r["name"], "bank_account": r["bank_account"],
+                 "company": r.get("company"), "kind": GIRO} for r in rows]
+
+    rows = frappe.get_list(
+        "Kefiya Login",
+        filters={"bank_account": ["is", "set"],
+                 "account_kind": ["in", list(TRANSFER_SOURCE_KINDS)]},
+        fields=["name", "bank_account", "company", "account_kind"],
+        limit_page_length=0)
+
+    # A disabled Bank Account is still a Bank Account; it is just not one an
+    # order should be entered against.
+    disabled = {r["name"] for r in frappe.get_all(
+        "Bank Account", filters={"disabled": 1}, fields=["name"],
+        limit_page_length=0)}
+
+    return [{"login": r["name"], "bank_account": r["bank_account"],
+             "company": r.get("company"), "kind": r.get("account_kind")}
+            for r in rows if r["bank_account"] not in disabled]

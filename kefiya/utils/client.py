@@ -1087,6 +1087,55 @@ def set_transfer_hold(transfer_names, on_hold):
 
 
 @frappe.whitelist()
+def approve_transfers(transfer_names):
+    """Approve several drafts at once -- one submit each, in one action.
+
+    Approving is what submitting the document does: it locks the amounts and
+    the recipients and assigns the end-to-end identifiers. It moves no money.
+    Sending is a separate step that the bank confirms with a TAN, which is why
+    approving a whole selection is safe to offer as a batch while sending one
+    is deliberately confirmed order by order.
+
+    Each document is submitted inside its own savepoint. A document that
+    refuses -- over the transfer limit, a recipient the bank rejects -- must
+    not undo the ones approved before it, and it must not pass unnoticed
+    either: the caller is told, per document, what happened. A silent partial
+    success is the failure mode this guards against.
+
+    :param transfer_names: JSON list (or list) of Kefiya Transfer names
+    :return: {"status", "approved": [names], "refused": [{"name", "reason"}]}
+    """
+    transfer_names = _parse_transfer_names(transfer_names)
+    if not transfer_names:
+        return {"status": "error", "message": _("No transfers selected.")}
+
+    approved = []
+    refused = []
+    for name in transfer_names:
+        frappe.has_permission(
+            "Kefiya Transfer", ptype="submit", doc=name, throw=True)
+
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        if doc.docstatus != 0:
+            # Already approved, or cancelled. Saying so beats submitting it
+            # again and reporting a framework error as if something broke.
+            refused.append({"name": name,
+                            "reason": _("Not a draft any more.")})
+            continue
+
+        point = "kefiya_approve"
+        frappe.db.savepoint(point)
+        try:
+            doc.submit()
+            approved.append(name)
+        except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+            frappe.db.rollback(save_point=point)
+            refused.append({"name": name, "reason": _short_reason(exc)})
+
+    return {"status": "ok", "approved": approved, "refused": refused}
+
+
+@frappe.whitelist()
 def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
     """Send several approved transfers as one collective order (HKCCM).
 
