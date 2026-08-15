@@ -14,7 +14,7 @@ import unittest
 
 import frappe
 
-from kefiya.utils.fints_controller import FinTSInteractive
+from kefiya.utils.fints_interactive import FinTSInteractive
 
 
 class _Recorder:

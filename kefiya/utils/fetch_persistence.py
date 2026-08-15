@@ -25,7 +25,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, now_datetime
 
-from kefiya.utils import account_kind
+from kefiya.utils import account_kind, statement_import
 
 
 def _as_dict(entry):
@@ -269,30 +269,32 @@ def store_credit_card_transactions(kefiya_login, entries):
         counterparty = _first(entry, ("applicant_name", "Name", "merchant",
                                       "counterparty"), "")
 
-        raw_key = "cc|{0}|{1}|{2}|{3}|{4}".format(
-            login.bank_account, date, amount, counterparty, (text or "")[:120])
-        reference = hashlib.md5(raw_key.encode("utf-8")).hexdigest()
+        booking = {
+            "date": date,
+            "amount": amount,
+            "description": text or "",
+            "counterparty": counterparty,
+            "iban": None,
+            "reference": None,
+        }
+        # Same reference the file and feed paths build, so a card booking
+        # fetched here and later handed over in a statement file is one
+        # booking, not two.
+        reference = statement_import.reference_number(
+            login.bank_account, booking)
 
-        if frappe.db.exists("Bank Transaction", {"reference_number": reference}):
+        if statement_import.is_already_booked(login.bank_account, booking,
+                                              reference):
             skipped += 1
             continue
 
         try:
-            frappe.get_doc({
-                "doctype": "Bank Transaction",
-                "date": date,
-                "status": "Unreconciled",
-                "bank_account": login.bank_account,
-                "company": login.company,
-                "deposit": amount if amount > 0 else 0,
-                "withdrawal": -amount if amount < 0 else 0,
-                "description": " ".join(x for x in (counterparty, text) if x),
-                "reference_number": reference,
-                "allocated_amount": 0,
-                "unallocated_amount": abs(amount),
-                "bank_party_name": counterparty or None,
-                "docstatus": 1,
-            }).insert(ignore_permissions=True)
+            # Through the shared constructor, which is what makes a
+            # credit-card booking the same shape as every other. It also
+            # creates a DRAFT: this path used to insert with docstatus 1, so
+            # a fetch submitted its own bookings -- an approval nobody gave.
+            statement_import.create_booking(
+                login.bank_account, booking, reference, login.company)
             created += 1
         except Exception:
             skipped += 1

@@ -12,7 +12,8 @@ the other way round from a giro account.
 
 import unittest
 
-from kefiya.utils import statement_import as si
+from kefiya.utils import statement_formats as si
+from kefiya.utils import statement_import as persist
 
 
 class TestAmountsAreReadNotGuessed(unittest.TestCase):
@@ -204,14 +205,30 @@ class TestADuplicateIsNotOnlyAKnownReference(unittest.TestCase):
     comparison sees a stranger and books it again -- which is exactly the case
     when a file fills a gap in an account that is otherwise fetched."""
 
-    def test_the_plan_also_compares_what_a_booking_is(self):
+    def test_one_traversal_decides_for_every_path(self):
+        """The plan, the file import and the pushed-entry endpoint must not
+        each have their own loop: they would drift, and the lenient one would
+        be the one nobody looks at."""
         import inspect
-        source = inspect.getsource(si.plan)
-        self.assertIn("already_booked(target, entry)", source)
+        for fn in (persist.plan, persist.ingest):
+            self.assertIn("book_entries(", inspect.getsource(fn),
+                          fn.__name__ + " must not count for itself.")
+
+    def test_that_one_traversal_asks_the_single_duplicate_question(self):
+        import inspect
+        source = inspect.getsource(persist.book_entries)
+        self.assertIn("is_already_booked(target, entry, reference)", source)
+
+    def test_the_single_question_covers_reference_and_content(self):
+        """Reference alone misses everything the bank itself delivered."""
+        import inspect
+        source = inspect.getsource(persist.is_already_booked)
+        self.assertIn("reference_number", source)
+        self.assertIn("already_booked(bank_account, entry)", source)
 
     def test_the_content_check_is_account_day_and_amount(self):
         import inspect
-        source = inspect.getsource(si.already_booked)
+        source = inspect.getsource(persist.already_booked)
         for part in ('"bank_account": bank_account', '"date"', "deposit",
                      "withdrawal"):
             self.assertIn(part, source)
@@ -220,7 +237,7 @@ class TestADuplicateIsNotOnlyAKnownReference(unittest.TestCase):
         """A payment out and a payment in of the same amount on the same day
         are two bookings, not one."""
         import inspect
-        source = inspect.getsource(si.already_booked)
+        source = inspect.getsource(persist.already_booked)
         self.assertIn("if amount > 0", source)
 
 
@@ -312,36 +329,77 @@ class TestAFeedFromOutsideIsReadTheSameWay(unittest.TestCase):
             {"date": "01.08.2026"}, profile_name="amex"))
 
 
+#: Every place that builds a Bank Transaction. The statement paths were five
+#: and are now one. import_bank_transaction.py is the FinTS import, which
+#: predates all of this and builds its bookings out of MT940 -- it belongs on
+#: the shared constructor too, but that is its own piece of work and its own
+#: review. Listed here so it is a known debt rather than a blind spot.
+KNOWN_BUILDERS = [
+    "kefiya/utils/statement_import.py",
+    "kefiya/utils/import_bank_transaction.py",
+]
+
+
 class TestTheEndpointsGuardThemselves(unittest.TestCase):
     """Whitelisted endpoints are callable by any logged-in user, and both of
     these write."""
 
     def test_ingest_checks_rights_before_it_books(self):
         import inspect
-        source = inspect.getsource(si.ingest)
+        source = inspect.getsource(persist.ingest)
         self.assertIn('frappe.has_permission("Bank Account", ptype="write"',
                       source)
         self.assertIn('"Bank Transaction", ptype="create"', source)
         self.assertLess(
-            source.index("has_permission"), source.index("frappe.get_doc({"),
+            source.index("has_permission"), source.index("book_entries("),
             "The check must come before the first booking, not after it.")
 
     def test_ingest_writes_nothing_unless_it_was_asked_by_name(self):
         """A bulk write that a misconfigured workflow can trigger by omission
         is one that will eventually be triggered by omission."""
         import inspect
-        signature = inspect.signature(si.ingest)
+        signature = inspect.signature(persist.ingest)
         self.assertEqual(signature.parameters["dry_run"].default, 1)
 
-    def test_nothing_is_submitted_from_a_feed(self):
-        """Submitting is an approval, and an unattended feed does not give
-        itself one."""
+    def test_nothing_is_ever_submitted_by_an_import(self):
+        """Submitting is an approval, and no unattended path gives itself one.
+        The credit-card fetch used to insert with docstatus 1."""
         import inspect
-        self.assertNotIn(".submit(", inspect.getsource(si.ingest))
+        self.assertNotIn(".submit(", inspect.getsource(persist.ingest))
+        source = inspect.getsource(persist.create_booking)
+        self.assertNotIn("docstatus", source)
+        self.assertNotIn(".submit(", source)
+
+    def test_only_one_place_builds_a_bank_transaction(self):
+        """Five construction sites disagreed about status, party and
+        docstatus, so the same booking came out differently shaped depending
+        on which path created it."""
+        import inspect
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(inspect.getsourcefile(persist)))))
+        sites = []
+        for folder, _dirs, files in os.walk(root):
+            if "tests" in folder or "legacy" in folder:
+                continue
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as handle:
+                    body = handle.read()
+                if ('"doctype": "Bank Transaction"' in body
+                        or "'doctype': 'Bank Transaction'" in body
+                        or 'new_doc("Bank Transaction")' in body):
+                    sites.append(os.path.relpath(path, root).replace("\\", "/"))
+        self.assertEqual(
+            sorted(sites), sorted(KNOWN_BUILDERS),
+            "A Bank Transaction is built somewhere new. Route it through "
+            "statement_import.create_booking() instead.")
 
     def test_attaching_a_statement_checks_rights_and_repeats_harmlessly(self):
         import inspect
-        source = inspect.getsource(si.attach_statement)
+        source = inspect.getsource(persist.attach_statement)
         self.assertIn('frappe.has_permission("Bank Account", ptype="write"',
                       source)
         self.assertIn('"is_private": 1', source)
