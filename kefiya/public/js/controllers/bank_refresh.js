@@ -376,6 +376,27 @@ frappe.provide("kefiya");
         } catch (ignoredD) {}
     }
 
+    // "Freigabe erforderlich" named no bank and no account. In a collective
+    // run a dozen accesses stop for a release one after the other, and the box
+    // on screen looked identical every time -- so the user had to guess which
+    // banking app to open. The payload now carries the access; this puts it
+    // where the eye lands, in the heading and in the first line of the dialog.
+    function tanTitle(data) {
+        return data.account_label
+            ? __("Verification required") + " – " + data.account_label
+            : __("Verification required");
+    }
+
+    function tanContextField(data) {
+        if (!data.account_detail) return null;
+        return {
+            fieldtype: "HTML", fieldname: "kefiya_tan_context",
+            options: '<div class="text-muted small" '
+                + 'style="margin-bottom:8px">'
+                + frappe.utils.escape_html(data.account_detail) + "</div>"
+        };
+    }
+
     function tanPrompt(data) {
         var fields = [];
         if (data.possible_tan_modes) {
@@ -410,6 +431,13 @@ frappe.provide("kefiya");
                     options: __("Follow the instructions on your banking app or device.") });
             }
         }
+        // Prepended only now: everything above addresses the fields by index
+        // (fields[0] is the mode, fields[1] the medium), so an entry inserted
+        // ahead of them earlier would silently make the mode read-only field
+        // the wrong one.
+        var context = tanContextField(data);
+        if (context) fields.unshift(context);
+
         frappe.prompt(fields, function (values) {
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
@@ -425,7 +453,7 @@ frappe.provide("kefiya");
                     }, 10);
                 }
             });
-        }, __("Verification required"));
+        }, tanTitle(data));
     }
 
     function bindRealtime() {
