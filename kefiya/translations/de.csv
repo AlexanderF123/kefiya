@@ -88,3 +88,20 @@ Failures,Fehlgeschlagen
 Remark,Hinweis
 Assigned accounts,Zugeordnete Konten
 Access credentials,Zugangsdaten
+Open document,Im Dokument öffnen
+As soon as possible,So bald wie möglich
+On {0} — held here until then,Am {0} — bis dahin hier gehalten
+On {0} — the bank holds the order,Am {0} — die Bank hält den Auftrag
+Paying account,Abgehendes Konto
+Execution,Ausführung
+Instant payment,Echtzeitüberweisung
+Yes — sent as a SEPA instant payment,Ja — geht als SEPA-Echtzeitüberweisung
+No — ordinary SEPA transfer,Nein — gewöhnliche SEPA-Überweisung
+"Kept here, released on the day",Wird hier gehalten und am Tag freigegeben
+Left with the bank,Liegt bei der Bank
+Payee verification,Empfängerprüfung
+still open,noch offen
+Bank response,Rückmeldung der Bank
+Receipts,Belege
+The attachments could not be read.,Die Anhänge konnten nicht gelesen werden.
+No receipt is attached to this order.,An diesem Auftrag hängt kein Beleg.
