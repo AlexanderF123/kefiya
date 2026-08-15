@@ -320,3 +320,84 @@ class TestTheTanPromptIsTheSharedOne(unittest.TestCase):
         every visit."""
         body = _function(_source(), "function bindTan() {")
         self.assertIn("const live = kefiya._outbox;", body)
+
+
+class TestTheDetailViewReadsAsATransferSlip(unittest.TestCase):
+    """What the screenshot showed, and what must not come back.
+
+    Three labels were wrong at once, and only one of them was a typo of ours.
+    "State" was left to the framework on the assumption that an untranslated
+    generic word is safe; the framework knows that word as the address field
+    and rendered the order's state as "Bundesland". The stored status was
+    printed raw in English next to its own German explanation. And a "Due
+    date" row repeated the execution line above it, in English.
+    """
+
+    @staticmethod
+    def _details():
+        return _source("transfer_details.js")
+
+    def test_the_state_is_not_labelled_with_a_word_the_framework_owns(self):
+        source = self._details()
+        self.assertNotIn('__("State")', source,
+                         'The framework translates "State" as the address '
+                         'field: the order state came out as "Bundesland".')
+        self.assertIn('__("Order state")', source)
+
+    def test_the_state_is_shown_through_the_shared_wording(self):
+        """`row.status` is a stored English value. Printing it raw is how
+        "Sent" ended up on a German screen."""
+        source = self._details()
+        self.assertIn("kefiya.outbox_state", source)
+        self.assertNotIn('esc(row.status || "")', source)
+
+    def test_the_execution_is_stated_once(self):
+        """The "Due date" row said in English what the line above it had
+        already said in German."""
+        self.assertNotIn('__("Due date")', self._details())
+
+    def test_a_locked_order_says_why_it_cannot_be_changed(self):
+        """An absent Correct button explains nothing."""
+        source = self._details()
+        self.assertIn("if (row.docstatus === 1) {", source)
+        self.assertIn("This order is with the bank", source)
+
+
+class TestAReceiptIsFoundWhereItActuallyHangs(unittest.TestCase):
+    """Nobody attaches the travel expense PDF to the transfer.
+
+    It is created on the Business Trip and stays there; the transfer only says
+    "Reisekosten BT-0001" in its purpose. Looking for files attached to the
+    transfer alone reports "no receipt" for an order that plainly has one.
+    """
+
+    @staticmethod
+    def _details():
+        return _source("transfer_details.js")
+
+    def test_the_purpose_is_searched_for_document_names(self):
+        source = self._details()
+        self.assertIn("kefiya.DOCNAME_IN_TEXT", source)
+        self.assertIn("kefiya.transfer_referenced_documents", source)
+
+    def test_the_lookup_covers_the_order_and_what_it_names(self):
+        source = self._details()
+        self.assertIn('attached_to_name: ["in", names]', source,
+                      "Filtering on the transfer alone is the bug.")
+
+    def test_the_pattern_does_not_match_a_recipients_invoice_number(self):
+        """A looser pattern would send us looking for documents that are not
+        ours. The names it has to catch are BT-0001 and RE-260427-034."""
+        import re
+        pattern = re.compile(r"\b[A-Z]{2,8}(?:-[A-Z0-9]{2,6})*-\d{3,}\b")
+        for name in ("BT-0001", "RE-260427-034", "KEF-TRF-2026-00001"):
+            self.assertTrue(pattern.search(name), name)
+        for text in ("Rechnung 12345", "Miete 04/2026", "IBAN DE02"):
+            self.assertIsNone(pattern.search(text), text)
+
+    def test_a_receipt_from_elsewhere_says_where_it_came_from(self):
+        """A file that appears out of nowhere is magic; one that names its
+        document can be checked."""
+        source = self._details()
+        self.assertIn('__("from {0} {1}"', source)
+        self.assertIn("fl.attached_to_name !== row.name", source)

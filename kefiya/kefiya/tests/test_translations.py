@@ -44,13 +44,22 @@ LEFT_TO_THE_FRAMEWORK = {
     # "Betrag", "Delete" is "Löschen". Shipping our own would override the
     # framework's for the entire site to arrive at the same word.
     "Amount", "Draft", "Delete", "Send", "Refresh", "Total", "Company",
-    "IBAN", "Recipient", "Transfer", "State", "Loading ...", "public",
-    "Order", "Payments", "Yes", "No", "Save", "When", "Due date",
+    "IBAN", "Recipient", "Transfer", "Loading ...", "public",
+    "Order", "Payments", "Yes", "No", "Save", "When",
 }
 
 #: Words the framework already uses for something else. Translating them from
 #: this app would rename that something else across the whole site.
-CLAIMED_ELSEWHERE = {"Accounts", "Note", "Failed", "Credentials", "Status"}
+#:
+#: "State" is here for the opposite reason, and it is the more instructive
+#: one. It was left to the framework on the assumption that a word we do not
+#: translate cannot go wrong. The framework knows "State" as the address
+#: field, so the order's state came out on screen as "Bundesland". Not
+#: translating a generic word is as much a decision as translating it -- both
+#: get it wrong. Only a source string specific to what it means gets it right,
+#: which is why this app says "Order state".
+CLAIMED_ELSEWHERE = {"Accounts", "Note", "Failed", "Credentials", "Status",
+                     "State"}
 
 
 #: The screens whose JavaScript is covered here as well. The document service

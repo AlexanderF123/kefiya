@@ -180,3 +180,8 @@ The bank asks for a release.,Die Bank verlangt eine Freigabe.
 Handed to the bank: {0} orders,An die Bank übergeben: {0} Aufträge
 Not a draft any more.,Kein Entwurf mehr.
 No transfers selected.,Keine Überweisungen markiert.
+Ordering party,Auftraggeber
+This order is with the bank. Nothing about it can be changed here any more.,Dieser Auftrag liegt bei der Bank. Hier lässt sich nichts mehr daran ändern.
+"Approved orders are locked: amounts and recipients stand. To change something, cancel the order and enter a new one.",Freigegebene Aufträge sind festgeschrieben: Beträge und Empfänger stehen. Zum Ändern den Auftrag abbrechen und neu erfassen.
+"No receipt is attached, neither here nor on {0}.",Es hängt kein Beleg daran — weder hier noch an {0}.
+from {0} {1},aus {0} {1}
