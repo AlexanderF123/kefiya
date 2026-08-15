@@ -335,14 +335,8 @@ msgstr "Sammellastschrift"
 msgid "Read scheduled direct debits"
 msgstr "Terminierte Lastschriften lesen"
 
-msgid "Transactions"
-msgstr "Umsätze"
-
 msgid "Transactions as camt XML"
 msgstr "Umsätze als camt-XML"
-
-msgid "Balance"
-msgstr "Saldo"
 
 msgid "Portfolio"
 msgstr "Depotbestand"
@@ -409,3 +403,222 @@ msgstr "{0} gehört zur selben Company. Nutzen Sie „Auf ein eigenes Konto, sel
 
 msgid "no company"
 msgstr "keiner Company"
+
+msgid "Kefiya Transfer"
+msgstr "Überweisung"
+
+msgid "Kefiya Transfer Item"
+msgstr "Überweisungsposten"
+
+msgid "Paying Account (Kefiya Login)"
+msgstr "Abgehendes Konto"
+
+msgid "Execution Date"
+msgstr "Ausführung am"
+
+msgid "Total Amount"
+msgstr "Gesamtbetrag"
+
+msgid "Number of Payments"
+msgstr "Anzahl Zahlungen"
+
+msgid "Payments"
+msgstr "Posten"
+
+msgid "Purpose"
+msgstr "Verwendungszweck"
+
+msgid "Own Account"
+msgstr "Eigenes Konto"
+
+msgid "Recipient Name"
+msgstr "Name des Empfängers"
+
+msgid "Recipient IBAN"
+msgstr "IBAN des Empfängers"
+
+msgid "Recipient BIC"
+msgstr "BIC des Empfängers"
+
+msgid "End-To-End ID"
+msgstr "End-To-End-Kennung"
+
+msgid "Bank Response"
+msgstr "Rückmeldung der Bank"
+
+msgid "Bank Order Reference"
+msgstr "Auftragsnummer der Bank"
+
+msgid "Instant Payment (Echtzeitüberweisung)"
+msgstr "Echtzeitüberweisung"
+
+msgid "Manage the due date ourselves"
+msgstr "Termin bei uns halten"
+
+msgid "Held Back"
+msgstr "Zurückgestellt"
+
+msgid "Verification of Payee pending"
+msgstr "Empfängerprüfung läuft"
+
+msgid "Approved"
+msgstr "Freigegeben"
+
+msgid "On Hold"
+msgstr "Zurückgestellt"
+
+msgid "Due"
+msgstr "Fällig"
+
+msgid "Scheduled at Bank"
+msgstr "Bei der Bank vorgemerkt"
+
+msgid "Sent"
+msgstr "Abgesendet"
+
+msgid "Ready to send"
+msgstr "Sendebereit"
+
+msgid "Not ready"
+msgstr "Nicht sendebereit"
+
+msgid "TAN required"
+msgstr "TAN erforderlich"
+
+msgid "Verification of Payee — mismatch"
+msgstr "Empfängerprüfung — Abweichung"
+
+msgid "Send to bank"
+msgstr "An die Bank senden"
+
+msgid "Send transfer"
+msgstr "Überweisung senden"
+
+msgid "Send collective order"
+msgstr "Sammelauftrag senden"
+
+msgid "Send now"
+msgstr "Jetzt senden"
+
+msgid "Send selected"
+msgstr "Markierte senden"
+
+msgid "Release"
+msgstr "Freigeben"
+
+msgid "Hold back"
+msgstr "Zurückstellen"
+
+msgid "Sending to bank..."
+msgstr "Wird an die Bank gesendet …"
+
+msgid "Send failed"
+msgstr "Nicht abgesendet"
+
+msgid "Sent."
+msgstr "Abgesendet."
+
+msgid "You are about to move {0} from {1}. Check every recipient — a transfer cannot be undone here."
+msgstr "Sie sind dabei, {0} von {1} zu überweisen. Bitte jeden Empfänger prüfen — hier lässt sich eine Überweisung nicht zurücknehmen."
+
+msgid "About to send {0} order(s) totalling {1} from {2}. This cannot be undone here."
+msgstr "Es gehen {0} Aufträge über insgesamt {1} von {2} an die Bank. Hier lässt sich das nicht zurücknehmen."
+
+msgid "I checked every recipient and amount"
+msgstr "Ich habe jeden Empfänger und Betrag geprüft"
+
+msgid "I checked every order in this list"
+msgstr "Ich habe jeden Auftrag in dieser Liste geprüft"
+
+msgid "Please confirm you checked the recipients."
+msgstr "Bitte bestätigen Sie, dass Sie die Empfänger geprüft haben."
+
+msgid "Please confirm you checked the orders."
+msgstr "Bitte bestätigen Sie, dass Sie die Aufträge geprüft haben."
+
+msgid "Sent as an instant payment (SEPA Instant)."
+msgstr "Wird als Echtzeitüberweisung ausgeführt (SEPA Instant)."
+
+msgid "Single transfer."
+msgstr "Einzelüberweisung."
+
+msgid "Collective order ({0} payments) — a single TAN authorises all of them."
+msgstr "Sammelauftrag ({0} Zahlungen) — eine TAN gibt alle frei."
+
+msgid "They are combined into one collective order, so the bank asks for a single TAN."
+msgstr "Sie werden zu einem Sammelauftrag zusammengefasst, deshalb verlangt die Bank nur eine TAN."
+
+msgid "Sent to the bank. Recall it with your bank if needed — it cannot be withdrawn here."
+msgstr "An die Bank übergeben. Zurückholen geht nur noch bei der Bank, nicht mehr hier."
+
+msgid "Invalid IBAN"
+msgstr "Ungültige IBAN"
+
+msgid "{0} is not a valid IBAN — the checksum does not match. Please re-check the recipient's account."
+msgstr "{0} ist keine gültige IBAN — die Prüfziffer stimmt nicht. Bitte das Konto des Empfängers noch einmal prüfen."
+
+msgid "Select at least one transfer."
+msgstr "Bitte mindestens eine Überweisung auswählen."
+
+msgid "Different paying accounts"
+msgstr "Verschiedene abgehende Konten"
+
+msgid "One collective order can only be paid from a single account. Selected: {0}"
+msgstr "Ein Sammelauftrag geht immer von genau einem Konto ab. Ausgewählt: {0}"
+
+msgid "Held-back transfers selected"
+msgstr "Zurückgestellte Überweisungen ausgewählt"
+
+msgid "{0} of the selected transfers are held back. Release them first or deselect them — they are not sent silently."
+msgstr "{0} der ausgewählten Überweisungen sind zurückgestellt. Bitte erst freigeben oder abwählen — stillschweigend gesendet wird nichts."
+
+msgid "{0} of the selected transfers are not approved, or were already sent."
+msgstr "{0} der ausgewählten Überweisungen sind nicht freigegeben oder schon abgesendet."
+
+msgid "Only approved, unsent transfers can be held or released."
+msgstr "Zurückstellen und Freigeben geht nur bei freigegebenen, noch nicht abgesendeten Überweisungen."
+
+msgid "{0} transfer(s) held back."
+msgstr "{0} Überweisung(en) zurückgestellt."
+
+msgid "{0} transfer(s) released."
+msgstr "{0} Überweisung(en) freigegeben."
+
+msgid "The bank asked for a TAN. Open {0} to enter it."
+msgstr "Die Bank verlangt eine TAN. Bitte {0} öffnen und sie dort eingeben."
+
+msgid "The bank could not confirm a payee name. No money was sent. Open {0} to review and release it."
+msgstr "Die Bank konnte einen Empfängernamen nicht bestätigen. Es ist kein Geld abgegangen. Bitte {0} öffnen, prüfen und freigeben."
+
+msgid "The bank flagged a payee mismatch. Use 'Send to bank' to review and release it."
+msgstr "Die Bank meldet eine Abweichung beim Empfänger. Über „An die Bank senden“ prüfen und freigeben."
+
+msgid "The account the money is paid from."
+msgstr "Das Konto, von dem das Geld abgeht."
+
+msgid "The day the money is to leave the account. Today means now."
+msgstr "Der Tag, an dem das Geld vom Konto gehen soll. Heute heißt sofort."
+
+msgid "Set automatically on submit; identifies this payment in the bank statement."
+msgstr "Wird beim Freigeben gesetzt und weist diese Zahlung im Kontoauszug aus."
+
+msgid "Real-time credit transfer (HKIPZ). Bank and account must support it, otherwise the order is rejected."
+msgstr "Echtzeitüberweisung (HKIPZ). Bank und Konto müssen das können, sonst weist die Bank den Auftrag zurück."
+
+msgid "One row is a single transfer (HKCCS). Several rows are sent as one collective order (HKCCM) requiring only one TAN."
+msgstr "Eine Zeile ist eine Einzelüberweisung (HKCCS). Mehrere Zeilen gehen als ein Sammelauftrag (HKCCM) raus und brauchen nur eine TAN."
+
+msgid "Pick one of the company's own accounts to move money between them. Name and IBAN are filled from it; both stay editable."
+msgstr "Ein eigenes Konto der Gesellschaft wählen, um Geld zwischen den eigenen Konten zu bewegen. Name und IBAN werden daraus gefüllt und bleiben änderbar."
+
+msgid "Held back — this order stays in the outbox and is skipped by a collective send."
+msgstr "Zurückgestellt — der Auftrag bleibt im Zahlungsausgang und wird beim Sammelsenden übersprungen."
+
+msgid "Keep this order in the outbox: it is skipped by the collective send until released."
+msgstr "Den Auftrag im Zahlungsausgang halten: bis zur Freigabe wird er beim Sammelsenden übersprungen."
+
+msgid "The identifier the bank filed the dated order under. It is what a later change or cancellation at the bank refers to."
+msgstr "Die Nummer, unter der die Bank den Terminauftrag führt. Auf sie bezieht sich eine spätere Änderung oder Streichung bei der Bank."
+
+msgid "Ticked, the payment waits here and is presented for release on its execution date. Unticked, it is handed to the bank straight away and the BANK holds it until the date (FinTS HKCSE) -- it then cannot be changed here any more, only at the bank."
+msgstr "Angehakt wartet die Zahlung hier und wird am Ausführungstag zur Freigabe vorgelegt. Nicht angehakt geht sie sofort an die Bank, und die BANK hält sie bis zum Termin (FinTS HKCSE) — danach ist sie hier nicht mehr änderbar, nur noch bei der Bank."
