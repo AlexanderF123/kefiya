@@ -159,6 +159,86 @@ class TestARowThatCannotBeReadSaysSo(unittest.TestCase):
         self.assertIsNone(si.to_entry(rows[0], columns, si.PROFILES[name]))
 
 
+class TestAFeedFromOutsideIsReadTheSameWay(unittest.TestCase):
+    """A card issuer that speaks no FinTS is still reachable -- through a
+    licensed account information service, or through a document service that
+    already holds the connection. What arrives is a record, not a CSV row, and
+    it must not be trusted any further than a row is."""
+
+    AMEX_ROW = {"date": "01.08.2026", "amount": "349,90",
+                "description": "LUFTHANSA", "transactionId": "AT2601"}
+
+    def test_a_card_charge_stays_money_leaving(self):
+        entry = si.normalise_pushed(self.AMEX_ROW, profile_name="amex")
+        self.assertEqual(entry["amount"], -349.90)
+
+    def test_the_same_record_read_as_a_giro_feed_goes_the_other_way(self):
+        """Which is exactly why the convention must be stated, not assumed."""
+        entry = si.normalise_pushed(self.AMEX_ROW, profile_name="sepa_csv")
+        self.assertEqual(entry["amount"], 349.90)
+
+    def test_an_unstated_convention_is_refused_not_guessed(self):
+        with self.assertRaises(Exception):
+            si.normalise_pushed(self.AMEX_ROW, profile_name=None)
+
+    def test_an_explicit_override_wins(self):
+        entry = si.normalise_pushed(self.AMEX_ROW, charges_are_positive=False)
+        self.assertEqual(entry["amount"], 349.90)
+
+    def test_the_key_names_these_services_actually_use(self):
+        for key in ("bookingDate", "booking_date", "valueDate", "datum"):
+            entry = si.normalise_pushed(
+                {key: "01.08.2026", "amount": "10,00"}, profile_name="amex")
+            self.assertIsNotNone(entry, key)
+
+    def test_the_services_own_id_becomes_the_reference(self):
+        """It is what survives a re-download of the same period."""
+        entry = si.normalise_pushed(self.AMEX_ROW, profile_name="amex")
+        self.assertEqual(entry["reference"], "AT2601")
+
+    def test_a_record_that_cannot_be_read_is_not_a_zero_booking(self):
+        self.assertIsNone(si.normalise_pushed(
+            {"description": "no date, no amount"}, profile_name="amex"))
+        self.assertIsNone(si.normalise_pushed(
+            {"date": "01.08.2026"}, profile_name="amex"))
+
+
+class TestTheEndpointsGuardThemselves(unittest.TestCase):
+    """Whitelisted endpoints are callable by any logged-in user, and both of
+    these write."""
+
+    def test_ingest_checks_rights_before_it_books(self):
+        import inspect
+        source = inspect.getsource(si.ingest)
+        self.assertIn('frappe.has_permission("Bank Account", ptype="write"',
+                      source)
+        self.assertIn('"Bank Transaction", ptype="create"', source)
+        self.assertLess(
+            source.index("has_permission"), source.index("frappe.get_doc({"),
+            "The check must come before the first booking, not after it.")
+
+    def test_ingest_writes_nothing_unless_it_was_asked_by_name(self):
+        """A bulk write that a misconfigured workflow can trigger by omission
+        is one that will eventually be triggered by omission."""
+        import inspect
+        signature = inspect.signature(si.ingest)
+        self.assertEqual(signature.parameters["dry_run"].default, 1)
+
+    def test_nothing_is_submitted_from_a_feed(self):
+        """Submitting is an approval, and an unattended feed does not give
+        itself one."""
+        import inspect
+        self.assertNotIn(".submit(", inspect.getsource(si.ingest))
+
+    def test_attaching_a_statement_checks_rights_and_repeats_harmlessly(self):
+        import inspect
+        source = inspect.getsource(si.attach_statement)
+        self.assertIn('frappe.has_permission("Bank Account", ptype="write"',
+                      source)
+        self.assertIn('"is_private": 1', source)
+        self.assertIn('frappe.db.exists("File"', source)
+
+
 class TestTheSameFileTwiceIsHarmless(unittest.TestCase):
     """The import this replaces had no dedup whatsoever: importing a file a
     second time created every booking a second time."""

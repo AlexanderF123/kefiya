@@ -341,6 +341,215 @@ def file_content(file_url):
     return frappe.get_doc("File", name).get_content()
 
 
+def normalise_pushed(entry, profile_name=None, charges_are_positive=None):
+    """One booking out of one record handed over by an outside service.
+
+    A card issuer that speaks no FinTS is still reachable -- through a licensed
+    account information service (the PSD2 route a bank aggregator provides) or
+    through a document service that already holds the connection. What arrives
+    from either is a record, not a CSV row, so it needs the same treatment
+    without the file reading: amounts and dates parsed defensively, and above
+    all the SIGN settled.
+
+    The sign is why this takes a profile rather than assuming one. A card
+    feed states a charge as a positive number; a giro feed states money
+    arriving as a positive number. Guessing wrong books a year of spending as
+    income, and nothing downstream would notice.
+
+    :param entry: dict from the caller, keys as tolerated by _first()
+    :param profile_name: key in PROFILES whose sign convention applies
+    :param charges_are_positive: explicit override, wins over the profile
+    :return: canonical entry, or None when it cannot be read
+    """
+    if charges_are_positive is None:
+        if profile_name not in PROFILES:
+            frappe.throw(_(
+                "Unknown statement format {0}. Pass a known format or state"
+                " the sign convention explicitly -- a card feed and a giro"
+                " feed count the opposite way round."
+            ).format(profile_name))
+        charges_are_positive = PROFILES[profile_name]["charges_are_positive"]
+
+    def pick(*keys):
+        for key in keys:
+            if key in entry and entry[key] not in (None, ""):
+                return entry[key]
+        return None
+
+    date = parse_date(pick("date", "bookingDate", "booking_date", "datum",
+                           "valueDate", "transactionDate"))
+    amount = parse_amount(pick("amount", "betrag", "value"))
+    if date is None or amount is None:
+        return None
+
+    if charges_are_positive:
+        amount = -amount
+
+    iban = pick("iban", "counterpartyIban", "bank_party_iban")
+    return {
+        "date": date,
+        "amount": amount,
+        "description": str(pick("description", "purpose", "verwendungszweck",
+                                "beschreibung", "reference_text") or ""),
+        "counterparty": str(pick("counterparty", "counterpartyName",
+                                 "merchant", "name", "karteninhaber") or ""),
+        "iban": str(iban).replace(" ", "").upper() if iban else None,
+        # The service's own id is the best reference there is: it survives a
+        # changed description and a re-download of the same period.
+        "reference": pick("reference", "referenz", "transactionId",
+                          "transaction_id", "id"),
+    }
+
+
+@frappe.whitelist()
+def ingest(bank_account, entries, profile=None, charges_are_positive=None,
+           dry_run=1):
+    """Book what an outside service fetched, deciding here rather than there.
+
+    This is the endpoint an automation calls -- the transport fetches, this
+    validates and books. The caller never writes a Bank Transaction itself:
+    the sign convention, the deduplication and the permission check belong on
+    this side, where they are the same for every source.
+
+    Defaults to a dry run. A bulk write that only happens when it was asked
+    for by name is one that cannot be triggered by a misconfigured workflow.
+
+    :param entries: list of dicts (or its JSON form)
+    :param profile: key in PROFILES supplying the sign convention
+    :param dry_run: 1 = report what would happen, write nothing
+    :return: {"created"|"would_create", "duplicates", "unreadable", "sample"}
+    """
+    from frappe.utils import cint
+
+    # Permission gate: a whitelisted endpoint is callable by any logged-in
+    # user, and this one creates bookings on a named account.
+    frappe.has_permission("Bank Account", ptype="write", doc=bank_account,
+                          throw=True)
+    frappe.has_permission("Bank Transaction", ptype="create", throw=True)
+
+    if isinstance(entries, str):
+        entries = frappe.parse_json(entries)
+    if not isinstance(entries, (list, tuple)):
+        frappe.throw(_("ingest expects a list of entries."))
+
+    if charges_are_positive is not None:
+        charges_are_positive = bool(cint(charges_are_positive))
+
+    company = frappe.db.get_value("Bank Account", bank_account, "company")
+    result = {"total": len(entries), "duplicates": 0, "unreadable": 0,
+              "created": 0, "would_create": 0, "sample": [],
+              "dry_run": bool(cint(dry_run))}
+    seen = set()
+
+    for raw in entries:
+        entry = normalise_pushed(
+            raw if isinstance(raw, dict) else {},
+            profile_name=profile, charges_are_positive=charges_are_positive)
+        if entry is None:
+            result["unreadable"] += 1
+            continue
+
+        reference = reference_number(bank_account, entry)
+        if reference in seen or frappe.db.exists(
+                "Bank Transaction", {"reference_number": reference}):
+            result["duplicates"] += 1
+            continue
+        seen.add(reference)
+
+        if len(result["sample"]) < 5:
+            result["sample"].append({
+                "date": str(entry["date"]),
+                "description": (entry["description"] or "")[:60],
+                "in": entry["amount"] if entry["amount"] > 0 else 0,
+                "out": -entry["amount"] if entry["amount"] < 0 else 0,
+            })
+
+        if result["dry_run"]:
+            result["would_create"] += 1
+            continue
+
+        # Created as a draft on purpose. Submitting is an approval, and an
+        # approval is not something an unattended feed gives itself.
+        frappe.get_doc({
+            "doctype": "Bank Transaction",
+            "date": str(entry["date"]),
+            "status": "Unreconciled",
+            "bank_account": bank_account,
+            "company": company,
+            "deposit": entry["amount"] if entry["amount"] > 0 else 0,
+            "withdrawal": -entry["amount"] if entry["amount"] < 0 else 0,
+            "description": " ".join(
+                x for x in (entry["counterparty"], entry["description"]) if x),
+            "bank_party_iban": entry.get("iban"),
+            "bank_party_name": entry["counterparty"] or None,
+            "reference_number": reference,
+            "allocated_amount": 0,
+            "unallocated_amount": abs(entry["amount"]),
+        }).insert(ignore_permissions=True)
+        result["created"] += 1
+
+    return result
+
+
+@frappe.whitelist()
+def attach_statement(bank_account, filename, content_base64, period=None):
+    """File a statement document that came from outside FinTS.
+
+    The gap this closes is a specific one: the PSD2 account information route
+    delivers bookings and balances and no documents at all -- there is no
+    statement PDF in it, by design. A card issuer that speaks no FinTS
+    therefore leaves the bookings reachable and the statements not.
+
+    So a document service that already holds that connection can hand the PDF
+    over here, and it lands exactly where a fetched one lands: attached to the
+    BANK ACCOUNT as a private file, named so that handing the same one over
+    twice is recognised rather than filed twice. Same rule as
+    download_statements() in fetch_persistence.
+
+    :param content_base64: the document itself, base64 encoded
+    :param period: e.g. "2026-08"; only used to build a stable name
+    :return: {"stored": bool, "file": name|None, "reason": str|None}
+    """
+    import base64
+
+    frappe.has_permission("Bank Account", ptype="write", doc=bank_account,
+                          throw=True)
+
+    # A statement is a private document about an account. Keeping the name
+    # deterministic is what makes a repeated hand-over idempotent.
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", str(filename or "")).strip("-")
+    if not safe:
+        safe = "Kontoauszug-{0}".format(period or "unbenannt")
+    if period and period not in safe:
+        safe = "{0}-{1}".format(period, safe)
+
+    existing = frappe.db.exists("File", {
+        "attached_to_doctype": "Bank Account",
+        "attached_to_name": bank_account,
+        "file_name": safe,
+    })
+    if existing:
+        return {"stored": False, "file": existing,
+                "reason": "already present"}
+
+    try:
+        payload = base64.b64decode(content_base64 or "", validate=True)
+    except Exception:
+        frappe.throw(_("The document could not be decoded."))
+    if not payload:
+        frappe.throw(_("The document is empty."))
+
+    doc = frappe.get_doc({
+        "doctype": "File",
+        "file_name": safe,
+        "attached_to_doctype": "Bank Account",
+        "attached_to_name": bank_account,
+        "is_private": 1,
+        "content": payload,
+    }).insert(ignore_permissions=True)
+    return {"stored": True, "file": doc.name, "reason": None}
+
+
 def plan(file_url, bank_account):
     """Read the file and report what an import WOULD do. Writes nothing.
 
