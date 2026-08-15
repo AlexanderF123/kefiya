@@ -470,7 +470,7 @@ frappe.provide("kefiya");
         };
     }
 
-    function tanPrompt(data) {
+    function tanPrompt(data, done) {
         var fields = [];
         if (data.possible_tan_modes) {
             fields.push({ fieldtype: "Select", fieldname: "tan_mode",
@@ -518,16 +518,24 @@ frappe.provide("kefiya");
                 args: { fints_login: data.docname,
                         values: Object.assign({}, data, values) },
                 silent: true,
+                callback: function () { if (done) done(); },
                 error: function (r) {
                     frappe.show_alert({
                         message: __("TAN release failed.") + " "
                             + errText(r),
                         indicator: "red"
                     }, 10);
+                    if (done) done();
                 }
             });
         }, tanTitle(data));
     }
+
+    // Shared, because a TAN prompt is a TAN prompt: the outgoing-payments page
+    // needs the same box when the bank asks for a release on a send. Two copies
+    // of it drifted apart once already -- the second one named neither the bank
+    // nor the account, which is the whole reason the context lines exist.
+    kefiya.tan_prompt = tanPrompt;
 
     function bindRealtime() {
         if (kefiya._bank_refresh_realtime) return;

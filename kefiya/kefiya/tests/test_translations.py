@@ -39,6 +39,13 @@ def _rows():
 LEFT_TO_THE_FRAMEWORK = {
     "Bank Account", "Date", "Name", "GetMyInvoices",
     "Enabled", "Provider", "Base URL", "API Key", "Match Value",
+    # The transfer screens. Every one of these is a word the framework already
+    # translates, and translates the same way this app would -- "Amount" is
+    # "Betrag", "Delete" is "Löschen". Shipping our own would override the
+    # framework's for the entire site to arrive at the same word.
+    "Amount", "Draft", "Delete", "Send", "Refresh", "Total", "Company",
+    "IBAN", "Recipient", "Transfer", "State", "Loading ...", "public",
+    "Order", "Payments", "Yes", "No", "Save", "When", "Due date",
 }
 
 #: Words the framework already uses for something else. Translating them from
@@ -46,9 +53,48 @@ LEFT_TO_THE_FRAMEWORK = {
 CLAIMED_ELSEWHERE = {"Accounts", "Note", "Failed", "Credentials", "Status"}
 
 
+#: The screens whose JavaScript is covered here as well. The document service
+#: was the first; the transfer screens joined it when the outgoing-payments
+#: list moved out of a stored Custom HTML Block into this app -- it was written
+#: in German inside that block, so moving it here without the translations
+#: would have turned the whole page English.
+#:
+#: Not every controller: bank_refresh.js and the FinTS dialogs are still
+#: English-sourced and untranslated, and pretending otherwise by listing them
+#: would only make this test fail for work nobody has started.
+COVERED_CONTROLLERS = (
+    "transfer_details.js", "transfer_form.js", "payment_outbox.js",
+)
+
+#: `__("a" + "b")` -- one message written across two lines. Matching only the
+#: first literal would look for a string that is never shown.
+_JS_CALL = re.compile(
+    r'__\(\s*((?:"(?:[^"\\]|\\.)*")(?:\s*\+\s*"(?:[^"\\]|\\.)*")*)')
+
+
+#: Written out rather than using codecs' "unicode_escape": that one decodes the
+#: bytes as latin-1, so every em dash and ellipsis in these files would come
+#: back as mojibake and read as an untranslated string.
+_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\", '"': '"', "'": "'"}
+
+
+def _js_strings(text):
+    out = set()
+    for match in _JS_CALL.finditer(text):
+        joined = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1)))
+        out.add(re.sub(r"\\(.)",
+                       lambda m: _ESCAPES.get(m.group(1), m.group(1)), joined))
+    return out
+
+
 def _sources():
-    """Every translatable string of the document service."""
+    """Every translatable string of the document service and the transfers."""
     found = set()
+
+    for name in COVERED_CONTROLLERS:
+        with open(_app_path("public", "js", "controllers", name),
+                  encoding="utf-8") as handle:
+            found |= _js_strings(handle.read())
 
     for doctype in ("kefiya_document_service", "kefiya_document_account"):
         with open(_app_path("kefiya", "doctype", doctype, doctype + ".json"),
