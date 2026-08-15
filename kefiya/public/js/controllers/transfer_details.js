@@ -32,6 +32,21 @@ kefiya.transfer_details = function (row, options) {
 		},
 	});
 
+	// Correcting happens from here, so the row itself needs no second button.
+	// Only a draft can be corrected: after approval the amounts and the
+	// recipients are locked, which is the entire point of approving.
+	if (row.docstatus === 0 && options.canWrite !== false) {
+		dialog.set_secondary_action_label(__("Correct"));
+		dialog.set_secondary_action(function () {
+			dialog.hide();
+			kefiya.transfer_form({
+				row: row,
+				payers: options.payers || [],
+				onSaved: options.onChanged || function () {},
+			});
+		});
+	}
+
 	const field = dialog.fields_dict.body;
 	field.$wrapper.html(kefiya.transfer_details_html(row, null));
 	dialog.show();

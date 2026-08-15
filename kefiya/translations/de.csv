@@ -105,3 +105,28 @@ Bank response,Rückmeldung der Bank
 Receipts,Belege
 The attachments could not be read.,Die Anhänge konnten nicht gelesen werden.
 No receipt is attached to this order.,An diesem Auftrag hängt kein Beleg.
+Correct,Korrigieren
+Correct transfer,Überweisung korrigieren
+New transfer,Neue Überweisung
+Enter,Erfassen
+On a date — the bank holds the order,Zu einem Termin — die Bank hält den Auftrag
+On a date — held here until then,Zu einem Termin — bis dahin hier gehalten
+The order goes out with the next send.,Der Auftrag geht mit der nächsten Sendung raus.
+"Sent now, executed by the bank on the day. The bank must support dated transfers for this account.","Geht sofort raus, die Bank führt ihn am Termin aus. Die Bank muss Terminüberweisungen für dieses Konto anbieten."
+Stays in the outbox and is offered for sending on the day. Use this where the bank takes no dated order.,"Bleibt im Ausgangskorb und wird am Termin zum Senden angeboten. Für Banken, die keinen Terminauftrag annehmen."
+No account available,Kein Konto verfügbar
+"No bank access is set up that a transfer can start from. A loan, a guarantee or a credit card cannot send money.","Es ist kein Bankzugang eingerichtet, von dem eine Überweisung ausgehen kann. Ein Darlehen, ein Aval oder eine Kreditkarte kann kein Geld senden."
+The paying account cannot be changed on an existing order. Delete it and enter a new one instead.,Das abgehende Konto lässt sich an einem bestehenden Auftrag nicht ändern. Stattdessen löschen und neu erfassen.
+"Free text. Known payees are suggested while you type, but any name may be entered.","Freitext. Bekannte Empfänger werden beim Tippen vorgeschlagen, eingeben lässt sich jeder Name."
+Checked against its checksum before it is stored.,Wird vor dem Speichern gegen ihre Prüfsumme geprüft.
+Execution date,Ausführungstermin
+"Arrives within seconds. The bank must offer it for this account, and it is usually capped.","Kommt binnen Sekunden an. Die Bank muss es für dieses Konto anbieten, meist gilt eine Betragsgrenze."
+Date missing,Termin fehlt
+A dated transfer needs a date.,Eine Terminüberweisung braucht einen Termin.
+Transfer saved.,Überweisung gespeichert.
+Transfer entered.,Überweisung erfasst.
+Not saved,Nicht gespeichert
+The transfer could not be saved.,Die Überweisung konnte nicht gespeichert werden.
+Please choose a paying account.,Bitte ein abgehendes Konto wählen.
+When,Wann
+Reference,Verwendungszweck

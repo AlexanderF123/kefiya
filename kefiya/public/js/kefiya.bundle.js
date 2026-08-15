@@ -17,3 +17,6 @@ import "./controllers/bank_refresh";
 // Opened from the outgoing-payments page, and from anywhere else that wants
 // to show one transfer without navigating away from what the reader is doing.
 import "./controllers/transfer_details";
+// Entering and correcting one transfer, with the execution options the
+// document has always carried.
+import "./controllers/transfer_form";
