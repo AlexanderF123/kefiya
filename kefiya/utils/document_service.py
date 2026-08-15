@@ -151,14 +151,32 @@ def _call(path, payload=None):
             base + path, json=body,
             timeout=(15, 120),
             headers={"Content-Type": "application/json"})
-        response.raise_for_status()
-        return response.json()
     except Exception as exc:
-        # str(exc) on a requests error names the URL but not the body; the
-        # body is dropped here deliberately and is never logged.
+        # Nothing came back at all -- DNS, TLS, timeout. There is no response
+        # to quote, and the request must not be quoted: it carries the key.
         raise DocumentServiceError(
-            _("The document service did not answer as expected ({0}): {1}")
+            _("The document service could not be reached ({0}): {1}")
             .format(path, type(exc).__name__)) from None
+
+    if response.status_code >= 400:
+        # The STATUS and the RESPONSE are what make this diagnosable, and
+        # neither contains the key -- the key travels in the request. The
+        # first version of this reported only "HTTPError", which is the same
+        # sentence for a wrong key, a wrong path and a retired API version;
+        # the dialog then had nothing to show and stayed silent.
+        detail = (response.text or "").strip().replace("\n", " ")[:300]
+        raise DocumentServiceError(
+            _("The document service answered {0} on {1}: {2}").format(
+                response.status_code, path, detail or _("no detail given"))
+        ) from None
+
+    try:
+        return response.json()
+    except Exception:
+        raise DocumentServiceError(
+            _("The document service answered {0} on {1}, but not in JSON: {2}")
+            .format(response.status_code, path,
+                    (response.text or "").strip()[:200])) from None
 
 
 class DocumentServiceError(frappe.ValidationError):

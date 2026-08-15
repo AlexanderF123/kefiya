@@ -1,0 +1,137 @@
+# Copyright (c) 2026, Phamos GmbH and contributors
+# For license information, please see license.txt
+
+"""Every user-facing string of the document service has a German translation.
+
+A translation file rots quietly: a label added next month is simply English on
+a German screen, and nobody notices until a user does. So the coverage is
+asserted rather than assumed.
+
+The second half matters more than the first. An app translation is applied
+SITE-WIDE, so a generic source string overrides that word everywhere: shipping
+"Accounts" -> "Konten" renames the whole accounting module, and "Note" ->
+"Hinweis" renames the Note DocType. Those source strings were made specific in
+this app instead, and this test keeps them that way.
+"""
+
+import csv
+import json
+import os
+import re
+import unittest
+
+
+def _app_path(*parts):
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), *parts)
+
+
+def _rows():
+    path = _app_path("translations", "de.csv")
+    with open(path, encoding="utf-8") as handle:
+        return [r for r in csv.reader(handle) if r]
+
+
+#: Left to the framework on purpose: either its translation is already right
+#: ("Bank Account" -> "Bankkonto") or the string is a product name that must
+#: not be translated at all.
+LEFT_TO_THE_FRAMEWORK = {
+    "Bank Account", "Date", "Name", "GetMyInvoices",
+    "Enabled", "Provider", "Base URL", "API Key", "Match Value",
+}
+
+#: Words the framework already uses for something else. Translating them from
+#: this app would rename that something else across the whole site.
+CLAIMED_ELSEWHERE = {"Accounts", "Note", "Failed", "Credentials", "Status"}
+
+
+def _sources():
+    """Every translatable string of the document service."""
+    found = set()
+
+    for doctype in ("kefiya_document_service", "kefiya_document_account"):
+        with open(_app_path("kefiya", "doctype", doctype, doctype + ".json"),
+                  encoding="utf-8") as handle:
+            meta = json.load(handle)
+        found.add(meta["name"])
+        for field in meta["fields"]:
+            for key in ("label", "description"):
+                if field.get(key):
+                    found.add(field[key])
+            if field.get("fieldtype") == "Select" and field.get("options"):
+                found |= {o.strip() for o in field["options"].split("\n")
+                          if o.strip()}
+
+    with open(_app_path("kefiya", "doctype", "kefiya_document_service",
+                        "kefiya_document_service.js"), encoding="utf-8") as h:
+        js = h.read()
+    found |= {m.group(1)
+              for m in re.finditer(r'__\(\s*"((?:[^"\\]|\\.)*)"', js)}
+
+    python = ""
+    for path in (("utils", "document_service.py"),
+                 ("kefiya", "doctype", "kefiya_document_service",
+                  "kefiya_document_service.py")):
+        with open(_app_path(*path), encoding="utf-8") as handle:
+            python += handle.read()
+    for m in re.finditer(r'_\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\)', python):
+        found.add("".join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))))
+
+    return {s for s in found if s.strip()}
+
+
+class TestEveryStringIsTranslated(unittest.TestCase):
+
+    def test_nothing_is_left_in_english_by_accident(self):
+        translated = {r[0] for r in _rows()}
+        missing = sorted(_sources() - translated - LEFT_TO_THE_FRAMEWORK)
+        self.assertEqual(
+            missing, [],
+            "Untranslated strings. Add them to translations/de.csv, or to "
+            "LEFT_TO_THE_FRAMEWORK if the framework already translates them "
+            "correctly.")
+
+    def test_the_file_has_two_columns_and_no_empty_translation(self):
+        for row in _rows():
+            self.assertEqual(len(row), 2, row)
+            self.assertTrue(row[0].strip(), row)
+            self.assertTrue(row[1].strip(), row)
+
+    def test_no_source_is_translated_twice(self):
+        sources = [r[0] for r in _rows()]
+        duplicates = sorted({s for s in sources if sources.count(s) > 1})
+        self.assertEqual(duplicates, [],
+                         "One source, two translations -- whichever wins is "
+                         "a coin toss.")
+
+
+class TestNoGenericWordIsHijacked(unittest.TestCase):
+    """An app translation applies to the WHOLE site. Shipping a translation
+    for a word the framework uses for something else renames that something
+    else -- "Accounts" is the accounting module, "Note" is a DocType."""
+
+    def test_the_file_claims_no_word_that_belongs_to_the_framework(self):
+        sources = {r[0] for r in _rows()}
+        stolen = sorted(sources & CLAIMED_ELSEWHERE)
+        self.assertEqual(
+            stolen, [],
+            "These would be renamed across the entire site. Make the source "
+            "string in this app specific instead (\"Account mapping\", "
+            "\"Remark\", \"Failures\").")
+
+    def test_the_app_uses_the_specific_wording(self):
+        sources = _sources()
+        for generic in CLAIMED_ELSEWHERE:
+            self.assertNotIn(
+                generic, sources,
+                "{0} is claimed by the framework; this app must not use it as "
+                "a label.".format(generic))
+
+    def test_the_replacements_are_actually_in_use(self):
+        sources = _sources()
+        for specific in ("Account mapping", "Assigned accounts",
+                         "Access credentials", "Failures", "Remark"):
+            self.assertIn(specific, sources,
+                          "{0} was translated but is used nowhere.".format(
+                              specific))
