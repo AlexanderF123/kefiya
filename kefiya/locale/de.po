@@ -416,17 +416,8 @@ msgstr "Abgehendes Konto"
 msgid "Execution Date"
 msgstr "Ausführung am"
 
-msgid "Total Amount"
-msgstr "Gesamtbetrag"
-
 msgid "Number of Payments"
 msgstr "Anzahl Zahlungen"
-
-msgid "Payments"
-msgstr "Posten"
-
-msgid "Purpose"
-msgstr "Verwendungszweck"
 
 msgid "Own Account"
 msgstr "Eigenes Konto"
@@ -461,20 +452,8 @@ msgstr "Zurückgestellt"
 msgid "Verification of Payee pending"
 msgstr "Empfängerprüfung läuft"
 
-msgid "Approved"
-msgstr "Freigegeben"
-
-msgid "On Hold"
-msgstr "Zurückgestellt"
-
-msgid "Due"
-msgstr "Fällig"
-
 msgid "Scheduled at Bank"
 msgstr "Bei der Bank vorgemerkt"
-
-msgid "Sent"
-msgstr "Abgesendet"
 
 msgid "Ready to send"
 msgstr "Sendebereit"
@@ -502,9 +481,6 @@ msgstr "Jetzt senden"
 
 msgid "Send selected"
 msgstr "Markierte senden"
-
-msgid "Release"
-msgstr "Freigeben"
 
 msgid "Hold back"
 msgstr "Zurückstellen"
