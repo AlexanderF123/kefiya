@@ -63,6 +63,30 @@ PROFILES = {
         # A card statement names no IBAN -- a card has none.
         "required": ("date", "amount"),
     },
+    # A StarMoney export names 75 columns and, importantly, carries SEVERAL
+    # ACCOUNTS in one file -- one export covering every access the program
+    # knows. Its "IBAN" column is therefore the account the booking belongs
+    # TO, not the counterparty: read as a counterparty IBAN (which is what a
+    # generic giro profile would do) every booking would name its own account
+    # as the other side. Hence `own_iban`, which also lets one file be split
+    # across the Bank Accounts it covers instead of by hand beforehand.
+    "starmoney": {
+        "label": "StarMoney CSV",
+        "charges_are_positive": False,
+        "columns": {
+            "own_iban": ("iban",),
+            "date": ("buchungstag",),
+            "value_date": ("wertstellungstag",),
+            "amount": ("betrag",),
+            "counterparty": ("beguenstigter absender name",),
+            "description": ("verwendungszweckzeile 1",),
+            "posting_text": ("buchungstext",),
+            # The bank's own running number for the booking. Stable across a
+            # re-export of the same period, which is what a reference is for.
+            "reference": ("laufende nummer",),
+        },
+        "required": ("date", "amount", "own_iban"),
+    },
     "sepa_csv": {
         "label": "SEPA / Giro CSV",
         "charges_are_positive": False,
@@ -232,16 +256,47 @@ _ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "iso-8859-1")
 
 
 def decode(raw):
-    """Text out of bytes, trying the encodings these exports actually use."""
+    """Text out of bytes, trying the encodings these exports actually use.
+
+    The byte order mark is stripped BEFORE the encodings are tried, not left
+    to utf-8-sig. A real StarMoney export turned out to carry a UTF-8 BOM in
+    front of a cp1252 body -- the mark says "this is UTF-8" and the umlauts
+    say otherwise. Read as utf-8-sig it fails on the first umlaut; read as
+    cp1252 with the mark left in place, the first header cell begins with
+    "ï»¿" and matches no column name. Removing the mark first makes both
+    halves readable.
+    """
     if isinstance(raw, str):
-        return raw
-    for encoding in _ENCODINGS:
-        try:
-            return raw.decode(encoding)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    # Last resort: never fail the import over one unmappable byte.
-    return raw.decode("utf-8", errors="replace")
+        return raw.lstrip("﻿")
+    if raw[:3] == b"\xef\xbb\xbf":
+        raw = raw[3:]
+
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    # Not one encoding but two. A real export turned out to hold 887 UTF-8
+    # lines and 1.695 cp1252 lines in the same file -- accesses exported at
+    # different times, concatenated. Decoded wholesale either way, one half
+    # comes out wrong: as cp1252 every "Ü" becomes "Ãœ", as UTF-8 the file
+    # will not decode at all.
+    #
+    # Line by line, both halves come out right. Splitting on the newline byte
+    # is safe for every encoding here, because none of them uses 0x0A inside
+    # a multi-byte sequence -- and the lines are rejoined exactly as found, so
+    # a newline inside a quoted CSV field survives untouched.
+    out = []
+    for line in raw.split(b"\n"):
+        for encoding in _ENCODINGS:
+            try:
+                out.append(line.decode(encoding))
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        else:
+            out.append(line.decode("utf-8", errors="replace"))
+    return "\n".join(out)
 
 
 def _delimiter(sample):
@@ -298,12 +353,21 @@ def to_entry(row, columns, profile):
     if profile["charges_are_positive"]:
         amount = -amount
 
+    # The posting text ("LASTSCHRIFT", "RECHNUNG", "DAUERAUFTRAG") is what the
+    # bank called the movement; the purpose line is what the payer wrote. Both
+    # are worth keeping, and neither is worth losing to the other.
+    description = " ".join(
+        part for part in (cell("posting_text"), cell("description")) if part)
+
     return {
         "date": date,
         "amount": amount,
-        "description": cell("description"),
+        "description": description,
         "counterparty": cell("counterparty"),
         "iban": cell("iban").replace(" ", "").upper() or None,
+        # The account the booking belongs TO, where the format names it. A
+        # file covering twenty accesses is split by this rather than by hand.
+        "own_iban": cell("own_iban").replace(" ", "").upper() or None,
         "reference": cell("reference") or None,
     }
 
@@ -326,6 +390,39 @@ def reference_number(bank_account, entry):
             entry.get("counterparty") or "",
             (entry.get("description") or "")[:120])
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def already_booked(bank_account, entry):
+    """Is this booking already on the account, under whatever reference?
+
+    The reference hash only recognises what THIS module wrote. A booking the
+    bank itself delivered by FinTS carries the bank's reference, so a hash
+    comparison sees a stranger and books it a second time -- which is exactly
+    the situation when a statement file is used to fill a gap in an account
+    that is otherwise fetched.
+
+    So the second line of defence compares what a booking IS: same account,
+    same day, same amount. That is deliberately blunt. Two genuinely distinct
+    bookings of the same amount on the same day do exist -- two identical
+    parking fees, two equal rent payments -- and this will hold the second one
+    back. Reporting a real booking as "already present" is recoverable by
+    looking at the day; creating a duplicate in the ledger is the error that
+    took 3.000 entries to notice the last time.
+
+    :return: name of the existing Bank Transaction, or None
+    """
+    amount = flt(entry["amount"])
+    side = ("deposit", flt(amount)) if amount > 0 else ("withdrawal", flt(-amount))
+
+    rows = frappe.get_all(
+        "Bank Transaction",
+        filters={
+            "bank_account": bank_account,
+            "date": str(entry["date"]),
+            side[0]: side[1],
+        },
+        fields=["name"], limit=1)
+    return rows[0]["name"] if rows else None
 
 
 def file_content(file_url):
@@ -578,6 +675,8 @@ def plan(file_url, bank_account):
 
     profile = PROFILES[profile_name]
     seen_in_file = set()
+    by_iban = {}
+    result["accounts"] = {}
 
     for row in rows:
         if not any(str(cell).strip() for cell in row):
@@ -589,18 +688,47 @@ def plan(file_url, bank_account):
             result["unreadable"] += 1
             continue
 
-        entry["reference_number"] = reference_number(bank_account, entry)
+        # A file may cover many accounts -- a StarMoney export covers every
+        # access the program knows. The row says which one it belongs to, so
+        # nobody has to split the file by hand and nobody can file April's
+        # bookings of one account against another.
+        target = bank_account
+        if entry.get("own_iban"):
+            if entry["own_iban"] not in by_iban:
+                by_iban[entry["own_iban"]] = _bank_account_for_iban(
+                    entry["own_iban"])
+            target = by_iban[entry["own_iban"]]
+            if not target:
+                result.setdefault("unmatched_ibans", {})
+                key = _mask_own(entry["own_iban"])
+                result["unmatched_ibans"][key] = \
+                    result["unmatched_ibans"].get(key, 0) + 1
+                continue
 
-        # A file that repeats a row within itself must not book it twice
-        # either -- the database check alone would not catch that.
-        if entry["reference_number"] in seen_in_file or frappe.db.exists(
-                "Bank Transaction",
-                {"reference_number": entry["reference_number"]}):
+        entry["bank_account"] = target
+        entry["reference_number"] = reference_number(target, entry)
+
+        per = result["accounts"].setdefault(
+            target, {"new": 0, "duplicates": 0})
+
+        # Three ways the same booking can already be here, checked in order of
+        # cost: twice within this file, already imported by this module, or
+        # already delivered by the bank under its own reference. The last one
+        # is the case that matters when a file fills a gap in an account that
+        # is otherwise fetched -- a reference comparison alone would miss it
+        # entirely and book everything a second time.
+        if (entry["reference_number"] in seen_in_file
+                or frappe.db.exists(
+                    "Bank Transaction",
+                    {"reference_number": entry["reference_number"]})
+                or already_booked(target, entry)):
             result["duplicates"] += 1
+            per["duplicates"] += 1
             continue
 
         seen_in_file.add(entry["reference_number"])
         result["new"] += 1
+        per["new"] += 1
         result["entries"].append(entry)
         if len(result["sample"]) < 5:
             result["sample"].append({
@@ -611,3 +739,24 @@ def plan(file_url, bank_account):
             })
 
     return result
+
+
+def _mask_own(iban):
+    return "..." + str(iban)[-4:] if iban else None
+
+
+def _bank_account_for_iban(iban):
+    """The Bank Account carrying this IBAN, or None.
+
+    Compared without spaces and in upper case, because an IBAN is written
+    both ways and a file must not fail to match over a blank.
+    """
+    cleaned = str(iban or "").replace(" ", "").upper()
+    if not cleaned:
+        return None
+    for row in frappe.get_all("Bank Account",
+                              filters={"iban": ["is", "set"]},
+                              fields=["name", "iban"]):
+        if str(row["iban"] or "").replace(" ", "").upper() == cleaned:
+            return row["name"]
+    return None

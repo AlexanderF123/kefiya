@@ -115,6 +115,115 @@ class TestTheHeaderIsFound(unittest.TestCase):
             self.assertIn("nstigter", text, encoding)
 
 
+class TestAFileMayHoldTwoEncodings(unittest.TestCase):
+    """A real export held 887 UTF-8 lines and 1.695 cp1252 lines in one file --
+    accesses exported at different times, concatenated, behind a UTF-8 byte
+    order mark that describes only the first half."""
+
+    HEADER = "IBAN;Buchungstag;Betrag;Buchungstext;Verwendungszweckzeile 1;Laufende Nummer\n"
+
+    def _mixed(self):
+        utf8_line = "DE02120300000000202051;01.04.2026;10,00;GUTSCHRIFT;ÜBERWEISUNG;1\n"
+        cp_line = "DE02120300000000202051;02.04.2026;-20,00;LASTSCHRIFT;Bürobedarf;2\n"
+        return (b"\xef\xbb\xbf" + self.HEADER.encode("utf-8")
+                + utf8_line.encode("utf-8") + cp_line.encode("cp1252"))
+
+    def test_both_halves_come_out_readable(self):
+        text = si.decode(self._mixed())
+        self.assertIn("ÜBERWEISUNG", text, "the UTF-8 half")
+        self.assertIn("Bürobedarf", text, "the cp1252 half")
+
+    def test_neither_half_is_turned_into_mojibake(self):
+        """Read wholesale as cp1252 every Ü becomes Ãœ; read wholesale as
+        UTF-8 the file does not decode at all."""
+        text = si.decode(self._mixed())
+        self.assertNotIn("Ã", text)
+        self.assertNotIn("�", text)
+
+    def test_the_byte_order_mark_never_reaches_the_first_column(self):
+        """Left in place it prefixes the first header cell and that cell then
+        matches no column name at all."""
+        text = si.decode(self._mixed())
+        self.assertTrue(text.startswith("IBAN"), repr(text[:12]))
+        name, columns, _, _ = si.read_rows(text)
+        self.assertEqual(name, "starmoney")
+        self.assertEqual(columns["own_iban"], 0)
+
+    def test_a_plain_utf8_file_is_not_touched_line_by_line(self):
+        """The common case must stay one decode, not one per line."""
+        text = si.decode("Datum;Betrag\n01.08.2026;1,00\n".encode("utf-8"))
+        self.assertEqual(text, "Datum;Betrag\n01.08.2026;1,00\n")
+
+
+class TestAFileMayCoverManyAccounts(unittest.TestCase):
+    """A StarMoney export covers every access the program knows. Its "IBAN"
+    column is the account the booking belongs TO -- read as a counterparty
+    IBAN, every booking would name its own account as the other side."""
+
+    FILE = (
+        "IBAN;Buchungstag;Betrag;Buchungstext;Verwendungszweckzeile 1;Laufende Nummer\n"
+        "DE02120300000000202051;01.04.2026;-100,00;LASTSCHRIFT;Strom;11\n"
+        "DE89370400440532013000;02.04.2026;250,00;GUTSCHRIFT;Miete;12\n"
+    )
+
+    def test_the_own_account_is_read_as_such(self):
+        name, columns, rows, _ = si.read_rows(self.FILE)
+        self.assertEqual(name, "starmoney")
+        entries = [si.to_entry(r, columns, si.PROFILES[name]) for r in rows]
+        self.assertEqual(entries[0]["own_iban"], "DE02120300000000202051")
+        self.assertIsNone(entries[0]["iban"],
+                          "The own IBAN must not double as the counterparty.")
+
+    def test_two_accounts_are_told_apart(self):
+        name, columns, rows, _ = si.read_rows(self.FILE)
+        entries = [si.to_entry(r, columns, si.PROFILES[name]) for r in rows]
+        self.assertNotEqual(entries[0]["own_iban"], entries[1]["own_iban"])
+
+    def test_the_posting_text_and_the_purpose_both_survive(self):
+        """One says what the bank called it, the other what the payer wrote."""
+        name, columns, rows, _ = si.read_rows(self.FILE)
+        entry = si.to_entry(rows[0], columns, si.PROFILES[name])
+        self.assertIn("LASTSCHRIFT", entry["description"])
+        self.assertIn("Strom", entry["description"])
+
+    def test_the_running_number_becomes_the_reference(self):
+        name, columns, rows, _ = si.read_rows(self.FILE)
+        entry = si.to_entry(rows[0], columns, si.PROFILES[name])
+        self.assertEqual(entry["reference"], "11")
+
+    def test_a_giro_sign_convention_applies(self):
+        name, columns, rows, _ = si.read_rows(self.FILE)
+        entries = [si.to_entry(r, columns, si.PROFILES[name]) for r in rows]
+        self.assertEqual(entries[0]["amount"], -100.0)
+        self.assertEqual(entries[1]["amount"], 250.0)
+
+
+class TestADuplicateIsNotOnlyAKnownReference(unittest.TestCase):
+    """The reference hash recognises only what this module wrote. A booking
+    the bank delivered by FinTS carries the bank's own reference, so a hash
+    comparison sees a stranger and books it again -- which is exactly the case
+    when a file fills a gap in an account that is otherwise fetched."""
+
+    def test_the_plan_also_compares_what_a_booking_is(self):
+        import inspect
+        source = inspect.getsource(si.plan)
+        self.assertIn("already_booked(target, entry)", source)
+
+    def test_the_content_check_is_account_day_and_amount(self):
+        import inspect
+        source = inspect.getsource(si.already_booked)
+        for part in ('"bank_account": bank_account', '"date"', "deposit",
+                     "withdrawal"):
+            self.assertIn(part, source)
+
+    def test_the_side_of_the_booking_is_part_of_the_comparison(self):
+        """A payment out and a payment in of the same amount on the same day
+        are two bookings, not one."""
+        import inspect
+        source = inspect.getsource(si.already_booked)
+        self.assertIn("if amount > 0", source)
+
+
 class TestACardCountsTheOtherWayRound(unittest.TestCase):
     """The expensive mistake. On a giro account a positive amount is money
     arriving; on a card statement it is a charge -- money leaving. Read with
