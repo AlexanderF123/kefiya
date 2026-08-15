@@ -401,3 +401,81 @@ class TestAReceiptIsFoundWhereItActuallyHangs(unittest.TestCase):
         source = self._details()
         self.assertIn('__("from {0} {1}"', source)
         self.assertIn("fl.attached_to_name !== row.name", source)
+
+
+class TestAnUnsignedOrderIsNotASentOrder(unittest.TestCase):
+    """The most expensive kind of wrong: a payment recorded as made.
+
+    An order of 70,40 EUR went out, the bank asked for no TAN, and the app
+    wrote "Sent". In the online banking the transfer did not exist -- neither
+    sent nor received. HIUPD had said all along what the account requires:
+
+        HKCCS Ueberweisung          erlaubt, required_signatures 1
+        HKIPZ Echtzeitueberweisung  erlaubt, required_signatures 1
+
+    One signature. None was given. The old code could not tell "a bank that
+    asks for no TAN" from "an order that was never signed", because it never
+    asked the one question that separates them.
+    """
+
+    @staticmethod
+    def _controller():
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_controller.py")
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    @staticmethod
+    def _capabilities():
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils",
+            "account_capabilities.py")
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_a_tan_free_dialog_is_checked_before_it_counts_as_sent(self):
+        source = self._controller()
+        body = source.split("def submit_sepa_transfer(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("self._refuse_unsigned(", body)
+        refuse = body.find("self._refuse_unsigned(")
+        submitted = body.find('result = {"status": "submitted"}')
+        self.assertTrue(0 < refuse < submitted,
+                        "Checked after the status is set is not checked.")
+
+    def test_the_number_of_signatures_comes_from_what_the_bank_said(self):
+        source = self._capabilities()
+        self.assertIn("def required_signatures(", source)
+        body = source.split("def required_signatures(")[1].split("\ndef ")[0]
+        self.assertIn('cint(row.get("required_signatures"))', body)
+
+    def test_nothing_stored_is_not_read_as_nothing_required(self):
+        """The reading that turns a missing TAN into a successful payment."""
+        source = self._capabilities()
+        body = source.split("def required_signatures(")[1].split("\ndef ")[0]
+        self.assertIn("return None", body)
+        self.assertIn("if not rows:", body)
+
+    def test_the_capability_asked_about_matches_the_order_that_was_sent(self):
+        """An instant collective order is not the same business transaction as
+        a single dated one, and they carry their own signature rules."""
+        body = self._controller().split("def _refuse_unsigned(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("payment_count=2 if multiple else 1", body)
+        self.assertIn("scheduled=bool(scheduled)", body)
+        self.assertIn("instant=bool(instant_payment)", body)
+
+    def test_it_refuses_rather_than_guesses(self):
+        body = self._controller().split("def _refuse_unsigned(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("frappe.throw(", body)
+        self.assertIn("has NOT been marked as sent", body)
+
+    def test_the_refusal_tells_the_reader_to_check_before_repeating(self):
+        """Refusing costs a repeated send; a repeated send that the bank did
+        take costs twice the money."""
+        body = self._controller().split("def _refuse_unsigned(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("check the online banking before sending again", body)
