@@ -25,6 +25,8 @@ from .import_bank_transaction import (
 )
 from .auto_reconcile import run_after_import
 from .assign_payment_controller import AssignmentController
+from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
+from kefiya.utils.fints_masking import mask_iban
 
 class InitFailedException(Exception):
     pass
@@ -213,19 +215,9 @@ def fints_session():
             _end_dialog_unless_paused(conn, "shared")
 
 
-def _mask_iban(value):
-    """Shorten an IBAN for diagnostic output.
 
-    Error messages end up in the Error Log, which is broadly readable. Keeping
-    the country code and the last four digits is enough to tell the accounts of
-    one login apart without writing full account numbers into the log.
-    """
-    if not value:
-        return "<no IBAN>"
-    value = str(value)
-    if len(value) <= 6:
-        return value
-    return "{0}***{1}".format(value[:2], value[-4:])
+#: Kept as a module-level name because callers throughout this file use it.
+_mask_iban = mask_iban
 
 class FinTSController:
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
@@ -1740,96 +1732,6 @@ class FinTSController:
             ).format(str(e)), frappe.get_traceback())
 
 
-class FinTSInteractive:
-    def __init__(self, configuration):
-        if not configuration:
-            self.docname = None
-            self.enabled = False
-        else:
-            self.docname = configuration["docname"]
-            self.enabled = configuration["enabled"]
-        self.progress = 0
-
-    def set_interactive_mode(self, enable):
-        """Turn on/off interactive mode.
-
-        :param enable: Turn on/off interactive mode
-        :type enable: bool
-        :return: None
-        """
-        self.enabled = enable
-
-    def get_interactive_mode(self):
-        """Get interactive mode.
-
-        :return: bool
-        """
-        return self.enabled
-
-    def show_progress_realtime(self, message, progress, reload=False):
-        """Show a progressbar on client side.
-
-        :param message: Message to display under the bar
-        :param progress: 0 - 100
-        :param reload: Reload the doc form, , defaults to False
-        :type message: str
-        :type progress: int
-        :type reload: bool, optional
-        :return: None
-        """
-        if self.enabled:
-            frappe.publish_realtime(
-                "fints_progressbar", {
-                    "progress": progress,
-                    "docname": self.docname,
-                    "message": message,
-                    "reload": reload
-                }, user=frappe.session.user)
-
-    def request_tan_mechanism(self, possible_tan_modes=None, possible_tan_mediums=None):
-        """Request tan mechanism from user.
-
-        :param possible_tan_modes: List of tan mechanisms
-        :type mechanisms: list
-        :return: None
-        """
-        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums)
-
-    def request_tan(self, possible_tan_modes=None, possible_tan_mediums=None):
-        """Request a TAN from user
-
-        :return: None
-        """
-        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums, request_tan=True)
-
-    def request_mfa_confirmation(self, possible_tan_modes=None, possible_tan_mediums=None):
-        """Request a solved MFA challenge from the user
-
-        :return: None
-        """
-        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums, request_mfa_confirmation=True)
-
-    def request_tan_prompt(self, possible_tan_modes, possible_tan_mediums=None, *, request_tan=False, request_mfa_confirmation=False):
-        """Request tan mechanism from user.
-
-        :param possible_tan_modes: List of tan mechanisms
-        :type mechanisms: list
-        :return: None
-        """
-        if self.enabled:
-            params = {
-                        "docname": self.docname,
-                        "possible_tan_modes": possible_tan_modes,
-                        "possible_tan_mediums": possible_tan_mediums,
-                    }
-
-            if request_tan:
-                params["tan_required"] = True
-
-            elif request_mfa_confirmation:
-                params["mfa_required"] = True
-
-            frappe.publish_realtime("fints_tan_interaction_required", params, user=frappe.session.user)
 
 
 def _to_jsonable(value):

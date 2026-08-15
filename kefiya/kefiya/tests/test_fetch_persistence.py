@@ -40,8 +40,14 @@ class TestBalanceIsStored(unittest.TestCase):
         self.assertIn("custom_account_balance", source)
         self.assertIn("custom_credit_line", source)
         self.assertIn(
+            "account.db_set(", source,
+            "Through the document object, not a hand-written UPDATE.",
+        )
+        self.assertNotIn(
             "account.save(", source,
-            "Through the document lifecycle, not a direct database write.",
+            "A full save runs Bank Account.validate(), which clears is_default "
+            "across every account of the company -- a range lock taken to "
+            "store one number, and the deadlock of 15.08.",
         )
 
     def test_the_right_row_is_picked(self):

@@ -137,27 +137,86 @@ frappe.provide("kefiya");
             + "<div style='height:6px;width:" + pct + "%;background:" + barColor
             + "'></div></div>";
 
+        // The log link used to appear only once the run had finished. A
+        // collective fetch takes minutes, so an access that broke in the first
+        // one stayed invisible for the rest of them -- and by the time the log
+        // could be opened, the run had long moved past it. It is offered from
+        // the first entry on.
         var links = "";
-        if (!run.busy) {
+        if (run.log && run.log.length) {
             links = "<div style='margin-top:6px'>"
                 + "<a href='#' data-kefiya='log' style='font-size:11px'>"
                 + esc(__("Show log")) + "</a>";
-            if (run.onRefreshView) {
-                links += " <span style='color:" + C_MUTED + "'>·</span> "
-                    + "<a href='#' data-kefiya='upd' style='font-size:11px'>"
-                    + esc(__("Refresh view")) + "</a>";
-            }
-            links += "</div>";
         }
+        if (!run.busy && run.onRefreshView) {
+            links = (links || "<div style='margin-top:6px'>")
+                + (run.log && run.log.length
+                    ? " <span style='color:" + C_MUTED + "'>·</span> " : "")
+                + "<a href='#' data-kefiya='upd' style='font-size:11px'>"
+                + esc(__("Refresh view")) + "</a>";
+        }
+        if (links) links += "</div>";
 
         el.innerHTML = "<div style='font-weight:600;color:"
             + (run.fail ? C_ERR : "var(--text-color)") + "'>"
-            + esc(head) + "</div>" + bar + links;
+            + esc(head) + "</div>" + bar + liveProblems() + links;
 
         var u = el.querySelector("[data-kefiya=upd]");
         if (u) u.onclick = function (e) { e.preventDefault(); run.onRefreshView(); };
         var g = el.querySelector("[data-kefiya=log]");
         if (g) g.onclick = function (e) { e.preventDefault(); showLog(); };
+
+        // A log that is already open must not freeze at the state it had when
+        // it was opened -- that was the other half of "you only see it
+        // afterwards".
+        if (run.logDialog && run.logDialog.$wrapper
+                && run.logDialog.$wrapper.is(":visible")) {
+            var field = run.logDialog.fields_dict
+                && run.logDialog.fields_dict.body;
+            if (field) field.$wrapper.html(logBody());
+        }
+    }
+
+    // The shortest true sentence about one failed access: the reason the
+    // server gave, or the first line that came back marked as an error.
+    function shortProblem(entry) {
+        if (entry.detail) return entry.detail;
+        var bad = (entry.lines || []).filter(function (l) {
+            return l.kind === "err";
+        })[0];
+        if (bad) return bad.label + ": " + bad.text;
+        return entry.state === "tan"
+            ? __("awaiting release") : __("failed");
+    }
+
+    // Failures while the run is still going, right under the bar. Bounded, so
+    // a long run cannot push the rest of the page away.
+    function liveProblems() {
+        var bad = ((run && run.log) || []).filter(function (e) {
+            return e.state === "err" || e.state === "tan";
+        });
+        if (!bad.length) return "";
+
+        var shown = bad.slice(-5);
+        var hidden = bad.length - shown.length;
+        var rows = shown.map(function (e) {
+            var col = e.state === "err" ? C_ERR : C_WAIT;
+            var icon = e.state === "err" ? "✗" : "🔑";
+            return "<div style='margin-top:3px;line-height:1.35'>"
+                + "<span style='color:" + col + "'>" + icon + "</span> "
+                + "<span style='font-weight:600'>" + esc(e.ln) + "</span>"
+                + "<span style='color:" + C_MUTED + "'> — </span>"
+                + "<span style='color:" + col + "'>"
+                + esc(String(shortProblem(e)).slice(0, 160)) + "</span></div>";
+        }).join("");
+
+        var more = hidden > 0
+            ? "<div style='margin-top:3px;color:" + C_MUTED + "'>"
+                + esc(__("and {0} more — see the log", [hidden])) + "</div>"
+            : "";
+
+        return "<div style='margin-top:8px;font-size:11px'>" + rows + more
+            + "</div>";
     }
 
     // What the server reported per account, turned into readable lines.
@@ -303,7 +362,7 @@ frappe.provide("kefiya");
         return lines;
     }
 
-    function showLog() {
+    function logBody() {
         var entries = (run && run.log) || [];
         var body;
         if (!entries.length) {
@@ -340,13 +399,27 @@ frappe.provide("kefiya");
                     + "</table>" + detail + "</div>";
             }).join("");
         }
+        return body;
+    }
+
+    function showLog() {
         var dlg = new frappe.ui.Dialog({
             title: __("Log of the account fetch"),
             size: "large",
-            fields: [{ fieldtype: "HTML", fieldname: "body", options: body }],
+            fields: [{ fieldtype: "HTML", fieldname: "body",
+                       options: logBody() }],
             primary_action_label: __("Close"),
             primary_action: function () { dlg.hide(); }
         });
+
+        // Held on to so render() can refresh it while the run continues. The
+        // log used to be a snapshot of the moment it was opened, which during
+        // a running fetch is the least interesting moment there is.
+        if (run) run.logDialog = dlg;
+        dlg.$wrapper.on("hidden.bs.modal", function () {
+            if (run && run.logDialog === dlg) run.logDialog = null;
+        });
+
         dlg.show();
     }
 
@@ -374,6 +447,27 @@ frappe.provide("kefiya");
             }
             document.body.classList.remove("modal-open");
         } catch (ignoredD) {}
+    }
+
+    // "Freigabe erforderlich" named no bank and no account. In a collective
+    // run a dozen accesses stop for a release one after the other, and the box
+    // on screen looked identical every time -- so the user had to guess which
+    // banking app to open. The payload now carries the access; this puts it
+    // where the eye lands, in the heading and in the first line of the dialog.
+    function tanTitle(data) {
+        return data.account_label
+            ? __("Verification required") + " – " + data.account_label
+            : __("Verification required");
+    }
+
+    function tanContextField(data) {
+        if (!data.account_detail) return null;
+        return {
+            fieldtype: "HTML", fieldname: "kefiya_tan_context",
+            options: '<div class="text-muted small" '
+                + 'style="margin-bottom:8px">'
+                + frappe.utils.escape_html(data.account_detail) + "</div>"
+        };
     }
 
     function tanPrompt(data) {
@@ -410,6 +504,13 @@ frappe.provide("kefiya");
                     options: __("Follow the instructions on your banking app or device.") });
             }
         }
+        // Prepended only now: everything above addresses the fields by index
+        // (fields[0] is the mode, fields[1] the medium), so an entry inserted
+        // ahead of them earlier would silently make the mode read-only field
+        // the wrong one.
+        var context = tanContextField(data);
+        if (context) fields.unshift(context);
+
         frappe.prompt(fields, function (values) {
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
@@ -425,7 +526,7 @@ frappe.provide("kefiya");
                     }, 10);
                 }
             });
-        }, __("Verification required"));
+        }, tanTitle(data));
     }
 
     function bindRealtime() {
@@ -517,7 +618,7 @@ frappe.provide("kefiya");
             run = {
                 busy: true, order: logins.slice(), log: [],
                 tot: 0, ok: 0, tan: 0, fail: 0, skip: 0, done: 0,
-                mount: options.mount || null, panel: null,
+                mount: options.mount || null, panel: null, logDialog: null,
                 onRefreshView: options.onRefreshView || null
             };
             render();

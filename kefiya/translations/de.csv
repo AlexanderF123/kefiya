@@ -1,0 +1,90 @@
+Kefiya Document Service,Kefiya Dokumentendienst
+Kefiya Document Account,Kefiya Dokumentenkonto
+What to fetch,Was abgerufen wird
+Document Type Filter,Dokumentart (Filter)
+Lookback (days),Rückblick (Tage)
+Max Documents per Run,Höchstzahl Dokumente je Lauf
+Last Run,Letzter Lauf
+Last Run On,Zuletzt gelaufen am
+Last Run Summary,Ergebnis des letzten Laufs
+Credential Source,Quelle der Zugangsdaten
+Credential DocType,DocType der Zugangsdaten
+Credential Document,Dokument der Zugangsdaten
+Child Table Fieldname,Feldname der Kindtabelle
+Match Field,Vergleichsfeld
+Token Field,Feld mit dem Schlüssel
+Base URL Field,Feld mit der Basis-URL
+Inline,Direkt hier
+External DocType,Externer DocType
+Service Company ID,Kennung beim Dienst
+Last Fetched On,Zuletzt abgerufen am
+"While this is off, nothing is fetched and the scheduled run does nothing.","Solange dies aus ist, wird nichts abgerufen, und der geplante Lauf tut nichts."
+Endpoint of the document service. Only https is accepted.,Endpunkt des Dokumentendienstes. Nur https wird angenommen.
+"Created at the service under ""API access"". Stored encrypted and never written to a log.",Beim Dienst unter „API-Zugang“ erzeugt. Verschlüsselt abgelegt und niemals in ein Protokoll geschrieben.
+"Document type as the service names it, e.g. a statement type. Empty fetches every type.","Dokumentart, wie der Dienst sie benennt, etwa eine Auszugsart. Leer ruft jede Art ab."
+How far back a run looks. A first run may need more; afterwards a small window is enough.,Wie weit ein Lauf zurückschaut. Der erste Lauf braucht womöglich mehr; danach genügt ein kleines Fenster.
+"Upper bound per run. Each document is a separate download, so a first run works its backlog off over several runs rather than in one request.","Obergrenze je Lauf. Jedes Dokument ist ein eigener Download, deshalb arbeitet ein erster Lauf seinen Rückstand über mehrere Läufe ab statt in einer Anfrage."
+Which Bank Account a fetched document belongs to. Without an entry here nothing is filed -- a statement with no account has nowhere to go.,Zu welchem Bankkonto ein abgerufenes Dokument gehört. Ohne Eintrag hier wird nichts abgelegt — ein Auszug ohne Konto hat keinen Platz.
+"Identifier of the matching company/account at the document service. Left empty, every document the service returns for the configured filter is filed on this account.","Kennung der zugehörigen Firma bzw. des Kontos beim Dokumentendienst. Bleibt sie leer, wird jedes Dokument, das der Dienst zum eingestellten Filter liefert, auf dieses Konto abgelegt."
+"Inline keeps the key in the field below. External DocType reads it from wherever this instance already keeps its API credentials, so there is one place for them instead of two.","„Direkt hier“ hält den Schlüssel im Feld darunter. „Externer DocType“ liest ihn dort, wo diese Instanz ihre API-Zugangsdaten ohnehin führt — damit gibt es einen Ort dafür statt zwei."
+Leave empty for a Single DocType.,Bei einem Single-DocType leer lassen.
+Fieldname of the table holding one row per service. Empty means the fields sit on the document itself.,"Feldname der Tabelle mit einer Zeile je Dienst. Leer bedeutet, die Felder stehen am Dokument selbst."
+"Value identifying this service's row, e.g. its short name.","Wert, der die Zeile dieses Dienstes kennzeichnet, etwa sein Kurzname."
+Password field holding the key.,"Passwortfeld, das den Schlüssel enthält."
+"Optional. When set, the endpoint is taken from there instead of the Base URL above.","Optional. Ist es gesetzt, wird der Endpunkt von dort genommen statt aus der Basis-URL oben."
+Test connection,Verbindung testen
+Check field names,Feldnamen prüfen
+Dry run,Prüflauf
+Fetch now,Jetzt abrufen
+Asking the service …,Dienst wird angefragt …
+"Looking, writing nothing …","Nur ansehen, nichts schreiben …"
+Fetching …,Wird abgerufen …
+Connection,Verbindung
+Connection failed,Verbindung fehlgeschlagen
+The service answered.,Der Dienst hat geantwortet.
+Field names,Feldnamen
+Dry run failed,Prüflauf fehlgeschlagen
+Fetch failed,Abruf fehlgeschlagen
+The call returned nothing. See the Error Log for details.,Der Aufruf hat nichts zurückgegeben. Einzelheiten stehen im Fehlerprotokoll.
+Fetch the statements and file them against the accounts?,Die Kontoauszüge abrufen und den Konten zuordnen?
+Response not understood,Antwort nicht verstanden
+Top level keys,Schlüssel der obersten Ebene
+Field names returned by the service,Vom Dienst gelieferte Feldnamen
+Documents found,Gefundene Dokumente
+Recognised,Erkannt
+Identifier,Kennung
+"Only field names are shown, never their values.","Es werden nur Feldnamen gezeigt, niemals deren Werte."
+Nothing to do,Nichts zu tun
+Dry run — nothing was filed,Prüflauf — nichts abgelegt
+Statements fetched,Kontoauszüge abgerufen
+Found,Gefunden
+Would file,Würde ablegen
+Filed,Abgelegt
+Already present,Schon vorhanden
+The document service is switched off.,Der Dokumentendienst ist ausgeschaltet.
+No API key is configured for the document service.,Für den Dokumentendienst ist kein API-Schlüssel hinterlegt.
+The base URL must be an https address.,Die Basis-URL muss eine https-Adresse sein.
+No credential DocType is configured.,Es ist kein DocType für die Zugangsdaten eingestellt.
+No credential document is named.,Es ist kein Dokument für die Zugangsdaten benannt.
+No credential row where {0} is {1}.,"Keine Zugangsdaten-Zeile, in der {0} gleich {1} ist."
+The credential row {0} is not active.,Die Zugangsdaten-Zeile {0} ist nicht aktiv.
+The document service could not be reached ({0}): {1},Der Dokumentendienst war nicht erreichbar ({0}): {1}
+The document service answered {0} on {1}: {2},Der Dokumentendienst hat auf {1} mit {0} geantwortet: {2}
+"The document service answered {0} on {1}, but not in JSON: {2}","Der Dokumentendienst hat auf {1} mit {0} geantwortet, aber nicht in JSON: {2}"
+no detail given,keine Einzelheiten genannt
+No account is configured. A statement with no bank account has nowhere to go.,Es ist kein Konto eingestellt. Ein Auszug ohne Bankkonto hat keinen Platz.
+The attached file could not be found: {0},Die angehängte Datei wurde nicht gefunden: {0}
+The document could not be decoded.,Das Dokument ließ sich nicht dekodieren.
+The document is empty.,Das Dokument ist leer.
+Bank Account {0} is listed more than once.,Das Bankkonto {0} ist mehr als einmal aufgeführt.
+The service is switched on but no account is configured. A statement with no bank account has nowhere to go.,"Der Dienst ist eingeschaltet, aber es ist kein Konto eingestellt. Ein Auszug ohne Bankkonto hat keinen Platz."
+No known column layout was recognised in this file.,In dieser Datei wurde kein bekannter Spaltenaufbau erkannt.
+the bank does not hand out statements for this account,die Bank gibt für dieses Konto keine Auszüge heraus
+{0} bookings were created as drafts. Submitting them is left to the Bank Transaction list.,{0} Buchungen wurden als Entwurf angelegt. Das Einreichen bleibt der Liste der Banktransaktionen überlassen.
+Unknown statement format {0}. Pass a known format or state the sign convention explicitly -- a card feed and a giro feed count the opposite way round.,Unbekanntes Auszugsformat {0}. Ein bekanntes Format angeben oder die Vorzeichenkonvention ausdrücklich nennen — ein Kartenfeed und ein Girofeed zählen entgegengesetzt.
+ingest expects a list of entries.,ingest erwartet eine Liste von Einträgen.
+Account mapping,Kontozuordnung
+Failures,Fehlgeschlagen
+Remark,Hinweis
+Assigned accounts,Zugeordnete Konten
+Access credentials,Zugangsdaten
