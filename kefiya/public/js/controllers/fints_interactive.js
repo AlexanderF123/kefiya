@@ -81,11 +81,20 @@ kefiya.interactive = {
 				return;
 			}
 
+			// "Freigabe erforderlich" named no bank and no account. During a
+			// collective run one access after the other stops for a release
+			// and the box looked identical every time, so the user had to
+			// guess which banking app to open. The payload now carries the
+			// access it belongs to.
+			const title = data.account_label
+				? __("Verification required") + " – " + data.account_label
+				: __("Verification required");
+
 			await kefiya.interactive.enqueueUpdate(() => {
 				// Step out of the way for the TAN prompt, but keep the session
 				// log: hide() retains the entries and the next update()
 				// restores the window with its history intact.
-				kefiya.progress.update(__("Verification required"), 0);
+				kefiya.progress.update(title, 0);
 				kefiya.progress.hide();
 			});
 
@@ -165,6 +174,20 @@ kefiya.interactive = {
 				}
 			}
 
+			// Prepended only now: everything above addresses the fields by
+			// index (fields[0] is the mode, fields[1] the medium), so an entry
+			// inserted ahead of them earlier would silently make the wrong
+			// field read-only.
+			if (data.account_detail) {
+				fields.unshift({
+					fieldtype: "HTML",
+					fieldname: "kefiya_tan_context",
+					options: '<div class="text-muted small" style="margin-bottom:8px">'
+						+ frappe.utils.escape_html(data.account_detail)
+						+ "</div>",
+				});
+			}
+
 			frappe.prompt(
 				fields,
 				(values) => {
@@ -176,7 +199,7 @@ kefiya.interactive = {
 						},
 					});
 				},
-				__("Verification required")
+				title
 			);
 		});
 	},

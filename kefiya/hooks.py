@@ -163,6 +163,10 @@ scheduler_events = {
         # sent: a credit transfer needs a TAN, and a pushTAN nobody answers
         # would leave a challenge hanging instead of paying anybody.
         "kefiya.utils.client.present_due_transfers",
+        # Statement documents for accounts that speak no FinTS. Does nothing
+        # at all while the document service is switched off, which is its
+        # state until someone configures one.
+        "kefiya.utils.document_service.fetch_statements_scheduled",
     ]
 }
 
