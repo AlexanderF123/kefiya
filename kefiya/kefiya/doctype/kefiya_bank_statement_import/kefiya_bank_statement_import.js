@@ -18,27 +18,47 @@ kefiya.show_import_plan = function (plan) {
 
 	const esc = frappe.utils.escape_html;
 	let rows = (plan.sample || []).map((s) =>
-		`<tr><td>${esc(s.date)}</td><td>${esc(s.description)}</td>`
+		`<tr><td>${esc(s.date)}</td><td>${esc(s.bank_account || "")}</td>`
+		+ `<td>${esc(s.description)}</td>`
 		+ `<td class="text-right">${s.in ? format_currency(s.in) : ""}</td>`
 		+ `<td class="text-right">${s.out ? format_currency(s.out) : ""}</td></tr>`
 	).join("");
 
+	// One file, many accounts: the per-account split is the number that says
+	// whether the run understood the file, not the grand total.
+	const perAccount = Object.keys(plan.accounts || {}).sort().map((a) =>
+		`<tr><td>${esc(a)}</td>`
+		+ `<td class="text-right">${plan.accounts[a].new}</td>`
+		+ `<td class="text-right">${plan.accounts[a].duplicates}</td></tr>`
+	).join("");
+
+	const unmatched = Object.keys(plan.unmatched || {}).map((k) =>
+		`${esc(k)} (${plan.unmatched[k]})`).join(", ");
+
 	frappe.msgprint({
 		title: __("Dry run — nothing was written"),
-		indicator: plan.new ? "blue" : "orange",
+		indicator: (plan.would_create || plan.created) ? "blue" : "orange",
 		message: `
 			<p>${__("Recognised format")}: <b>${esc(plan.label)}</b></p>
 			<ul>
 				<li>${__("Rows read")}: <b>${plan.total}</b></li>
-				<li>${__("New")}: <b>${plan.new}</b></li>
+				<li>${__("New")}: <b>${plan.would_create || plan.created || 0}</b></li>
 				<li>${__("Already present")}: <b>${plan.duplicates}</b></li>
-				<li>${__("Unreadable")}: <b>${plan.unreadable}</b></li>
+				<li>${__("Unreadable")}: <b>${plan.unreadable || 0}</b></li>
 			</ul>
+			${unmatched ? `<p class="text-muted">${__("Unknown accounts")}: ${unmatched}</p>` : ""}
+			<table class="table table-bordered">
+				<thead><tr><th>${__("Bank Account")}</th>
+				<th class="text-right">${__("New")}</th>
+				<th class="text-right">${__("Already present")}</th></tr></thead>
+				<tbody>${perAccount}</tbody>
+			</table>
 			<p class="text-muted">${__(
 				"Check the direction of the first bookings: money in belongs"
 				+ " in the left column, money out in the right.")}</p>
 			<table class="table table-bordered">
-				<thead><tr><th>${__("Date")}</th><th>${__("Description")}</th>
+				<thead><tr><th>${__("Date")}</th><th>${__("Bank Account")}</th>
+				<th>${__("Description")}</th>
 				<th class="text-right">${__("In")}</th>
 				<th class="text-right">${__("Out")}</th></tr></thead>
 				<tbody>${rows}</tbody>
@@ -80,7 +100,9 @@ frappe.ui.form.on("Kefiya Bank Statement Import", {
 					frm.call("start_import", {
 						file_url: frm.doc.import_file,
 						bank_account: frm.doc.bank_account,
-						company: frm.doc.company,
+					}).then((r) => {
+						kefiya.show_import_plan(r.message);
+						frm.reload_doc();
 					});
 				});
 		}
@@ -99,7 +121,9 @@ frappe.ui.form.on("Kefiya Bank Statement Import", {
 					frm.call("start_import", {
 						file_url: frm.doc.import_file,
 						bank_account: frm.doc.bank_account,
-						company: frm.doc.company,
+					}).then((r) => {
+						kefiya.show_import_plan(r.message);
+						frm.reload_doc();
 					});
 				});
 		}
