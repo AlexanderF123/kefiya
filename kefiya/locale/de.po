@@ -77,6 +77,9 @@ msgstr "Automatischer Abgleich nach Import"
 msgid "Auto Create Advance Payments"
 msgstr "Anzahlungen automatisch anlegen"
 
+msgid "Auto Book Our Own Transfers"
+msgstr "Eigene Überweisungen automatisch buchen"
+
 msgid "Send via FinTS"
 msgstr "Per FinTS senden"
 
