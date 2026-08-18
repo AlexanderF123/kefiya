@@ -19,6 +19,7 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
+from kefiya.utils import tan_challenge
 from .import_bank_transaction import (
     ImportBankTransaction,
     resolve_incremental_from_date,
@@ -665,10 +666,22 @@ class FinTSController:
                     reference_name=self.kefiya_login.name,
                 )
 
+        # What the bank actually asks. comdirect sends a photoTAN -- a coloured
+        # mosaic the phone app reads -- and a Sparkasse sends chipTAN-QR the
+        # same way. Without it the prompt asks for a TAN and shows nothing to
+        # scan, which is not a question anybody can answer.
+        challenge = tan_challenge.challenge_of(response)
+
         if response.decoupled if decoupled is None else decoupled:
-            self.interactive.request_mfa_confirmation(possible_tan_modes=possible_tan_modes, possible_tan_mediums=possible_tan_mediums)
+            self.interactive.request_mfa_confirmation(
+                possible_tan_modes=possible_tan_modes,
+                possible_tan_mediums=possible_tan_mediums,
+                challenge=challenge)
         else:
-            self.interactive.request_tan(possible_tan_modes=possible_tan_modes, possible_tan_mediums=possible_tan_mediums)
+            self.interactive.request_tan(
+                possible_tan_modes=possible_tan_modes,
+                possible_tan_mediums=possible_tan_mediums,
+                challenge=challenge)
 
     def __fetch_fints_accounts(self) -> bool:
         """Fetch FinTS Accounts.

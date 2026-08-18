@@ -191,3 +191,5 @@ Not sent — no signature,Nicht abgesendet — keine Signatur
 Please check the online banking before sending again: if the transfer is there after all, cancel this order instead of repeating it.","Die Bank hat keine TAN verlangt, verlangt für „{1}“ auf diesem Konto aber {0} Signatur(en). Ein Auftrag ohne die nötige Signatur wird nicht ausgeführt — er wurde deshalb NICHT als abgesendet vermerkt.
 
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
+Bank challenge,Aufforderung der Bank
+"Scan this with your banking app, then enter the TAN it shows.","Mit der Banking-App scannen, dann die angezeigte TAN eintragen."
