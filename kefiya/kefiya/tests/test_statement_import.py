@@ -577,3 +577,152 @@ class TestTwoRealBookingsOfOneDayAndAmountBothArrive(unittest.TestCase):
         import inspect
         source = inspect.getsource(persist._existing_budget)
         self.assertIn('"date": ["between", [min(days), max(days)]]', source)
+
+
+class TestTheBanksOwnFormatIsRead(unittest.TestCase):
+    """MT940 was reported as an unknown layout while its parser sat one module
+    away, reading every FinTS fetch.
+
+    It has no header row, so every CSV profile declines it -- and declining is
+    all the file path could do. The parser is the mt940 library, wrapped by
+    python-fints and patched by this app's own mt940_compat: an MT940 statement
+    is what a Sparkasse hands over on every single fetch.
+    """
+
+    STATEMENT = (
+        ":20:REFSTARMONEY\n"
+        ":25:67250020/9281703\n"
+        ":28C:00000\n"
+        ":60F:C180503EUR0,00\n"
+        ":61:1805030503CR8053,56NMSCNONREF\n"
+        ":86:166?00GUTSCHRIFT?109251?20Miete Mai?30PBNKDEFF"
+        "?31DE68440100460000208468?32Deutsche Postbank AG?34000\n"
+        ":62F:C180503EUR8053,56\n"
+    )
+
+    def test_a_statement_is_recognised_as_one(self):
+        self.assertTrue(si.looks_like_mt940(self.STATEMENT))
+
+    def test_a_table_is_not_mistaken_for_one(self):
+        self.assertFalse(si.looks_like_mt940(
+            "Datum;Betrag\n01.08.2026;1,00\n"))
+
+
+class TestAStatementNamesItsOwnAccount(unittest.TestCase):
+    """The second line of the file is the fact the old importer never read.
+
+        :25:67250020/9281703
+
+    It booked every row of a portfolio-wide export onto the one account picked
+    on the form instead, which is how 21.252 payments came to stand on accounts
+    that never made them.
+    """
+
+    def test_the_german_iban_is_a_rule_not_a_lookup(self):
+        """DE, two check digits, eight-digit bank code, ten-digit account."""
+        self.assertEqual(si.german_iban("67250020", "9281703"),
+                         "DE67672500200009281703")
+        self.assertEqual(si.german_iban("67250020", "9355367"),
+                         "DE27672500200009355367")
+        self.assertEqual(si.german_iban("67092300", "33108982"),
+                         "DE02670923000033108982")
+
+    def test_parts_that_cannot_be_an_account_give_nothing(self):
+        for blz, account in (("672500", "9281703"), ("67250020", ""),
+                             ("67250020", "12345678901"), (None, None)):
+            self.assertIsNone(si.german_iban(blz, account), (blz, account))
+
+    def test_the_account_is_read_from_the_statement(self):
+        self.assertEqual(
+            si.mt940_own_iban(TestTheBanksOwnFormatIsRead.STATEMENT),
+            "DE67672500200009281703")
+
+    def test_a_statement_that_names_an_iban_directly_is_taken_as_it_is(self):
+        text = ":20:REF\n:25:DE02120300000000202051\n:28C:0\n"
+        self.assertEqual(si.mt940_own_iban(text), "DE02120300000000202051")
+
+
+class TestTheCounterpartyIsSplitFromItsIban(unittest.TestCase):
+    """The mt940 library hands over IBAN and name glued together:
+
+        DE68440100460000208468Deutsche Postbank AG
+
+    Left alone, the IBAN ends up inside the name on every single booking.
+    """
+
+    def test_the_two_are_separated(self):
+        iban, name = si._split_iban_and_name(
+            "DE68440100460000208468Deutsche Postbank AG")
+        self.assertEqual(iban, "DE68440100460000208468")
+        self.assertEqual(name, "Deutsche Postbank AG")
+
+    def test_a_plain_name_stays_a_plain_name(self):
+        iban, name = si._split_iban_and_name("Milorad Vrban")
+        self.assertIsNone(iban)
+        self.assertEqual(name, "Milorad Vrban")
+
+    def test_nothing_is_not_a_name(self):
+        iban, name = si._split_iban_and_name(None)
+        self.assertIsNone(iban)
+        self.assertEqual(name, "")
+
+
+class TestOneRoutingForBothReaders(unittest.TestCase):
+    """The account routing is the part that went wrong once already. A second
+    copy of it for a second file format is how that comes back."""
+
+    def test_both_readers_end_in_the_same_function(self):
+        import inspect
+        source = inspect.getsource(persist.read_entries)
+        self.assertEqual(source.count("_address_entries("), 2)
+        self.assertIn("formats.looks_like_mt940(text)", source)
+
+    def test_the_routing_prefers_what_the_file_says(self):
+        import inspect
+        source = inspect.getsource(persist._address_entries)
+        self.assertIn('if entry.get("own_iban"):', source)
+        self.assertIn("continue", source,
+                      "An account the file names but we do not hold must be "
+                      "reported, not booked onto the caller's choice.")
+
+
+class TestAReferenceThatIsNotAnIdentity(unittest.TestCase):
+    """NONREF is on thousands of bookings and the prima nota is a batch number
+    shared by every booking of a day. Either as the reference would make them
+    all the same booking -- which is exactly how "9310" ended up identifying
+    hundreds of different payments."""
+
+    def test_the_placeholder_is_not_taken_as_a_reference(self):
+        import inspect
+        source = inspect.getsource(si.mt940_entries)
+        self.assertIn('"NONREF"', source)
+        self.assertNotIn("prima_nota", source)
+
+
+class TestAnIbanVerifiesItself(unittest.TestCase):
+    """A wrong split puts a letter of the name into the IBAN, and that IBAN
+    then matches no party at all. The check digits decide instead."""
+
+    def test_real_ibans_pass(self):
+        for iban in ("DE67672500200009281703", "DE27672500200009355367",
+                     "DE79200411110679723700", "DE68440100460000208468"):
+            self.assertTrue(si.iban_checksum_ok(iban), iban)
+
+    def test_one_wrong_character_fails(self):
+        self.assertFalse(si.iban_checksum_ok("DE67672500200009281704"))
+
+    def test_the_swallowed_letter_case_fails(self):
+        """"DE68…468D" -- the split that ate the D of "Deutsche"."""
+        self.assertFalse(si.iban_checksum_ok("DE68440100460000208468D"))
+
+    def test_what_is_not_an_iban_fails(self):
+        for value in ("", None, "Milorad Vrban", "DE68", "1234567890123456"):
+            self.assertFalse(si.iban_checksum_ok(value), value)
+
+    def test_the_generated_german_ibans_verify(self):
+        """german_iban() computes the check digits; this proves it right
+        rather than merely consistent."""
+        for blz, account in (("67250020", "9281703"), ("67092300", "33108982"),
+                             ("67250020", "9355367"), ("60050101", "4339272")):
+            self.assertTrue(si.iban_checksum_ok(si.german_iban(blz, account)),
+                            (blz, account))

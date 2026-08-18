@@ -518,6 +518,35 @@ def refuses(bank_account, capability):
     return verdict(bank_account, capability) == REFUSED
 
 
+def required_signatures(bank_account, capability, rows=None):
+    """How many signatures the bank demands for this transaction.
+
+    HIUPD states this per account and per business transaction, and for a
+    credit transfer the answer is one: the TAN. It is the number that decides
+    whether a dialog that ended WITHOUT a TAN can have moved money.
+
+    None where nothing is stored. An unknown answer must never be read as
+    "none required" -- that is the reading that turns a missing TAN into a
+    successful payment.
+
+    :return: int, or None when the account has no stored list for this
+    """
+    if not bank_account:
+        return None
+
+    rows = stored_rows(bank_account) if rows is None else rows
+    if not rows:
+        return None
+
+    codes = set(SEGMENTS_BY_KEY.get(capability, ()))
+    for row in rows:
+        matches = (row.get("capability") == capability
+                   or normalize_segment(row.get("transaction")) in codes)
+        if matches:
+            return cint(row.get("required_signatures"))
+    return None
+
+
 def required_capability(payment_count=1, scheduled=False, instant=False):
     """Which business transaction an outgoing order needs.
 

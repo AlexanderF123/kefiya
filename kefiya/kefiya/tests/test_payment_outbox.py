@@ -266,6 +266,42 @@ class TestTheSelectionCannotOutliveItsRows(unittest.TestCase):
         self.assertIn("if (!alive[name]) delete view.selected[name];", body)
 
 
+class TestTheStylesheetReachesThePage(unittest.TestCase):
+    """A Custom HTML Block renders inside a shadow root.
+
+    That is why the block is handed a `root_element` instead of reaching for
+    document, and why it has a style field of its own. A stylesheet appended
+    to document.head does not cross that boundary -- the page came up with
+    every rule silently matching nothing, which is exactly what happened the
+    first time this moved out of the block.
+    """
+
+    def test_the_stylesheet_goes_where_the_list_lives(self):
+        body = _source().split("kefiya.outbox_style = function (root) {")[1]
+        body = body.split("\nkefiya.payment_outbox")[0]
+        self.assertIn("root.getRootNode()", body,
+                      "getRootNode answers the shadow root inside a block and "
+                      "the document outside one.")
+        self.assertIn("holder.appendChild(el)", body)
+        self.assertNotIn("document.head.appendChild", body)
+
+    def test_it_is_given_the_element_it_has_to_reach(self):
+        self.assertIn("kefiya.outbox_style(root);", _source(),
+                      "Called without the element it cannot find the shadow "
+                      "root, and it is back to document.head.")
+
+    def test_it_is_not_put_inside_the_element_that_gets_rewritten(self):
+        """render() replaces #zk's innerHTML on every draw."""
+        body = _source().split("kefiya.outbox_style = function (root) {")[1]
+        body = body.split("\nkefiya.payment_outbox")[0]
+        self.assertNotIn("root.appendChild(el)", body)
+
+    def test_the_block_keeps_no_second_copy_of_it(self):
+        """Two stylesheets for one list is the split this move undid."""
+        block = _source("../blocks/payment_outbox_block.js")
+        self.assertNotIn("#zk .zk-", block)
+
+
 class TestTheTanPromptIsTheSharedOne(unittest.TestCase):
 
     def test_the_outbox_does_not_build_its_own_prompt(self):
@@ -284,3 +320,162 @@ class TestTheTanPromptIsTheSharedOne(unittest.TestCase):
         every visit."""
         body = _function(_source(), "function bindTan() {")
         self.assertIn("const live = kefiya._outbox;", body)
+
+
+class TestTheDetailViewReadsAsATransferSlip(unittest.TestCase):
+    """What the screenshot showed, and what must not come back.
+
+    Three labels were wrong at once, and only one of them was a typo of ours.
+    "State" was left to the framework on the assumption that an untranslated
+    generic word is safe; the framework knows that word as the address field
+    and rendered the order's state as "Bundesland". The stored status was
+    printed raw in English next to its own German explanation. And a "Due
+    date" row repeated the execution line above it, in English.
+    """
+
+    @staticmethod
+    def _details():
+        return _source("transfer_details.js")
+
+    def test_the_state_is_not_labelled_with_a_word_the_framework_owns(self):
+        source = self._details()
+        self.assertNotIn('__("State")', source,
+                         'The framework translates "State" as the address '
+                         'field: the order state came out as "Bundesland".')
+        self.assertIn('__("Order state")', source)
+
+    def test_the_state_is_shown_through_the_shared_wording(self):
+        """`row.status` is a stored English value. Printing it raw is how
+        "Sent" ended up on a German screen."""
+        source = self._details()
+        self.assertIn("kefiya.outbox_state", source)
+        self.assertNotIn('esc(row.status || "")', source)
+
+    def test_the_execution_is_stated_once(self):
+        """The "Due date" row said in English what the line above it had
+        already said in German."""
+        self.assertNotIn('__("Due date")', self._details())
+
+    def test_a_locked_order_says_why_it_cannot_be_changed(self):
+        """An absent Correct button explains nothing."""
+        source = self._details()
+        self.assertIn("if (row.docstatus === 1) {", source)
+        self.assertIn("This order is with the bank", source)
+
+
+class TestAReceiptIsFoundWhereItActuallyHangs(unittest.TestCase):
+    """Nobody attaches the travel expense PDF to the transfer.
+
+    It is created on the Business Trip and stays there; the transfer only says
+    "Reisekosten BT-0001" in its purpose. Looking for files attached to the
+    transfer alone reports "no receipt" for an order that plainly has one.
+    """
+
+    @staticmethod
+    def _details():
+        return _source("transfer_details.js")
+
+    def test_the_purpose_is_searched_for_document_names(self):
+        source = self._details()
+        self.assertIn("kefiya.DOCNAME_IN_TEXT", source)
+        self.assertIn("kefiya.transfer_referenced_documents", source)
+
+    def test_the_lookup_covers_the_order_and_what_it_names(self):
+        source = self._details()
+        self.assertIn('attached_to_name: ["in", names]', source,
+                      "Filtering on the transfer alone is the bug.")
+
+    def test_the_pattern_does_not_match_a_recipients_invoice_number(self):
+        """A looser pattern would send us looking for documents that are not
+        ours. The names it has to catch are BT-0001 and RE-260427-034."""
+        import re
+        pattern = re.compile(r"\b[A-Z]{2,8}(?:-[A-Z0-9]{2,6})*-\d{3,}\b")
+        for name in ("BT-0001", "RE-260427-034", "KEF-TRF-2026-00001"):
+            self.assertTrue(pattern.search(name), name)
+        for text in ("Rechnung 12345", "Miete 04/2026", "IBAN DE02"):
+            self.assertIsNone(pattern.search(text), text)
+
+    def test_a_receipt_from_elsewhere_says_where_it_came_from(self):
+        """A file that appears out of nowhere is magic; one that names its
+        document can be checked."""
+        source = self._details()
+        self.assertIn('__("from {0} {1}"', source)
+        self.assertIn("fl.attached_to_name !== row.name", source)
+
+
+class TestAnUnsignedOrderIsNotASentOrder(unittest.TestCase):
+    """The most expensive kind of wrong: a payment recorded as made.
+
+    An order of 70,40 EUR went out, the bank asked for no TAN, and the app
+    wrote "Sent". In the online banking the transfer did not exist -- neither
+    sent nor received. HIUPD had said all along what the account requires:
+
+        HKCCS Ueberweisung          erlaubt, required_signatures 1
+        HKIPZ Echtzeitueberweisung  erlaubt, required_signatures 1
+
+    One signature. None was given. The old code could not tell "a bank that
+    asks for no TAN" from "an order that was never signed", because it never
+    asked the one question that separates them.
+    """
+
+    @staticmethod
+    def _controller():
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_controller.py")
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    @staticmethod
+    def _capabilities():
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils",
+            "account_capabilities.py")
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_a_tan_free_dialog_is_checked_before_it_counts_as_sent(self):
+        source = self._controller()
+        body = source.split("def submit_sepa_transfer(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("self._refuse_unsigned(", body)
+        refuse = body.find("self._refuse_unsigned(")
+        submitted = body.find('result = {"status": "submitted"}')
+        self.assertTrue(0 < refuse < submitted,
+                        "Checked after the status is set is not checked.")
+
+    def test_the_number_of_signatures_comes_from_what_the_bank_said(self):
+        source = self._capabilities()
+        self.assertIn("def required_signatures(", source)
+        body = source.split("def required_signatures(")[1].split("\ndef ")[0]
+        self.assertIn('cint(row.get("required_signatures"))', body)
+
+    def test_nothing_stored_is_not_read_as_nothing_required(self):
+        """The reading that turns a missing TAN into a successful payment."""
+        source = self._capabilities()
+        body = source.split("def required_signatures(")[1].split("\ndef ")[0]
+        self.assertIn("return None", body)
+        self.assertIn("if not rows:", body)
+
+    def test_the_capability_asked_about_matches_the_order_that_was_sent(self):
+        """An instant collective order is not the same business transaction as
+        a single dated one, and they carry their own signature rules."""
+        body = self._controller().split("def _refuse_unsigned(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("payment_count=2 if multiple else 1", body)
+        self.assertIn("scheduled=bool(scheduled)", body)
+        self.assertIn("instant=bool(instant_payment)", body)
+
+    def test_it_refuses_rather_than_guesses(self):
+        body = self._controller().split("def _refuse_unsigned(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("frappe.throw(", body)
+        self.assertIn("has NOT been marked as sent", body)
+
+    def test_the_refusal_tells_the_reader_to_check_before_repeating(self):
+        """Refusing costs a repeated send; a repeated send that the bank did
+        take costs twice the money."""
+        body = self._controller().split("def _refuse_unsigned(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("check the online banking before sending again", body)

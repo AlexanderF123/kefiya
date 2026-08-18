@@ -338,17 +338,26 @@ def read_entries(file_url, bank_account=None):
 
     :return: (profile_name, entries, notes)
     """
-    profile_name, columns, rows, header_index = formats.read_rows(
-        decode(file_content(file_url)))
+    text = decode(file_content(file_url))
+
+    # MT940 first, because it cannot be recognised the way the tables are: it
+    # has no header row, so every CSV profile would decline it and the file
+    # would be reported as an unknown layout -- which is what happened, while
+    # the parser for it sat one module away, reading every FinTS fetch.
+    if formats.looks_like_mt940(text):
+        entries = formats.mt940_entries(text)
+        notes = {"header_row": None, "unreadable": 0, "unmatched": {},
+                 "format": "mt940"}
+        return _address_entries("mt940", entries, bank_account, notes)
+
+    profile_name, columns, rows, header_index = formats.read_rows(text)
 
     notes = {"header_row": header_index, "unreadable": 0, "unmatched": {}}
     if not profile_name:
         return None, [], notes
 
     profile = PROFILES[profile_name]
-    by_iban = {}
-    entries = []
-
+    parsed = []
     for row in rows:
         if not any(str(cell).strip() for cell in row):
             continue
@@ -356,7 +365,25 @@ def read_entries(file_url, bank_account=None):
         if entry is None:
             notes["unreadable"] += 1
             continue
+        parsed.append(entry)
 
+    return _address_entries(profile_name, parsed, bank_account, notes)
+
+
+def _address_entries(profile_name, entries, bank_account, notes):
+    """Give every entry the Bank Account it belongs to.
+
+    Shared by both readers on purpose. The routing is the part that went wrong
+    once already -- a portfolio-wide export booked onto whichever account was
+    picked on the form -- and a second copy of it for a second file format is
+    how that comes back.
+
+    :return: (profile_name, addressed entries, notes)
+    """
+    by_iban = {}
+    addressed = []
+
+    for entry in entries:
         target = bank_account
         if entry.get("own_iban"):
             if entry["own_iban"] not in by_iban:
@@ -369,9 +396,9 @@ def read_entries(file_url, bank_account=None):
                 continue
 
         entry["bank_account"] = target
-        entries.append(entry)
+        addressed.append(entry)
 
-    return profile_name, entries, notes
+    return profile_name, addressed, notes
 
 
 def plan(file_url, bank_account=None, dry_run=True):

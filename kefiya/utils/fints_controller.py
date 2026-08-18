@@ -1580,9 +1580,15 @@ class FinTSController:
                     "status": "tan_required",
                     "docname": self.kefiya_login.name,
                 }
-            # The bank accepted the order without asking for a TAN. For a credit
-            # transfer this is unexpected under PSD2 -- record it loudly so a
-            # transfer that moved money without strong auth is never silent.
+            # The dialog ended without a TAN. That is either a bank that asks
+            # for none, or an order that was never signed -- and those two look
+            # identical from here.
+            self._refuse_unsigned(multiple, scheduled, instant_payment)
+
+            # Nothing left to object to: the bank asks for no signature on this
+            # transaction, so an unsigned dialog is what success looks like.
+            # Still recorded, because a credit transfer without strong
+            # authentication is unusual enough to be worth a trail.
             frappe.log_error(
                 title="Kefiya SEPA transfer completed without TAN challenge",
                 message="login={0}: the bank did not request a TAN".format(
@@ -1597,6 +1603,61 @@ class FinTSController:
                 result["task_id"] = (
                     getattr(response, "data", None) or {}).get("task_id")
             return result
+
+    def _refuse_unsigned(self, multiple, scheduled, instant_payment):
+        """Refuse to call an unsigned order sent, when the bank demands a
+        signature for it.
+
+        What this is for, in one case. An order of 70,40 EUR went out, the
+        bank asked for no TAN, and the app wrote "Sent". In the online banking
+        the transfer did not exist -- not sent, not received. HIUPD had said
+        all along what the account requires:
+
+            HKCCS Ueberweisung             erlaubt, required_signatures 1
+            HKIPZ Echtzeitueberweisung     erlaubt, required_signatures 1
+
+        One signature. None was given. An order that needs a signature and has
+        none is not executed, so "the dialog ended without a TAN" cannot mean
+        the same thing for this account as for one that requires none -- and
+        the old code could not tell the two apart, because it never asked.
+
+        It asks now, from data already stored at logon, and refuses rather
+        than guesses. Refusing costs a repeated send; guessing costs an
+        invoice that everyone believes is paid.
+        """
+        from kefiya.utils import account_capabilities as capabilities
+
+        bank_account = getattr(self.kefiya_login, "bank_account", None)
+        capability = capabilities.required_capability(
+            payment_count=2 if multiple else 1,
+            scheduled=bool(scheduled), instant=bool(instant_payment))
+        needed = capabilities.required_signatures(bank_account, capability)
+        if not needed:
+            # None required, or nothing stored to go on. Unknown is not a
+            # reason to refuse a send that may well have worked -- it is a
+            # reason to keep the loud log below.
+            return
+
+        frappe.log_error(
+            title="Kefiya: transfer ended without the signature the bank"
+                  " requires",
+            message="login={0} capability={1} required_signatures={2}".format(
+                self.kefiya_login.name, capability, needed),
+        )
+        frappe.throw(
+            _(
+                "The bank asked for no TAN, but it requires {0} signature(s)"
+                " for \"{1}\" on this account. An order without the signature"
+                " it needs is not executed, so it has NOT been marked as sent."
+                "\n\nPlease check the online banking before sending again: if"
+                " the transfer is there after all, cancel this order instead"
+                " of repeating it."
+            ).format(
+                needed,
+                _(capabilities.LABEL_BY_KEY.get(capability, capability)),
+            ),
+            title=_("Not sent — no signature"),
+        )
 
     def _send_scheduled_transfer(self, account, pain_xml, multiple=False,
                                  control_sum=None, currency="EUR"):
