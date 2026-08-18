@@ -472,3 +472,183 @@ def reference_number(bank_account, entry):
             entry.get("counterparty") or "",
             (entry.get("description") or "")[:120])
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# MT940
+# --------------------------------------------------------------------------
+#
+# Not a profile: MT940 has no header row and no columns, so it cannot be
+# matched the way the CSV layouts are. It gets its own branch -- and it earns
+# it, because this is the format the banks themselves speak. Every Sparkasse
+# and Volksbank statement this app fetches over FinTS arrives as MT940 and is
+# already parsed by the mt940 library, wrapped by python-fints, patched by our
+# own mt940_compat. Only the FILE path never asked that parser anything.
+#
+# What makes it worth the branch is the second line of the file:
+#
+#     :25:67250020/9281703
+#
+# The statement names the account it belongs to. That is precisely the fact
+# the old importer did not read -- it booked every row of a portfolio-wide
+# export onto the one account picked on the form, which is how 21.252 payments
+# came to stand on accounts that never made them.
+
+#: A statement begins with its transaction reference and its account.
+_MT940_HEAD = re.compile(r":20:.*?:25:", re.S)
+
+#: ":25:BLZ/Kontonummer" -- German banks; other countries put an IBAN here,
+#: which is handled by the second branch of mt940_own_iban().
+_MT940_ACCOUNT = re.compile(r":25:\s*(\d{8})\s*/\s*(\w+)")
+_MT940_IBAN = re.compile(r":25:\s*([A-Z]{2}\d{2}[A-Z0-9]{10,30})")
+
+#: How long an IBAN is in each country. The split below needs it, because an
+#: IBAN and the name behind it are not separated by anything: without a length
+#: the pattern eats the first letters of the name, which is how "Deutsche
+#: Postbank AG" lost its D.
+IBAN_LENGTH = {
+    "AT": 20, "BE": 16, "BG": 22, "CH": 21, "CY": 28, "CZ": 24, "DE": 22,
+    "DK": 18, "EE": 20, "ES": 24, "FI": 18, "FR": 27, "GB": 22, "GR": 27,
+    "HR": 21, "HU": 28, "IE": 22, "IT": 27, "LI": 21, "LT": 20, "LU": 20,
+    "LV": 21, "MC": 27, "MT": 31, "NL": 18, "NO": 15, "PL": 28, "PT": 25,
+    "RO": 24, "SE": 24, "SI": 19, "SK": 24,
+}
+
+_IBAN_SHAPE = re.compile(r"^[A-Z]{2}\d{2}[A-Z0-9]+$")
+
+
+def iban_checksum_ok(value):
+    """Does this IBAN satisfy its own check digits?
+
+    The mod-97 rule, which is what makes an IBAN self-verifying: move the first
+    four characters to the end, read letters as numbers (A=10 … Z=35), and the
+    whole thing modulo 97 must be 1.
+    """
+    text = str(value or "").replace(" ", "").upper()
+    if not _IBAN_SHAPE.match(text) or not 15 <= len(text) <= 34:
+        return False
+    rotated = text[4:] + text[:4]
+    digits = "".join(
+        str(ord(ch) - 55) if ch.isalpha() else ch for ch in rotated)
+    return int(digits) % 97 == 1
+
+
+def looks_like_mt940(text):
+    """Is this an MT940 statement rather than a table?"""
+    return bool(_MT940_HEAD.search(str(text or "")[:2000]))
+
+
+def german_iban(blz, account):
+    """The IBAN of a German account, from its bank code and account number.
+
+    Germany's IBAN is not a lookup, it is a rule: DE, two check digits, the
+    eight-digit bank code, the ten-digit account number padded with zeros. So
+    ":25:67250020/9281703" is DE67672500200009281703 and nothing else -- which
+    is what lets an MT940 file address its own Bank Account without anybody
+    mapping account numbers by hand.
+
+    :return: the IBAN, or None when the parts are not usable
+    """
+    digits = "".join(ch for ch in str(blz or "") if ch.isdigit())
+    number = "".join(ch for ch in str(account or "") if ch.isdigit())
+    if len(digits) != 8 or not number or len(number) > 10:
+        return None
+
+    bban = digits + number.rjust(10, "0")
+    # The check digits: BBAN + country + "00", letters as numbers, mod 97.
+    rearranged = bban + "131400"          # D = 13, E = 14
+    check = 98 - (int(rearranged) % 97)
+    return "DE{0:02d}{1}".format(check, bban)
+
+
+def mt940_own_iban(text):
+    """The account an MT940 statement belongs to, as an IBAN."""
+    head = str(text or "")[:2000]
+    named = _MT940_IBAN.search(head)
+    if named:
+        return named.group(1).upper()
+    parts = _MT940_ACCOUNT.search(head)
+    if not parts:
+        return None
+    return german_iban(parts.group(1), parts.group(2))
+
+
+def _split_iban_and_name(value):
+    """"DE68…468Deutsche Postbank AG" -> ("DE68…468", "Deutsche Postbank AG").
+
+    The mt940 library concatenates the counterparty's IBAN and name into one
+    field, with nothing between them. Left alone the IBAN ends up inside the
+    name on every booking; split by a pattern alone it eats the beginning of
+    the name, because a capital letter is a legal IBAN character.
+
+    So the length decides, and the check digits confirm it. The country's own
+    IBAN length is tried first; where that country is unknown, every length is
+    tried and only a prefix that verifies against its own checksum is accepted.
+    Guessing is not among the options: a wrong split puts a letter of the name
+    into the IBAN, and that IBAN then matches no party at all.
+    """
+    text = str(value or "").strip()
+    if len(text) < 15 or not text[:2].isalpha():
+        return None, text
+
+    country = text[:2].upper()
+    lengths = ([IBAN_LENGTH[country]] if country in IBAN_LENGTH
+               else range(15, 35))
+    for length in lengths:
+        head = text[:length]
+        if len(head) == length and iban_checksum_ok(head):
+            return head.upper(), text[length:].strip()
+    return None, text
+
+
+def mt940_entries(text):
+    """Canonical entries out of an MT940 statement.
+
+    The same shape to_entry() produces, so everything downstream -- the
+    account routing, the duplicate check, the one constructor -- is indifferent
+    to whether a booking came from a table or from the bank's own format.
+
+    :return: list of entries; empty when nothing parses
+    """
+    # Imported here, not at module level: this module is the pure format layer
+    # and its tests run without a bench. The parser is a hard dependency of the
+    # app either way -- it is how every FinTS fetch reads its statements.
+    from fints.utils import mt940_to_array
+
+    own = mt940_own_iban(text)
+    entries = []
+    for row in mt940_to_array(str(text or "")):
+        data = getattr(row, "data", None) or row
+
+        amount = data.get("amount")
+        amount = getattr(amount, "amount", amount)
+        if amount is None:
+            continue
+        date = data.get("entry_date") or data.get("date")
+        if date is None:
+            continue
+
+        iban, name = _split_iban_and_name(data.get("applicant_name"))
+        description = " ".join(str(part) for part in (
+            data.get("posting_text"), data.get("purpose"),
+            data.get("additional_purpose")) if part)
+
+        # NONREF means "no reference given" and is on thousands of bookings;
+        # taking it as an identity would make them all the same booking. The
+        # prima nota is worse still -- it is a batch number, shared by every
+        # booking of a day. Neither may become the reference: without one, the
+        # identity is built from what the booking actually says.
+        reference = str(data.get("customer_reference") or "").strip()
+        if reference.upper() in ("", "NONREF"):
+            reference = str(data.get("bank_reference") or "").strip() or None
+
+        entries.append({
+            "date": date,
+            "amount": float(amount),
+            "description": description,
+            "counterparty": name,
+            "iban": iban,
+            "own_iban": own,
+            "reference": reference,
+        })
+    return entries
