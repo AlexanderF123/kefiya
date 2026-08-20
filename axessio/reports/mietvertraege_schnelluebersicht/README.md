@@ -18,9 +18,13 @@ gepflegt werden.
 |---|---|
 | `report_script.py` | Feld `report_script` des Report-Datensatzes |
 | `report.js` | Feld `javascript` des Report-Datensatzes |
+| `wiki_help.md` | Wiki Page `1g85uivt48` (`wiki/help-mietvertraege-schnelluebersicht`) |
+| `menuepunkt/block.{html,css,js}` | Custom HTML Block `axessio Schnelluebersicht Weiche` |
+| `menuepunkt/workspace.json` | Workspace `Schnellübersicht Mietverträge` |
 
-Beide Dateien sind die versionierte Fassung dessen, was in der Datenbank steht.
-Wer etwas ändert, ändert hier **und** am Report -- beides muss zeichengleich bleiben.
+Diese Dateien sind die versionierte Fassung dessen, was in der Datenbank steht.
+Wer etwas ändert, ändert hier **und** am jeweiligen Datensatz -- beides muss
+zeichengleich bleiben.
 
 ## Gliederung (entspricht den Blockstufen der Excel-Tabelle)
 
@@ -53,6 +57,41 @@ Die Objektzeile summiert Fläche, Soll und Kaution und zeigt die Vermietungsquot
 | Staffel / Index | `custom_rent_increase_type` plus nächste vereinbarte Stufe (Differenz und Datum) |
 | Kommentar | `Lease.custom_special_agreements` (auf 300 Zeichen gekürzt) |
 
+## Kennzahlen, Diagramm, Einstellungen
+
+Über der Liste steht ein Band aus fünf Kennzahlen: Einheiten, Vermietet,
+Leerstand, Soll/Monat, Kaution gesamt. Sie beschreiben immer den Bestand der
+ausgewählten Objekte, nicht den gerade gefilterten Ausschnitt -- und jede ist ein
+**Einstieg**: Ein Klick setzt den Belegungsfilter auf das, was die Zahl zählt,
+und klappt den Baum auf die passende Tiefe auf (Einheiten/Vermietet/Leerstand bis
+zur Einheit, Soll und Kaution bis zum Vertrag).
+
+Kennzahlenband und Diagramm lassen sich über zwei Schalter **ein- und
+ausklappen**. Das Diagramm zeigt das Soll je Objekt und zeichnet die Ansicht
+selbst, nicht der Bericht: Die Beträge spannen sich von 30 € bis über 328.000 €,
+linear wäre die Hälfte der Objekte unsichtbar. Die Achse steht deshalb in der
+Vorgabe **logarithmisch** (gezeichnet werden Zehnerlogarithmen, die Sprechblase
+nennt den echten Betrag); ein Schalter wechselt auf linear.
+
+Filter, Klappzustände, Achse und Baumtiefe hängen am Benutzerkonto
+(`frappe.model.utils.user_settings`, Ablagefach `Lease`, Schlüssel
+`mietvertraege_schnelluebersicht`), mit dem Browserspeicher als Rückfallebene.
+Über das Menü **Einstellungen zurücksetzen** stellt der Anwender die Vorgaben
+wieder her.
+
+## Menüpunkt und Hilfe
+
+Die Seitenleiste zeigt Arbeitsbereiche, keine Berichte. Der Menüpunkt
+**axessio Hausverwaltung › Schnellübersicht Mietverträge** ist deshalb ein
+Arbeitsbereich, dessen einziger Block sofort auf den Bericht weiterleitet
+(`menuepunkt/`); ein sichtbarer Link bleibt als Rückfallebene stehen.
+
+Die Hilfe im Schiebefenster (`❔ Hilfe`) hängt sonst an Client Scripts, die es nur
+für Formular- und Listenansichten gibt -- der Bericht lädt `ax_drawer_js` deshalb
+selbst nach. Die Zuordnung zur Wiki-Seite läuft über zwei `User Help Mapping`
+-Datensätze auf die Routen `/app/query-report/Mietverträge Schnellübersicht`
+(Report) und `/app/schnellübersicht-mietverträge` (Workspace).
+
 ## Filter
 
 | Filter | Wirkung |
@@ -62,12 +101,17 @@ Die Objektzeile summiert Fläche, Soll und Kaution und zeigt die Vermietungsquot
 | Mieter | Zeigt nur die Einheiten dieses Mieters |
 | Verträge | *Mit Vormietern* (Vorgabe), *Nur aktuelle Verträge*, *Nur Vormieter* |
 | Mietzeiträume | *Nur aktueller Zeitraum* (Vorgabe), *Alle Staffeln*, *Ohne Zeitraum-Zeilen* |
-| Nur Leerstand | Zeigt nur unvermietete Einheiten |
+| Belegung | *Alle* (Vorgabe), *Nur vermietet*, *Nur Leerstand* |
 | BK-Jahre | Anzahl der Betriebskosten-Spalten (0 bis 6, rückwärts ab Stichtag) |
 
 Vermietungsquote und Summen einer Objektzeile beschreiben immer den Bestand des
 Objekts, nicht den gerade gefilterten Ausschnitt -- sonst läse sich ein
-Leerstandsfilter als „0 von 3 vermietet".
+Leerstandsfilter als „0 von 3 vermietet". Der alte Haken `nur_leerstand` wird
+weiter verstanden, damit gespeicherte Verknüpfungen nicht ins Leere laufen.
+
+Der Hinweis zu Stichtag und Steuersatz steht **unter** der Tabelle: Er reist als
+Schlüssel `fussnote` an der ersten Zeile mit, weil Frappe eine `message` über die
+Liste setzen würde, wo sie den Blick auf die Daten verstellt.
 
 ## Drill-down und Pflege
 
@@ -101,8 +145,9 @@ Diese Lücken liegen in den Stammdaten, nicht im Bericht -- er macht sie sichtba
 deploybar). Ablauf:
 
 1. Datei hier ändern.
-2. Inhalt in das jeweilige Feld des Report-Datensatzes übertragen
-   (`Report` → *Mietverträge Schnellübersicht*, Felder `report_script` / `javascript`).
+2. Inhalt in das jeweilige Feld des Datensatzes übertragen (`Report` →
+   *Mietverträge Schnellübersicht*, Felder `report_script` / `javascript`;
+   Wiki Page `1g85uivt48`; Custom HTML Block *axessio Schnelluebersicht Weiche*).
 3. Testlauf über mehrere Objekte, mindestens einen mit Vormietern, und einmal
    rückdatiert.
 4. Zeichenzahl von Datei und Datenbankfeld vergleichen -- sie müssen gleich sein.

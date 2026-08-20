@@ -27,7 +27,9 @@ def erzeuge_bericht(filters):
     f_nutzungsart = filters.get("nutzungsart")
     sicht_vertraege = filters.get("vertraege") or "Mit Vormietern"
     sicht_zeitraeume = filters.get("zeitraeume") or "Nur aktueller Zeitraum"
-    nur_leerstand = frappe.utils.cint(filters.get("nur_leerstand"))
+    belegung = filters.get("belegung")
+    if not belegung:
+        belegung = "Nur Leerstand" if frappe.utils.cint(filters.get("nur_leerstand")) else "Alle"
     bk_jahre = frappe.utils.cint(filters.get("bk_jahre"))
     if bk_jahre < 0:
         bk_jahre = 0
@@ -367,8 +369,6 @@ def erzeuge_bericht(filters):
     # ------------------------------------------------------------------- Zeilen
 
     rows = []
-    chart_labels = []
-    chart_values = []
 
     summe_soll = 0.0
     summe_kaution = 0.0
@@ -442,7 +442,9 @@ def erzeuge_bericht(filters):
                 if not ist_gemeinschaft:
                     haus_vermietet = haus_vermietet + 1
 
-            if nur_leerstand and laufender:
+            if belegung == "Nur Leerstand" and laufender:
+                continue
+            if belegung == "Nur vermietet" and not laufender:
                 continue
 
             # Welche Vertraege werden gezeigt?
@@ -574,9 +576,6 @@ def erzeuge_bericht(filters):
         for z in haus_zeilen:
             rows.append(z)
 
-        chart_labels.append(haus)
-        chart_values.append(round(haus_soll, 2))
-
         summe_soll = summe_soll + haus_soll
         summe_kaution = summe_kaution + haus_kaution
         anzahl_einheiten = anzahl_einheiten + haus_einheiten
@@ -596,18 +595,18 @@ def erzeuge_bericht(filters):
         {"label": "Kaution gesamt", "value": round(summe_kaution, 2), "datatype": "Currency", "currency": "EUR"},
     ]
 
-    chart = {
-        "data": {"labels": chart_labels, "datasets": [{"name": "Soll / Monat", "values": chart_values}]},
-        "type": "bar",
-        "fieldtype": "Currency",
-    }
-
-    message = ("Stichtag " + de_datum(stichtag)
+    # Der Hinweis reist an der ersten Zeile mit, statt als `message` zu kommen:
+    # Frappe setzt eine Nachricht ueber die Tabelle, dort steht sie im Weg. Die
+    # Ansicht liest den Schluessel und haengt ihn als Fussnote unter die Liste.
+    hinweis = ("Stichtag " + de_datum(stichtag)
                + " · Beträge sind Monats-Sollwerte des am Stichtag geltenden Zeitraums."
                + " MwSt. ist mit " + str(frappe.utils.cint(MWST_SATZ)) + " % auf steuerpflichtige Positionen gerechnet."
                + " Gepflegt werden die Daten über die verlinkten Mietverträge und Einheiten.")
+    if rows:
+        rows[0]["fussnote"] = hinweis
 
-    return columns, rows, message, chart, report_summary, 1
+    # Das vierte Element bleibt leer: das Diagramm zeichnet die Ansicht aus den Zeilen.
+    return columns, rows, None, None, report_summary, 1
 
 
 data = erzeuge_bericht(filters or {})

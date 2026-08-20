@@ -1,0 +1,18 @@
+{
+  "doctype": "Workspace",
+  "name": "Schnellübersicht Mietverträge",
+  "title": "Schnellübersicht Mietverträge",
+  "label": "Schnellübersicht Mietverträge",
+  "parent_page": "axessio Hausverwaltung",
+  "public": 1,
+  "is_hidden": 0,
+  "icon": "list",
+  "indicator_color": "green",
+  "sequence_id": 1,
+  "content": "[{\"id\": \"axswblk1\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"axessio Schnelluebersicht Weiche\", \"col\": 12}}, {\"id\": \"axswblk2\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"axessio Help Bootstrap\", \"col\": 12}}, {\"id\": \"axswblk3\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"axessio Sidebar Bootstrap\", \"col\": 12}}]",
+  "custom_blocks": [
+    { "custom_block_name": "axessio Schnelluebersicht Weiche" },
+    { "custom_block_name": "axessio Help Bootstrap" },
+    { "custom_block_name": "axessio Sidebar Bootstrap" }
+  ]
+}
