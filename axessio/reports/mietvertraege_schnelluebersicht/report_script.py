@@ -65,6 +65,17 @@ def erzeuge_bericht(filters):
             return False
         return ("zzgl. mwst" in t) or ("mit mwst" in t) or ("zzgl.mwst" in t)
 
+    BETRAGSFELDER = ("miete", "kueche", "extras", "mwst", "k_zins", "bk", "soll")
+
+    def betraege_setzen(zeile, zeitraum):
+        """Traegt die Betragsspalten eines Zeitraums in eine Zeile ein."""
+        werte = zeitraum or {}
+        for feld in BETRAGSFELDER:
+            zeile[feld] = werte.get(feld)
+
+    def soll_von(zeitraum):
+        return frappe.utils.flt((zeitraum or {}).get("soll"))
+
     def leer_zu_none(wert):
         w = (wert or "").strip()
         return w or None
@@ -485,10 +496,15 @@ def erzeuge_bericht(filters):
                 haus_einheiten = haus_einheiten + 1
                 haus_qm = haus_qm + qm
             if laufender:
-                haus_soll = haus_soll + frappe.utils.flt(laufender["aktuell"] and laufender["aktuell"].get("soll"))
+                haus_soll = haus_soll + soll_von(laufender["aktuell"])
                 haus_kaution = haus_kaution + frappe.utils.flt(laufender["vertrag"].security_deposit)
                 if not ist_gemeinschaft:
                     haus_vermietet = haus_vermietet + 1
+            for a in aufbereitet:
+                salden = bk_je_vertrag.get(a["vertrag"].name) or {}
+                for j in bk_jahre_liste:
+                    if j in salden:
+                        haus_bk[j] = frappe.utils.flt(haus_bk.get(j)) + salden[j]
 
             if belegung == "Nur Leerstand" and laufender:
                 continue
@@ -510,7 +526,6 @@ def erzeuge_bericht(filters):
             einheit_zeilen = []
             for a in sichtbar:
                 v = a["vertrag"]
-                akt = a["aktuell"] or {}
                 zeile = {
                     "bezeichnung": v.lease_customer or v.name,
                     "rolle": a["rolle"],
@@ -522,13 +537,6 @@ def erzeuge_bericht(filters):
                     "pers": personen_je_vertrag.get(v.name),
                     "von": datum_oder_none(v.start_date),
                     "bis": datum_oder_none(v.end_date) or datum_oder_none(v.custom_move_out_date),
-                    "miete": akt.get("miete"),
-                    "kueche": akt.get("kueche"),
-                    "extras": akt.get("extras"),
-                    "mwst": akt.get("mwst"),
-                    "k_zins": akt.get("k_zins"),
-                    "bk": akt.get("bk"),
-                    "soll": akt.get("soll"),
                     "kaution": frappe.utils.flt(v.security_deposit) or None,
                     "kaution_art": v.custom_deposit_type,
                     "staffel": staffel_text(v, a["zeitraeume"]),
@@ -536,11 +544,11 @@ def erzeuge_bericht(filters):
                     "kommentar": kuerzen(v.custom_special_agreements, 300),
                     "indent": 2,
                 }
+                betraege_setzen(zeile, a["aktuell"])
                 salden = bk_je_vertrag.get(v.name) or {}
                 for j in bk_jahre_liste:
                     if j in salden:
                         zeile["bk_" + str(j)] = salden[j]
-                        haus_bk[j] = frappe.utils.flt(haus_bk.get(j)) + salden[j]
                 einheit_zeilen.append(zeile)
 
                 if sicht_zeitraeume != "Ohne Zeitraum-Zeilen":
@@ -583,19 +591,12 @@ def erzeuge_bericht(filters):
             }
             if laufender:
                 v = laufender["vertrag"]
-                akt = laufender_zeitraum or {}
                 einheit_zeile["vertrag"] = v.name
                 einheit_zeile["mieter"] = v.lease_customer
                 einheit_zeile["pers"] = personen_je_vertrag.get(v.name)
                 einheit_zeile["von"] = datum_oder_none(v.start_date)
                 einheit_zeile["bis"] = datum_oder_none(v.end_date)
-                einheit_zeile["miete"] = akt.get("miete")
-                einheit_zeile["kueche"] = akt.get("kueche")
-                einheit_zeile["extras"] = akt.get("extras")
-                einheit_zeile["mwst"] = akt.get("mwst")
-                einheit_zeile["k_zins"] = akt.get("k_zins")
-                einheit_zeile["bk"] = akt.get("bk")
-                einheit_zeile["soll"] = akt.get("soll")
+                betraege_setzen(einheit_zeile, laufender_zeitraum)
                 einheit_zeile["kaution"] = frappe.utils.flt(v.security_deposit) or None
                 einheit_zeile["kaution_art"] = v.custom_deposit_type
                 einheit_zeile["staffel"] = staffel_text(v, laufender["zeitraeume"])

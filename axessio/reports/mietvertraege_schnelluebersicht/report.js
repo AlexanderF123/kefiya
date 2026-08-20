@@ -25,19 +25,55 @@ frappe.provide("axessio.msu");
 	const VORGABE = { kennzahlen_offen: 1, diagramm_offen: 1, skala: "wurzel", tiefe: 1, filter: {} };
 	const SVG_NS = "http://www.w3.org/2000/svg";
 
-	// Reihenfolge des Skalen-Schalters. Wurzel ist die Vorgabe: sie laesst kleine
-	// Objekte sichtbar, ohne die Groessenverhaeltnisse so einzuebnen wie der
-	// Zehnerlogarithmus.
+	// Skalen des Diagramms. `hin` bildet einen Betrag auf die Zeichenhoehe ab,
+	// `zurueck` fuehrt eine Achsenmarke wieder in einen Betrag zurueck -- mehr
+	// braucht es nicht: Balkenhoehe und Achsenbeschriftung fallen beide daraus ab.
+	// Wurzel ist die Vorgabe, weil sie kleine Objekte sichtbar laesst, ohne die
+	// Groessenverhaeltnisse so einzuebnen wie der Zehnerlogarithmus.
 	const SKALEN = ["wurzel", "log", "linear"];
-	const SKALA_NAME = { wurzel: "Wurzel", log: "Logarithmisch", linear: "Linear" };
-	const SKALA_HINWEIS = {
-		wurzel: "Wurzelskala: kleine Objekte bleiben sichtbar, die Achse nennt die Beträge.",
-		log: "Logarithmisch: von Marke zu Marke der zehnfache Betrag.",
-		linear: "Lineare Achse: kleine Objekte verschwinden fast.",
+	const SKALA = {
+		wurzel: {
+			name: "Wurzel",
+			hinweis: "Wurzelskala: kleine Objekte bleiben sichtbar, die Achse nennt die Beträge.",
+			hin: function (betrag) {
+				return Math.sqrt(betrag);
+			},
+			zurueck: function (hoehe) {
+				return hoehe * hoehe;
+			},
+		},
+		log: {
+			name: "Logarithmisch",
+			hinweis: "Logarithmisch: von Marke zu Marke der zehnfache Betrag.",
+			hin: function (betrag) {
+				return Math.log10(1 + betrag);
+			},
+			zurueck: function (hoehe) {
+				return Math.pow(10, hoehe) - 1;
+			},
+		},
+		linear: {
+			name: "Linear",
+			hinweis: "Lineare Achse: kleine Objekte verschwinden fast.",
+			hin: function (betrag) {
+				return betrag;
+			},
+			zurueck: function (hoehe) {
+				return hoehe;
+			},
+		},
 	};
 
 	// Rollen, deren Zeile zu einem Mietvertrag gehoert; alle uebrigen zur Einheit.
 	const VERTRAGSROLLEN = ["Aktuell", "Vormieter", "Künftig", "Zeitraum"];
+
+	// Farbe der Zeile nach ihrer Rolle. Objektzeilen stehen fett statt farbig.
+	const ROLLENFARBE = {
+		Leerstand: "var(--red-500)",
+		Vormieter: "var(--text-muted)",
+		Künftig: "var(--blue-500)",
+		Zeitraum: "var(--text-light)",
+	};
 
 	// Jede Kennzahl fuehrt dorthin, wo die Zahl herkommt.
 	const EINSTIEGE = {
@@ -50,7 +86,10 @@ frappe.provide("axessio.msu");
 
 	const msu = axessio.msu;
 	msu.bericht = BERICHT;
-	msu.einstellungen = Object.assign({}, VORGABE);
+	msu.vorgabe = function () {
+		return Object.assign({}, VORGABE);
+	};
+	msu.einstellungen = msu.vorgabe();
 	msu.bereit = false;
 
 	// ---------------------------------------------------------- Einstellungen
@@ -77,7 +116,7 @@ frappe.provide("axessio.msu");
 	};
 
 	msu.laden = function () {
-		msu.einstellungen = Object.assign({}, VORGABE, msu.lokal_lesen());
+		msu.einstellungen = Object.assign(msu.vorgabe(), msu.lokal_lesen());
 		return frappe
 			.xcall("frappe.model.utils.user_settings.get", { doctype: ABLAGE_DOCTYPE })
 			.then(function (antwort) {
@@ -91,7 +130,7 @@ frappe.provide("axessio.msu");
 				}
 				const gespeichert = (alle || {})[ABLAGE_SCHLUESSEL];
 				if (gespeichert) {
-					msu.einstellungen = Object.assign({}, VORGABE, gespeichert);
+					msu.einstellungen = Object.assign(msu.vorgabe(), gespeichert);
 				}
 				if (SKALEN.indexOf(msu.einstellungen.skala) < 0) {
 					msu.einstellungen.skala = VORGABE.skala;
@@ -145,7 +184,7 @@ frappe.provide("axessio.msu");
 		}
 	};
 
-	msu.tiefe_anwenden = function (tiefe) {
+	msu.baum_aufklappen = function (tiefe) {
 		const datatable = frappe.query_report && frappe.query_report.datatable;
 		if (!datatable || !datatable.rowmanager) return;
 		const zeilen = (frappe.query_report && frappe.query_report.data) || [];
@@ -173,6 +212,12 @@ frappe.provide("axessio.msu");
 			return data.vertrag ? { doctype: "Lease", name: data.vertrag } : null;
 		}
 		return data.einheit ? { doctype: "Property", name: data.einheit } : null;
+	};
+
+	msu.einfaerben = function (data, inhalt) {
+		if (data.rolle === "Objekt") return "<b>" + inhalt + "</b>";
+		const farbe = ROLLENFARBE[data.rolle];
+		return farbe ? "<span style='color: " + farbe + "'>" + inhalt + "</span>" : inhalt;
 	};
 
 	msu.beleg_verweis = function (data, inhalt) {
@@ -204,20 +249,8 @@ frappe.provide("axessio.msu");
 		return Math.round(wert) + " €";
 	};
 
-	// Anteil der Balkenhoehe (0..1) und die Umkehrung fuer die Achsenbeschriftung.
-	msu.anteil = function (wert, groesster, skala) {
-		if (!(groesster > 0)) return 0;
-		const w = wert > 0 ? wert : 0;
-		if (skala === "linear") return w / groesster;
-		if (skala === "log") return Math.log10(1 + w) / Math.log10(1 + groesster);
-		return Math.sqrt(w) / Math.sqrt(groesster);
-	};
-
-	msu.betrag_bei = function (anteil, groesster, skala) {
-		if (!(groesster > 0)) return 0;
-		if (skala === "linear") return anteil * groesster;
-		if (skala === "log") return Math.pow(10, anteil * Math.log10(1 + groesster)) - 1;
-		return anteil * anteil * groesster;
+	msu.skala = function () {
+		return SKALA[msu.einstellungen.skala] || SKALA.wurzel;
 	};
 
 	msu.objektwerte = function () {
@@ -227,7 +260,7 @@ frappe.provide("axessio.msu");
 			if ((zeile.indent || 0) !== 0 || zeile.rolle !== "Objekt") return;
 			objekte.push({
 				id: zeile.einheit || "",
-				kurz: String(zeile.bezeichnung || "").split(" · ")[0],
+				kurz: zeile.einheit || "—",
 				name: String(zeile.bezeichnung || ""),
 				wert: Number(zeile.soll) || 0,
 			});
@@ -262,13 +295,14 @@ frappe.provide("axessio.msu");
 		const UNTEN = 86;
 		const feldbreite = BREITE - LINKS - RECHTS;
 		const feldhoehe = HOEHE - OBEN - UNTEN;
-		const skala = msu.einstellungen.skala;
+		const skala = msu.skala();
 
 		let groesster = 0;
 		objekte.forEach(function (o) {
 			if (o.wert > groesster) groesster = o.wert;
 		});
 		if (!(groesster > 0)) groesster = 1;
+		const spanne = skala.hin(groesster) || 1;
 
 		const svg = svg_knoten("svg", {
 			viewBox: "0 0 " + BREITE + " " + HOEHE,
@@ -289,23 +323,18 @@ frappe.provide("axessio.msu");
 				svg_knoten(
 					"text",
 					{ x: LINKS - 8, y: y + 4, "text-anchor": "end", class: "msu-achse" },
-					msu.euro_kurz(msu.betrag_bei(anteil, groesster, skala))
+					msu.euro_kurz(skala.zurueck(spanne * anteil))
 				)
 			);
 		}
 
 		const schritt = feldbreite / objekte.length;
 		const balken = Math.max(3, Math.min(26, schritt * 0.66));
-		let aktives_haus = "";
-		try {
-			aktives_haus = frappe.query_report.get_filter_value("haus") || "";
-		} catch (e) {
-			aktives_haus = "";
-		}
+		const aktives_haus = msu.filterwert("haus");
 
 		objekte.forEach(function (objekt, i) {
 			const mitte = LINKS + schritt * (i + 0.5);
-			const hoehe = feldhoehe * msu.anteil(objekt.wert, groesster, skala);
+			const hoehe = feldhoehe * (skala.hin(Math.max(objekt.wert, 0)) / spanne);
 			const y = OBEN + feldhoehe - hoehe;
 			const gruppe = svg_knoten("g", {
 				class:
@@ -346,18 +375,9 @@ frappe.provide("axessio.msu");
 	};
 
 	msu.diagramm_einstieg = function (haus) {
-		const report = frappe.query_report;
-		if (!report) return;
-		let vorher = "";
-		try {
-			vorher = report.get_filter_value("haus") || "";
-		} catch (e) {
-			vorher = "";
-		}
 		// Ein zweiter Klick auf dasselbe Objekt hebt die Einschränkung wieder auf.
-		const ziel = vorher === haus ? "" : haus;
-		msu.tiefe_setzen(ziel ? 2 : 1);
-		report.set_filter_value("haus", ziel);
+		const ziel = msu.filterwert("haus") === haus ? "" : haus;
+		msu.einstieg_setzen("haus", ziel, ziel ? 2 : 1);
 	};
 
 	// ------------------------------------------------------------ Oberflaeche
@@ -389,29 +409,38 @@ frappe.provide("axessio.msu");
 		const e = msu.einstellungen;
 		$leiste.find("[data-ziel='kennzahlen']").text((e.kennzahlen_offen ? "▾ " : "▸ ") + __("Kennzahlen"));
 		$leiste.find("[data-ziel='diagramm']").text((e.diagramm_offen ? "▾ " : "▸ ") + __("Soll je Objekt"));
+		const skala = msu.skala();
 		$leiste
 			.find(".msu-skala")
-			.text(__("Skala") + ": " + __(SKALA_NAME[e.skala] || SKALA_NAME.wurzel))
+			.text(__("Skala") + ": " + __(skala.name))
 			.toggle(!!e.diagramm_offen);
-		$leiste.find(".msu-hinweis").text(e.diagramm_offen ? __(SKALA_HINWEIS[e.skala] || "") : "");
+		$leiste.find(".msu-hinweis").text(e.diagramm_offen ? __(skala.hinweis) : "");
+	};
+
+	msu.filterwert = function (feld) {
+		try {
+			return frappe.query_report.get_filter_value(feld) || "";
+		} catch (e) {
+			return "";
+		}
+	};
+
+	// Einstieg = Filter setzen und den Baum auf die passende Tiefe aufklappen.
+	// Steht der Filter schon so, bleibt nur die Tiefe zu tun -- ein unveraenderter
+	// Filter loest keine Neuberechnung aus.
+	msu.einstieg_setzen = function (feld, wert, tiefe) {
+		const report = frappe.query_report;
+		if (!report) return;
+		msu.tiefe_setzen(tiefe);
+		if (msu.filterwert(feld) === (wert || "")) {
+			msu.baum_aufklappen(tiefe);
+		} else {
+			report.set_filter_value(feld, wert);
+		}
 	};
 
 	msu.einstieg = function (ziel) {
-		const report = frappe.query_report;
-		if (!report) return;
-		msu.tiefe_setzen(ziel.tiefe);
-
-		let vorher = null;
-		try {
-			vorher = report.get_filter_value("belegung");
-		} catch (e) {
-			vorher = null;
-		}
-		if (vorher === ziel.belegung) {
-			msu.tiefe_anwenden(ziel.tiefe);
-		} else {
-			report.set_filter_value("belegung", ziel.belegung);
-		}
+		msu.einstieg_setzen("belegung", ziel.belegung, ziel.tiefe);
 	};
 
 	msu.alle_zeilen = function () {
@@ -610,18 +639,7 @@ frappe.query_reports["Mietverträge Schnellübersicht"] = {
 		if (column.fieldname === "bezeichnung") {
 			value = msu.beleg_verweis(data, value);
 		}
-		if (data.rolle === "Objekt") {
-			value = "<b>" + value + "</b>";
-		} else if (data.rolle === "Leerstand" && column.fieldname === "bezeichnung") {
-			value = "<span style='color: var(--red-500)'>" + value + "</span>";
-		} else if (data.rolle === "Vormieter") {
-			value = "<span style='color: var(--text-muted)'>" + value + "</span>";
-		} else if (data.rolle === "Künftig" && column.fieldname === "bezeichnung") {
-			value = "<span style='color: var(--blue-500)'>" + value + "</span>";
-		} else if (data.rolle === "Zeitraum") {
-			value = "<span style='color: var(--text-light)'>" + value + "</span>";
-		}
-		return value;
+		return msu.einfaerben(data, value);
 	},
 
 	onload: function (report) {
@@ -665,7 +683,7 @@ frappe.query_reports["Mietverträge Schnellübersicht"] = {
 			}
 		});
 		report.page.add_menu_item(__("Einstellungen zurücksetzen"), function () {
-			msu.einstellungen = { kennzahlen_offen: 1, diagramm_offen: 1, skala: "wurzel", tiefe: 1, filter: {} };
+			msu.einstellungen = msu.vorgabe();
 			msu.sichern();
 			frappe.show_alert({ message: __("Einstellungen zurückgesetzt."), indicator: "green" });
 			frappe.query_report.refresh();
@@ -697,7 +715,7 @@ frappe.query_reports["Mietverträge Schnellübersicht"] = {
 		msu.oberflaeche_aufbauen();
 		if (msu.bereit) {
 			msu.filter_merken();
-			msu.tiefe_anwenden(msu.einstellungen.tiefe || 1);
+			msu.baum_aufklappen(msu.einstellungen.tiefe || 1);
 		}
 	},
 };
