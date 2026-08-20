@@ -9,8 +9,8 @@
 //     die Zahl zaehlt, und klappt den Baum auf die passende Tiefe auf,
 //   * Kennzahlenband und Diagramm lassen sich ein- und ausklappen,
 //   * das Diagramm ist selbst gezeichnet (SVG): die Achse links nennt Betraege,
-//     die Balkenhoehe folgt der gewaehlten Skala, und ein Klick auf einen Balken
-//     filtert auf dieses Objekt.
+//     die Balkenhoehe folgt der gewaehlten Skala, ein Klick auf einen Balken
+//     filtert auf dieses Objekt, und die Hoehe ist mit der Maus veraenderbar.
 //
 // Alles, was der Anwender einstellt -- Filter, Klappzustand, Skala, Baumtiefe --
 // haengt an seinem Benutzerkonto (frappe.model.utils.user_settings), mit dem
@@ -22,7 +22,16 @@ frappe.provide("axessio.msu");
 	const BERICHT = "Mietverträge Schnellübersicht";
 	const ABLAGE_DOCTYPE = "Lease";
 	const ABLAGE_SCHLUESSEL = "mietvertraege_schnelluebersicht";
-	const VORGABE = { kennzahlen_offen: 1, diagramm_offen: 1, skala: "wurzel", tiefe: 1, filter: {} };
+	const VORGABE = {
+		kennzahlen_offen: 1,
+		diagramm_offen: 1,
+		skala: "wurzel",
+		tiefe: 1,
+		diagramm_hoehe: 320,
+		filter: {},
+	};
+	const HOEHE_MIN = 160;
+	const HOEHE_MAX = 900;
 	const SVG_NS = "http://www.w3.org/2000/svg";
 
 	// Skalen des Diagramms. `hin` bildet einen Betrag auf die Zeichenhoehe ab,
@@ -91,6 +100,7 @@ frappe.provide("axessio.msu");
 	};
 	msu.einstellungen = msu.vorgabe();
 	msu.bereit = false;
+	msu.einmal_aufklappen = 0;
 
 	// ---------------------------------------------------------- Einstellungen
 
@@ -179,9 +189,7 @@ frappe.provide("axessio.msu");
 	msu.tiefe_setzen = function (tiefe) {
 		msu.einstellungen.tiefe = tiefe;
 		msu.sichern();
-		if (frappe.query_reports[BERICHT]) {
-			frappe.query_reports[BERICHT].initial_depth = tiefe;
-		}
+		msu.tiefe_uebernehmen();
 	};
 
 	msu.baum_aufklappen = function (tiefe) {
@@ -253,6 +261,32 @@ frappe.provide("axessio.msu");
 		return SKALA[msu.einstellungen.skala] || SKALA.wurzel;
 	};
 
+	msu.hoehe = function () {
+		const wert = Number(msu.einstellungen.diagramm_hoehe) || VORGABE.diagramm_hoehe;
+		return Math.min(Math.max(Math.round(wert), HOEHE_MIN), HOEHE_MAX);
+	};
+
+	// Die Zeichenflaeche traegt `resize: vertical`; der Beobachter merkt sich die
+	// gezogene Hoehe und zeichnet einmal neu, damit Achse und Balken mitwachsen.
+	msu.hoehe_beobachten = function ($flaeche) {
+		const el = $flaeche.get(0);
+		if (!el || typeof ResizeObserver !== "function") return;
+		let warten = null;
+		const beobachter = new ResizeObserver(function () {
+			if (warten) {
+				clearTimeout(warten);
+			}
+			warten = setTimeout(function () {
+				const jetzt = Math.round(el.clientHeight);
+				if (!jetzt || Math.abs(jetzt - msu.hoehe()) < 8) return;
+				msu.einstellungen.diagramm_hoehe = jetzt;
+				msu.sichern();
+				msu.diagramm_zeichnen($flaeche);
+			}, 250);
+		});
+		beobachter.observe(el);
+	};
+
 	msu.objektwerte = function () {
 		const zeilen = (frappe.query_report && frappe.query_report.data) || [];
 		const objekte = [];
@@ -288,7 +322,7 @@ frappe.provide("axessio.msu");
 		}
 
 		const BREITE = 1000;
-		const HOEHE = 320;
+		const HOEHE = msu.hoehe();
 		const LINKS = 96;
 		const RECHTS = 16;
 		const OBEN = 12;
@@ -307,6 +341,7 @@ frappe.provide("axessio.msu");
 		const svg = svg_knoten("svg", {
 			viewBox: "0 0 " + BREITE + " " + HOEHE,
 			class: "msu-svg",
+			style: "height: " + HOEHE + "px",
 			preserveAspectRatio: "xMidYMid meet",
 			role: "img",
 			"aria-label": __("Soll je Objekt"),
@@ -394,7 +429,8 @@ frappe.provide("axessio.msu");
 			".msu-klickbar { cursor: pointer; border-radius: var(--border-radius-md); }",
 			".msu-klickbar:hover { background: var(--bg-light-gray, var(--subtle-fg)); }",
 			".msu-fussnote { margin: 12px 0 4px 0; font-size: var(--text-sm); }",
-			".msu-svg { width: 100%; height: auto; display: block; }",
+			".msu-svg { width: 100%; display: block; }",
+			".msu-flaeche { resize: vertical; overflow: hidden; min-height: 160px; }",
 			".msu-gitter { stroke: var(--border-color); stroke-width: 1; }",
 			".msu-achse, .msu-marke { fill: var(--text-muted); font-size: 11px; }",
 			".msu-balken rect { fill: #14532d; }",
@@ -417,12 +453,48 @@ frappe.provide("axessio.msu");
 		$leiste.find(".msu-hinweis").text(e.diagramm_offen ? __(skala.hinweis) : "");
 	};
 
-	msu.filterwert = function (feld) {
+	msu.filterwert = function (feld, report) {
 		try {
-			return frappe.query_report.get_filter_value(feld) || "";
+			return (report || frappe.query_report).get_filter_value(feld) || "";
 		} catch (e) {
 			return "";
 		}
+	};
+
+	msu.tiefe_uebernehmen = function () {
+		if (frappe.query_reports[BERICHT]) {
+			frappe.query_reports[BERICHT].initial_depth = msu.einstellungen.tiefe || 1;
+		}
+	};
+
+	// Gespeicherte Filter setzen. `sanft` schreibt nur in die Eingabefelder, ohne
+	// eine Neuberechnung auszuloesen -- so wie es vor dem ersten Lauf gebraucht
+	// wird. Felder, die ohnehin schon so stehen, bleiben unberuehrt; deshalb ist
+	// der spaetere Abgleich mit dem Server in der Regel ein Nichts-tun.
+	msu.filter_uebernehmen = function (report, werte, sanft) {
+		const anzuwenden = {};
+		Object.keys(werte || {}).forEach(function (feld) {
+			const wert = werte[feld];
+			if (wert === undefined || wert === null) return;
+			if (!report.get_filter(feld)) return;
+			if (msu.filterwert(feld, report) === (wert || "")) return;
+			anzuwenden[feld] = wert;
+		});
+		const felder = Object.keys(anzuwenden);
+		if (!felder.length) return false;
+		if (sanft) {
+			felder.forEach(function (feld) {
+				try {
+					report.get_filter(feld).set_input(anzuwenden[feld]);
+				} catch (e) {
+					// Steuerelement mag kein set_input: dann eben mit Neuberechnung.
+					report.set_filter_value(feld, anzuwenden[feld]);
+				}
+			});
+		} else {
+			report.set_filter_value(anzuwenden);
+		}
+		return true;
 	};
 
 	// Einstieg = Filter setzen und den Baum auf die passende Tiefe aufklappen.
@@ -435,6 +507,10 @@ frappe.provide("axessio.msu");
 		if (msu.filterwert(feld) === (wert || "")) {
 			msu.baum_aufklappen(tiefe);
 		} else {
+			// Nach dem Neuaufbau einmal nachfassen -- der Rahmen klappt zwar selbst
+			// bis `initial_depth` auf, aber darauf allein soll ein bewusster Klick
+			// des Anwenders nicht angewiesen sein.
+			msu.einmal_aufklappen = tiefe;
 			report.set_filter_value(feld, wert);
 		}
 	};
@@ -443,7 +519,7 @@ frappe.provide("axessio.msu");
 		msu.einstieg_setzen("belegung", ziel.belegung, ziel.tiefe);
 	};
 
-	msu.alle_zeilen = function () {
+	msu.filter_aufheben = function () {
 		const report = frappe.query_report;
 		if (!report) return;
 		msu.tiefe_setzen(1);
@@ -487,6 +563,7 @@ frappe.provide("axessio.msu");
 			"</div>"
 		);
 		const $rahmen = $("<div class='msu-rahmen'><div class='msu-flaeche'></div></div>");
+		$rahmen.find(".msu-flaeche").css("height", msu.hoehe() + "px");
 
 		if ($kennzahlen.length) {
 			$leiste.insertBefore($kennzahlen);
@@ -545,6 +622,7 @@ frappe.provide("axessio.msu");
 		if (msu.einstellungen.diagramm_offen) {
 			msu.diagramm_zeichnen($rahmen.find(".msu-flaeche"));
 		}
+		msu.hoehe_beobachten($rahmen.find(".msu-flaeche"));
 		msu.fussnote_setzen($haupt);
 	};
 })();
@@ -665,8 +743,8 @@ frappe.query_reports["Mietverträge Schnellübersicht"] = {
 			});
 		}
 
-		report.page.add_inner_button(__("Alle Zeilen"), function () {
-			msu.alle_zeilen();
+		report.page.add_inner_button(__("Filter aufheben"), function () {
+			msu.filter_aufheben();
 		});
 		report.page.add_inner_button(__("Einheit öffnen"), function () {
 			const zeile = frappe.query_report.get_checked_items()[0] || frappe.query_report.data[0];
@@ -689,24 +767,22 @@ frappe.query_reports["Mietverträge Schnellübersicht"] = {
 			frappe.query_report.refresh();
 		});
 
-		// Gespeicherte Einstellungen des Benutzers nachziehen.
+		// Der gespeicherte Stand kommt zuerst aus dem Browserspeicher: er ist ohne
+		// Serverfrage da und damit noch vor dem ersten Lauf des Berichts. Frueher
+		// wurde er erst nach der Serverantwort gesetzt -- der Bericht lief dadurch
+		// zweimal, einmal mit den Vorgaben und einmal mit den Filtern des Anwenders.
+		msu.einstellungen = Object.assign(msu.vorgabe(), msu.lokal_lesen());
+		msu.tiefe_uebernehmen();
+		msu.filter_uebernehmen(report, msu.einstellungen.filter, true);
+		msu.bereit = true;
+
+		// Der Server haelt den Stand ueber Rechnergrenzen hinweg. Stimmt er mit dem
+		// Browserspeicher ueberein -- der Normalfall --, aendert dieser Abgleich
+		// nichts und loest auch keinen zweiten Lauf aus.
 		msu.laden().then(function (einstellungen) {
-			msu.bereit = true;
-			if (frappe.query_reports[msu.bericht]) {
-				frappe.query_reports[msu.bericht].initial_depth = einstellungen.tiefe || 1;
-			}
-			const gespeichert = einstellungen.filter || {};
-			const anzuwenden = {};
-			Object.keys(gespeichert).forEach(function (feld) {
-				if (report.get_filter(feld) && gespeichert[feld] !== undefined && gespeichert[feld] !== null) {
-					anzuwenden[feld] = gespeichert[feld];
-				}
-			});
-			if (Object.keys(anzuwenden).length) {
-				report.set_filter_value(anzuwenden);
-			} else {
-				msu.oberflaeche_aufbauen();
-			}
+			msu.tiefe_uebernehmen();
+			msu.filter_uebernehmen(report, einstellungen.filter, false);
+			msu.oberflaeche_aufbauen();
 		});
 	},
 
@@ -715,7 +791,14 @@ frappe.query_reports["Mietverträge Schnellübersicht"] = {
 		msu.oberflaeche_aufbauen();
 		if (msu.bereit) {
 			msu.filter_merken();
-			msu.baum_aufklappen(msu.einstellungen.tiefe || 1);
+		}
+		// Aufgeklappt wird nur nach einem bewussten Einstieg. Bei jedem Rendern zu
+		// und wieder aufzuklappen kostete bei tausend Einheiten mehr Zeit als der
+		// ganze Bericht -- den Rest erledigt `initial_depth` beim Aufbau.
+		if (msu.einmal_aufklappen) {
+			const tiefe = msu.einmal_aufklappen;
+			msu.einmal_aufklappen = 0;
+			msu.baum_aufklappen(tiefe);
 		}
 	},
 };

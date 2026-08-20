@@ -34,7 +34,7 @@ Ein **Klick auf eine Kachel** filtert die Liste auf das, was die Zahl zählt:
 
 Gemeinschaftsflächen zählen weder als vermietet noch als Leerstand.
 
-Die Schaltfläche **Alle Zeilen** oben rechts hebt alle Einschränkungen wieder auf – Gesellschaft, Objekt, Einheit, Mieter, Nutzungsart, Belegung und Vertragssicht stehen danach wieder auf „alles". Stichtag und Anzahl der BK-Jahre bleiben, wie Sie sie gesetzt haben.
+Die Schaltfläche **Filter aufheben** oben rechts hebt alle Einschränkungen wieder auf – Gesellschaft, Objekt, Einheit, Mieter, Nutzungsart, Belegung und Vertragssicht stehen danach wieder auf „alles". Stichtag und Anzahl der BK-Jahre bleiben, wie Sie sie gesetzt haben.
 
 ## Ein- und ausklappen
 
@@ -50,6 +50,8 @@ Beides bleibt so, wie Sie es zuletzt gelassen haben – persönlich, nicht für 
 Das Diagramm zeigt das monatliche Soll je Haus. Die Achse links nennt Beträge – 1 T€, 40 T€, 328 T€ –, sodass Sie an jeder Höhe ablesen können, worum es geht. Beim Zeigen auf einen Balken erscheint der genaue Betrag.
 
 **Ein Klick auf einen Balken** schränkt die Liste auf dieses Objekt ein und klappt bis zu den Verträgen auf; ein zweiter Klick auf denselben Balken hebt die Einschränkung wieder auf.
+
+Das Diagramm lässt sich **in der Höhe ziehen**: Fassen Sie die rechte untere Ecke der Zeichenfläche an und ziehen Sie sie nach unten, bis alle Objekte gut lesbar sind (160 bis 900 Bildpunkte). Die eingestellte Höhe wird zu Ihrem Benutzerkonto gemerkt.
 
 Die Spanne reicht von wenigen Euro (eine Plakatwand) bis in die Hunderttausende (ein Hotelobjekt). Mit dem Schalter **Skala** wählen Sie, wie die Balkenhöhe daraus entsteht:
 
@@ -95,7 +97,7 @@ Zusätzlich öffnen die Schaltflächen **Einheit öffnen** und **Mietvertrag öf
 
 ## Ihre Einstellungen
 
-Filter, Klappzustände, Achse und Baumtiefe hängen an Ihrem Benutzerkonto: Beim nächsten Öffnen finden Sie die Liste so vor, wie Sie sie verlassen haben – auch an einem anderen Rechner. Über das Menü **⋮ › Einstellungen zurücksetzen** stellen Sie den Auslieferungszustand wieder her.
+Filter, Klappzustände, Skala, Diagrammhöhe und Baumtiefe hängen an Ihrem Benutzerkonto: Beim nächsten Öffnen finden Sie die Liste so vor, wie Sie sie verlassen haben – auch an einem anderen Rechner, und ohne dass die Liste dafür zweimal gerechnet wird. Über das Menü **⋮ › Einstellungen zurücksetzen** stellen Sie den Auslieferungszustand wieder her.
 
 ## Wenn Beträge fehlen
 

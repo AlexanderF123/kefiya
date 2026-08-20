@@ -211,12 +211,14 @@ def erzeuge_bericht(filters):
             limit_page_length=0,
         )
 
-    # Positionen je Vertrag buendeln.
+    # Positionen je Vertrag buendeln. Das Gueltig-ab-Datum wird hier einmal
+    # umgewandelt -- in der Zeitraumbildung wird es sonst je Zeitraum und Position
+    # erneut geparst, und in der Sandbox kostet jeder dieser Aufrufe.
     pos_je_vertrag = {}
     for p in positionen:
         if p.parent not in pos_je_vertrag:
             pos_je_vertrag[p.parent] = []
-        pos_je_vertrag[p.parent].append(p)
+        pos_je_vertrag[p.parent].append((datum_oder_none(p.valid_from), p.lease_item, p.amount))
 
     # BK-Salden je Vertrag und Jahr.
     bk_je_vertrag = {}
@@ -256,7 +258,7 @@ def erzeuge_bericht(filters):
 
         wechsel_alle = []
         for p in posten:
-            d = datum_oder_none(p.valid_from) or v_start
+            d = p[0] or v_start
             if not d:
                 continue
             if v_start and d < v_start:
@@ -288,10 +290,10 @@ def erzeuge_bericht(filters):
             # Fuer jede Artikelart die zum Zeitraumbeginn juengste Fassung.
             aktuell = {}
             for p in posten:
-                d = datum_oder_none(p.valid_from) or v_start
+                d = p[0] or v_start
                 if not d or d > beginn:
                     continue
-                aktuell[p.lease_item] = p.amount
+                aktuell[p[1]] = p[2]
 
             summen = {"miete": 0.0, "kueche": 0.0, "extras": 0.0, "bk": 0.0, "k_zins": 0.0, "mwst": 0.0}
             for artikel in aktuell:
@@ -349,7 +351,7 @@ def erzeuge_bericht(filters):
             return "Vormieter"
         return "Aktuell"
 
-    def staffel_text(vertrag, zeitraeume):
+    def staffel_text(vertrag, zeitraeume, aktuell):
         """Kurztext zur Mietanpassung: Art plus naechste vereinbarte Stufe."""
         art = vertrag.custom_rent_increase_type or ""
         if art == "graduated rent":
@@ -366,7 +368,6 @@ def erzeuge_bericht(filters):
             if z["von"] > stichtag and naechster is None:
                 naechster = z
         if naechster:
-            aktuell = aktueller_zeitraum(zeitraeume)
             differenz = 0.0
             if aktuell:
                 differenz = round(naechster["soll"] - aktuell["soll"], 2)
@@ -539,9 +540,9 @@ def erzeuge_bericht(filters):
                     "bis": datum_oder_none(v.end_date) or datum_oder_none(v.custom_move_out_date),
                     "kaution": frappe.utils.flt(v.security_deposit) or None,
                     "kaution_art": v.custom_deposit_type,
-                    "staffel": staffel_text(v, a["zeitraeume"]),
+                    "staffel": staffel_text(v, a["zeitraeume"], a["aktuell"]),
                     "status": v.lease_status,
-                    "kommentar": kuerzen(v.custom_special_agreements, 300),
+                    "kommentar": kuerzen(v.custom_special_agreements, 160),
                     "indent": 2,
                 }
                 betraege_setzen(zeile, a["aktuell"])
@@ -599,7 +600,7 @@ def erzeuge_bericht(filters):
                 betraege_setzen(einheit_zeile, laufender_zeitraum)
                 einheit_zeile["kaution"] = frappe.utils.flt(v.security_deposit) or None
                 einheit_zeile["kaution_art"] = v.custom_deposit_type
-                einheit_zeile["staffel"] = staffel_text(v, laufender["zeitraeume"])
+                einheit_zeile["staffel"] = staffel_text(v, laufender["zeitraeume"], laufender_zeitraum)
 
             haus_zeilen.append(einheit_zeile)
             for z in einheit_zeilen:
@@ -654,8 +655,19 @@ def erzeuge_bericht(filters):
     if rows:
         rows[0]["fussnote"] = hinweis
 
+    # Leere Felder gar nicht erst senden: die Ansicht liest einen fehlenden
+    # Schluessel ohnehin als leere Zelle, die Antwort wird dadurch rund ein
+    # Drittel kleiner -- und genau daran haengt die Wartezeit im Browser.
+    schlank = []
+    for zeile in rows:
+        gefuellt = {}
+        for feld in zeile:
+            if zeile[feld] is not None:
+                gefuellt[feld] = zeile[feld]
+        schlank.append(gefuellt)
+
     # Das vierte Element bleibt leer: das Diagramm zeichnet die Ansicht aus den Zeilen.
-    return columns, rows, None, None, report_summary, 1
+    return columns, schlank, None, None, report_summary, 1
 
 
 data = erzeuge_bericht(filters or {})

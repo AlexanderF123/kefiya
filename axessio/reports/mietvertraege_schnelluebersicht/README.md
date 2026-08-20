@@ -6,7 +6,7 @@ Live-Stammdaten, filterbar und mit Drill-down auf die Belege, in denen die Daten
 gepflegt werden.
 
 - **Aufruf:** `/app/query-report/Mietverträge Schnellübersicht`
-- **Art:** Script Report (in der Datenbank, Modul *Property Management Solution*,
+- **Art:** Script Report (in der Datenbank, Modul *axessio Propms addon*,
   Referenz-DocType *Lease*)
 - **Rollen:** System Manager, Property Manager, axessio Hausverwalter
 - **Risikoklasse:** A -- reiner Lesebericht, keine Datenänderung
@@ -78,7 +78,7 @@ ausgewählten Objekte, nicht den gerade gefilterten Ausschnitt -- und jede ist e
 und klappt den Baum auf die passende Tiefe auf (Einheiten/Vermietet/Leerstand bis
 zur Einheit, Soll und Kaution bis zum Vertrag).
 
-Die Schaltfläche **Alle Zeilen** hebt alle einschränkenden Filter auf
+Die Schaltfläche **Filter aufheben** hebt alle einschränkenden Filter auf
 (Gesellschaft, Objekt, Einheit, Mieter, Nutzungsart, Belegung, Vertragssicht) und
 zeigt den ganzen Bestand; Stichtag und BK-Jahre bleiben stehen.
 
@@ -87,7 +87,9 @@ ausklappen**. Das Diagramm zeigt das Soll je Objekt und ist selbst gezeichnetes
 SVG -- nicht frappe-charts: Nur so trägt die **Achse links echte Beträge**
 (1 T€, 40 T€, 328 T€ …) statt Skalenwerte, und nur so lässt sich ein Balken
 anklicken. Ein Klick filtert auf dieses Objekt und klappt bis zu den Verträgen
-auf, ein zweiter Klick hebt die Einschränkung wieder auf.
+auf, ein zweiter Klick hebt die Einschränkung wieder auf. Die Zeichenfläche trägt
+`resize: vertical`; ein `ResizeObserver` merkt sich die gezogene Höhe (160 bis 900
+Bildpunkte, entprellt) in den Benutzereinstellungen und zeichnet neu.
 
 Die Balkenhöhe folgt einer wählbaren Skala (Schalter **Skala**):
 
@@ -100,11 +102,27 @@ Die Balkenhöhe folgt einer wählbaren Skala (Schalter **Skala**):
 Die Achsenmarken werden aus der jeweiligen Umkehrfunktion berechnet und mit dem
 Betrag beschriftet, der auf dieser Höhe steht.
 
-Filter, Klappzustände, Achse und Baumtiefe hängen am Benutzerkonto
+Filter, Klappzustände, Skala, Diagrammhöhe und Baumtiefe hängen am Benutzerkonto
 (`frappe.model.utils.user_settings`, Ablagefach `Lease`, Schlüssel
 `mietvertraege_schnelluebersicht`), mit dem Browserspeicher als Rückfallebene.
 Über das Menü **Einstellungen zurücksetzen** stellt der Anwender die Vorgaben
 wieder her.
+
+## Laufzeit
+
+Der volle Bestand sind rund 2.450 Zeilen. Damit das Öffnen nicht zweimal bezahlt
+wird, gilt:
+
+- Die gemerkten Einstellungen werden **vor** dem ersten Lauf gesetzt
+  (`set_input` ohne Neuberechnung); vom Server kommende Werte gleichen nur ab,
+  was der Browserspeicher schon gesetzt hat. Der Bericht rechnet beim Öffnen
+  einmal statt zweimal.
+- Aufgeklappt wird nur nach einem bewussten Drill-down (einmalig nach dem
+  nächsten Zeichnen), nicht bei jedem Rendern -- das frühere Aufklappen kostete
+  bei gemerkter Tiefe rund tausend Einzelaufrufe je Darstellung.
+- Der Serverskript-Teil bündelt die Positionen je Vertrag, wandelt jedes
+  `valid_from` genau einmal um und sendet leere Felder gar nicht erst mit
+  (Nutzlast rund 835 KB statt 1.012 KB).
 
 ## Menüpunkt und Hilfe
 
