@@ -1,5 +1,0 @@
-.axsw { padding: 24px; text-align: center; font-family: var(--font-stack); }
-.axsw-titel { font-size: var(--text-xl); font-weight: 600; color: #14532d; margin-bottom: 6px; }
-.axsw-text { color: var(--text-muted); margin-bottom: 12px; }
-.axsw-link { display: inline-block; padding: 6px 14px; border-radius: var(--border-radius-md);
-  border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); }
