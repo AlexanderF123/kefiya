@@ -2,9 +2,11 @@
 
 Die Schnellübersicht zeigt Ihren gesamten Bestand auf einer Seite: welches Objekt welche Einheiten hat, wer dort wohnt, wer vorher dort wohnte, was vereinbart ist und was monatlich zu zahlen wäre. Sie ersetzt die gewachsene Excel-Tabelle „Soll" – mit demselben Aufbau, aber auf den gepflegten Daten.
 
-Sie erreichen die Seite über die Seitenleiste unter **axessio Hausverwaltung › Schnellübersicht Mietverträge** oder direkt unter `/app/query-report/Mietverträge Schnellübersicht`.
+Sie erreichen die Seite über die Seitenleiste unter **Kaufmännische Verwaltung › Schnellübersicht Mietverträge**, über die Kachel **Mietverträge** auf der Seite *Kaufmännische Verwaltung* oder direkt unter `/app/query-report/Mietverträge Schnellübersicht`.
 
 > **Die Liste liest nur.** Geändert wird nichts in der Übersicht selbst, sondern in den verknüpften Mietverträgen und Einheiten – ein Klick auf eine Verknüpfung führt dorthin.
+
+Sie sehen nur, was Sie sehen dürfen: Objekte, Einheiten und Verträge werden mit Ihren Berechtigungen gelesen. Wer auf eine Gesellschaft beschränkt ist, findet hier auch nur deren Bestand.
 
 ## Aufbau: vier Ebenen
 
@@ -32,6 +34,8 @@ Ein **Klick auf eine Kachel** filtert die Liste auf das, was die Zahl zählt:
 
 Gemeinschaftsflächen zählen weder als vermietet noch als Leerstand.
 
+Die Schaltfläche **Alle Zeilen** oben rechts hebt alle Einschränkungen wieder auf – Gesellschaft, Objekt, Einheit, Mieter, Nutzungsart, Belegung und Vertragssicht stehen danach wieder auf „alles". Stichtag und Anzahl der BK-Jahre bleiben, wie Sie sie gesetzt haben.
+
 ## Ein- und ausklappen
 
 Über den Kacheln stehen zwei Schalter:
@@ -43,9 +47,15 @@ Beides bleibt so, wie Sie es zuletzt gelassen haben – persönlich, nicht für 
 
 ## Diagramm: Soll je Objekt
 
-Das Diagramm zeigt das monatliche Soll je Haus. Die Spanne reicht von wenigen Euro (eine Plakatwand) bis in die Hunderttausende (ein Hotelobjekt) – linear wären die kleinen Objekte unsichtbar. Deshalb steht die Achse in der Vorgabe auf **logarithmisch**: Jeder gleiche Schritt nach oben bedeutet den zehnfachen Betrag. Die Sprechblase am Balken nennt immer den echten Betrag in Euro.
+Das Diagramm zeigt das monatliche Soll je Haus. Die Achse links nennt Beträge – 1 T€, 40 T€, 328 T€ –, sodass Sie an jeder Höhe ablesen können, worum es geht. Beim Zeigen auf einen Balken erscheint der genaue Betrag.
 
-Mit dem Schalter **Achse: logarithmisch / linear** wechseln Sie die Darstellung.
+**Ein Klick auf einen Balken** schränkt die Liste auf dieses Objekt ein und klappt bis zu den Verträgen auf; ein zweiter Klick auf denselben Balken hebt die Einschränkung wieder auf.
+
+Die Spanne reicht von wenigen Euro (eine Plakatwand) bis in die Hunderttausende (ein Hotelobjekt). Mit dem Schalter **Skala** wählen Sie, wie die Balkenhöhe daraus entsteht:
+
+- **Wurzel** (Vorgabe) – der Kompromiss: kleine Objekte bleiben sichtbar, die Größenverhältnisse bleiben erkennbar.
+- **Logarithmisch** – von Marke zu Marke der zehnfache Betrag; sehr große Unterschiede werden stark eingeebnet.
+- **Linear** – echte Verhältnisse; kleine Objekte verschwinden fast auf der Nulllinie.
 
 ## Filter
 
@@ -79,7 +89,7 @@ Die MwSt. wird mit 19 % auf die steuerpflichtigen Positionen gerechnet (erkennba
 
 ## Daten pflegen
 
-Drei Spalten sind Verknüpfungen: **Einheit**, **Mietvertrag** und **Mieter**. Ein Klick öffnet den jeweiligen Datensatz – dort ändern Sie Fläche, Positionen, Kaution oder Vereinbarungen. Nach dem Speichern zeigt die Übersicht die neuen Werte.
+**Jede Zeile führt in ihren Beleg:** Ein Klick auf den Text in der ersten Spalte öffnet bei Objekt- und Einheitenzeilen die Einheit, bei Mieter- und Zeitraumzeilen den Mietvertrag. Zusätzlich sind die Spalten **Einheit**, **Mietvertrag** und **Mieter** Verknüpfungen. Dort ändern Sie Fläche, Positionen, Kaution oder Vereinbarungen – nach dem Speichern zeigt die Übersicht die neuen Werte.
 
 Zusätzlich öffnen die Schaltflächen **Einheit öffnen** und **Mietvertrag öffnen** den Datensatz der markierten Zeile.
 

@@ -10,6 +10,9 @@ gepflegt werden.
   Referenz-DocType *Lease*)
 - **Rollen:** System Manager, Property Manager, axessio Hausverwalter
 - **Risikoklasse:** A -- reiner Lesebericht, keine Datenänderung
+- **Rechte:** gelesen wird über `frappe.get_list` (Kindtabellen mit
+  `parent_doctype`), also mit den Rollen- und Benutzerberechtigungen des
+  Aufrufers -- keine Rohabfrage am Rechtesystem vorbei
 - **Feature-Datensatz:** `FEAT-16128`
 
 ## Dateien
@@ -57,6 +60,15 @@ Die Objektzeile summiert Fläche, Soll und Kaution und zeigt die Vermietungsquot
 | Staffel / Index | `custom_rent_increase_type` plus nächste vereinbarte Stufe (Differenz und Datum) |
 | Kommentar | `Lease.custom_special_agreements` (auf 300 Zeichen gekürzt) |
 
+## Einzelbeleg öffnen
+
+Die erste Spalte jeder Zeile ist ein Verweis auf ihren Beleg: Objekt- und
+Einheitenzeilen führen auf die `Property`, Vertrags- und Zeitraumzeilen auf den
+`Lease`. Der Verweis trägt `data-doctype` und `data-name`, damit auch das
+Kontextmenü der Oberfläche (`ax_actions_js`) die Zeile erkennt. Die Spalten
+*Einheit*, *Mietvertrag* und *Mieter* bleiben zusätzlich als Verknüpfungen
+bestehen.
+
 ## Kennzahlen, Diagramm, Einstellungen
 
 Über der Liste steht ein Band aus fünf Kennzahlen: Einheiten, Vermietet,
@@ -66,12 +78,27 @@ ausgewählten Objekte, nicht den gerade gefilterten Ausschnitt -- und jede ist e
 und klappt den Baum auf die passende Tiefe auf (Einheiten/Vermietet/Leerstand bis
 zur Einheit, Soll und Kaution bis zum Vertrag).
 
+Die Schaltfläche **Alle Zeilen** hebt alle einschränkenden Filter auf
+(Gesellschaft, Objekt, Einheit, Mieter, Nutzungsart, Belegung, Vertragssicht) und
+zeigt den ganzen Bestand; Stichtag und BK-Jahre bleiben stehen.
+
 Kennzahlenband und Diagramm lassen sich über zwei Schalter **ein- und
-ausklappen**. Das Diagramm zeigt das Soll je Objekt und zeichnet die Ansicht
-selbst, nicht der Bericht: Die Beträge spannen sich von 30 € bis über 328.000 €,
-linear wäre die Hälfte der Objekte unsichtbar. Die Achse steht deshalb in der
-Vorgabe **logarithmisch** (gezeichnet werden Zehnerlogarithmen, die Sprechblase
-nennt den echten Betrag); ein Schalter wechselt auf linear.
+ausklappen**. Das Diagramm zeigt das Soll je Objekt und ist selbst gezeichnetes
+SVG -- nicht frappe-charts: Nur so trägt die **Achse links echte Beträge**
+(1 T€, 40 T€, 328 T€ …) statt Skalenwerte, und nur so lässt sich ein Balken
+anklicken. Ein Klick filtert auf dieses Objekt und klappt bis zu den Verträgen
+auf, ein zweiter Klick hebt die Einschränkung wieder auf.
+
+Die Balkenhöhe folgt einer wählbaren Skala (Schalter **Skala**):
+
+| Skala | Anteil der Höhe | Wofür |
+|---|---|---|
+| **Wurzel** (Vorgabe) | `√wert / √größter` | Kompromiss: kleine Objekte bleiben sichtbar, die Größenverhältnisse bleiben lesbar |
+| Logarithmisch | `log(1+wert) / log(1+größter)` | Sehr große Spannen; ebnet Unterschiede stark ein |
+| Linear | `wert / größter` | Echte Proportionen; kleine Objekte verschwinden fast |
+
+Die Achsenmarken werden aus der jeweiligen Umkehrfunktion berechnet und mit dem
+Betrag beschriftet, der auf dieser Höhe steht.
 
 Filter, Klappzustände, Achse und Baumtiefe hängen am Benutzerkonto
 (`frappe.model.utils.user_settings`, Ablagefach `Lease`, Schlüssel
@@ -82,9 +109,16 @@ wieder her.
 ## Menüpunkt und Hilfe
 
 Die Seitenleiste zeigt Arbeitsbereiche, keine Berichte. Der Menüpunkt
-**axessio Hausverwaltung › Schnellübersicht Mietverträge** ist deshalb ein
+**Kaufmännische Verwaltung › Schnellübersicht Mietverträge** ist deshalb ein
 Arbeitsbereich, dessen einziger Block sofort auf den Bericht weiterleitet
 (`menuepunkt/`); ein sichtbarer Link bleibt als Rückfallebene stehen.
+
+Zusätzlich zeigt die Kachel **Mietverträge** im Block *axessio Commercial Hub*
+(Seite `/app/commercial-management`) nicht mehr auf `/app/leases`, sondern auf
+den Bericht. Der Block gehört nicht zu diesem Bericht und liegt deshalb nicht
+hier im Repository -- geändert wurde dort nur das Ziel und der Untertitel dieser
+einen Kachel. Die alte Stamm- und Detailansicht bleibt über die Seitenleiste
+(*Kaufmännische Verwaltung › Mietverträge*) erreichbar.
 
 Die Hilfe im Schiebefenster (`❔ Hilfe`) hängt sonst an Client Scripts, die es nur
 für Formular- und Listenansichten gibt -- der Bericht lädt `ax_drawer_js` deshalb

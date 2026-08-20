@@ -91,66 +91,114 @@ def erzeuge_bericht(filters):
         return frappe.utils.getdate(wert)
 
     # --------------------------------------------------------------- Stammdaten
+    #
+    # Gelesen wird ueber frappe.get_list: Rollenrechte und Benutzerberechtigungen
+    # des Anrufers gelten damit fuer jede Zeile -- wer nur eine Gesellschaft sehen
+    # darf, sieht auch hier nur deren Objekte. Kindtabellen kommen ueber
+    # parent_doctype (Rechtepruefung am Mietvertrag) und zusaetzlich eingegrenzt
+    # auf die Vertraege, die der Anrufer ohnehin lesen darf.
 
-    bedingungen = ["u.is_group = 0"]
-    werte = {}
+    einheit_filter = {"is_group": 0}
     if f_company:
-        bedingungen.append("u.company = %(company)s")
-        werte["company"] = f_company
+        einheit_filter["company"] = f_company
     if f_haus:
-        bedingungen.append("u.parent_property = %(haus)s")
-        werte["haus"] = f_haus
+        einheit_filter["parent_property"] = f_haus
     if f_einheit:
-        bedingungen.append("u.name = %(einheit)s")
-        werte["einheit"] = f_einheit
+        einheit_filter["name"] = f_einheit
     if f_nutzungsart:
-        bedingungen.append("u.custom_type_of_use = %(nutzungsart)s")
-        werte["nutzungsart"] = f_nutzungsart
+        einheit_filter["custom_type_of_use"] = f_nutzungsart
 
-    einheiten = frappe.db.sql(
-        "SELECT u.name, u.name1, u.parent_property, u.company, u.status, "
-        "  u.custom_type_of_use, u.custom_property_area, u.master_bedroom, u.bedroom, "
-        "  u.custom_level_in_the_building, h.name1 AS haus_name "
-        "FROM `tabProperty` u "
-        "LEFT JOIN `tabProperty` h ON h.name = u.parent_property "
-        "WHERE " + " AND ".join(bedingungen) + " "
-        "ORDER BY IFNULL(u.parent_property, 'ZZZZ') ASC, u.name ASC",
-        werte,
-        as_dict=True,
+    einheiten_roh = frappe.get_list(
+        "Property",
+        filters=einheit_filter,
+        fields=[
+            "name",
+            "name1",
+            "parent_property",
+            "company",
+            "status",
+            "custom_type_of_use",
+            "custom_property_area",
+            "master_bedroom",
+            "bedroom",
+        ],
+        limit_page_length=0,
     )
+
+    # Sortierung in Python: Einheiten ohne Objekt gehoeren ans Ende, und der
+    # Sortierausdruck einer Datenbankfunktion kaeme durch die Pruefung nicht durch.
+    paare = []
+    for e in einheiten_roh:
+        paare.append(((e.parent_property or "ZZZZ"), e.name, e))
+    paare = sorted(paare)
+    einheiten = []
+    for pa in paare:
+        einheiten.append(pa[2])
+
+    # Titel der Objekte -- eigene Abfrage, weil ein Join an der Rechtepruefung
+    # vorbeiliefe.
+    haus_namen = {}
+    for g in frappe.get_list("Property", filters={"is_group": 1}, fields=["name", "name1"], limit_page_length=0):
+        haus_namen[g.name] = g.name1
 
     einheit_namen = []
     for e in einheiten:
         einheit_namen.append(e.name)
     einheit_set = set(einheit_namen)
 
-    vertraege = frappe.db.sql(
-        "SELECT name, property, lease_customer, custom_tenants_contract_number, "
-        "  start_date, end_date, lease_status, security_deposit, custom_deposit_type, "
-        "  custom_rent_increase_type, custom_price_index, custom_total_rental_area, "
-        "  custom_special_agreements, custom_move_out_date, company "
-        "FROM `tabLease` WHERE docstatus < 2 "
-        "ORDER BY property ASC, start_date ASC, name ASC",
-        as_dict=True,
+    vertraege = frappe.get_list(
+        "Lease",
+        filters={"docstatus": ["<", 2]},
+        fields=[
+            "name",
+            "property",
+            "lease_customer",
+            "custom_tenants_contract_number",
+            "start_date",
+            "end_date",
+            "lease_status",
+            "security_deposit",
+            "custom_deposit_type",
+            "custom_rent_increase_type",
+            "custom_total_rental_area",
+            "custom_special_agreements",
+            "custom_move_out_date",
+            "company",
+        ],
+        order_by="property asc, start_date asc, name asc",
+        limit_page_length=0,
     )
 
-    positionen = frappe.db.sql(
-        "SELECT parent, lease_item, amount, valid_from FROM `tabLease Item` "
-        "ORDER BY parent ASC, valid_from ASC",
-        as_dict=True,
-    )
+    vertrag_namen = []
+    for v in vertraege:
+        vertrag_namen.append(v.name)
 
-    bk_salden = frappe.db.sql(
-        "SELECT lease, abrechnungsjahr, saldo FROM `tabBKA Mieter Abrechnung` "
-        "WHERE ist_gueltig = 1",
-        as_dict=True,
-    )
-
-    personenstaende = frappe.db.sql(
-        "SELECT parent, personen, gueltig_von, gueltig_bis FROM `tabBKA Personenstand` "
-        "ORDER BY parent ASC, gueltig_von ASC",
-        as_dict=True,
-    )
+    positionen = []
+    personenstaende = []
+    bk_salden = []
+    if vertrag_namen:
+        positionen = frappe.get_list(
+            "Lease Item",
+            filters={"parenttype": "Lease", "parent": ["in", vertrag_namen]},
+            fields=["parent", "lease_item", "amount", "valid_from"],
+            parent_doctype="Lease",
+            order_by="parent asc, valid_from asc",
+            limit_page_length=0,
+        )
+        personenstaende = frappe.get_list(
+            "BKA Personenstand",
+            filters={"parenttype": "Lease", "parent": ["in", vertrag_namen]},
+            fields=["parent", "personen", "gueltig_von", "gueltig_bis"],
+            parent_doctype="Lease",
+            order_by="parent asc, gueltig_von asc",
+            limit_page_length=0,
+        )
+        bk_salden = frappe.get_list(
+            "BKA Mieter Abrechnung",
+            filters={"ist_gueltig": 1, "lease": ["in", vertrag_namen]},
+            fields=["lease", "abrechnungsjahr", "saldo"],
+            limit_page_length=0,
+        )
 
     # Positionen je Vertrag buendeln.
     pos_je_vertrag = {}
@@ -384,7 +432,7 @@ def erzeuge_bericht(filters):
             einheiten_je_haus[schluessel] = []
             haus_reihenfolge.append(schluessel)
             if e.parent_property:
-                haus_titel[schluessel] = e.parent_property + " · " + (e.haus_name or "")
+                haus_titel[schluessel] = e.parent_property + " · " + (haus_namen.get(e.parent_property) or "")
             else:
                 haus_titel[schluessel] = "Ohne Objektzuordnung"
         einheiten_je_haus[schluessel].append(e)
