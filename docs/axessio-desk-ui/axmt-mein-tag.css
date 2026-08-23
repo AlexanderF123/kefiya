@@ -1,0 +1,38 @@
+/* axessio Mein Tag Cockpit (.axmt) - Kartenraster auf /app/axessio-hausverwaltung */
+
+.axmt{
+  font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+  color:#14211a;padding:2px 0;width:100%;max-width:100%;
+  container-type:inline-size;container-name:axmt;
+}
+.axmt *{box-sizing:border-box;min-width:0}
+.axmt-title{font-weight:700;color:#14532d;margin-bottom:12px;font-size:16px;font-size:clamp(14.5px,1.8cqi,16px)}
+.axmt-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(290px,100%),1fr));
+  gap:14px;gap:clamp(10px,1.4cqi,14px);
+}
+.axmt-card{background:#fff;border:1px solid #e3e8e3;border-radius:10px;box-shadow:0 1px 3px rgba(20,33,26,.06);overflow:hidden}
+.axmt-h{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;background:#f9fafb;border-bottom:1px solid #eef1ee;font-weight:700;font-size:13px;color:#14532d}
+.axmt-cnt{background:#14532d;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;min-width:20px;text-align:center;flex:none}
+.axmt-body{padding:4px 0}
+.axmt-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 14px;font-size:13px;color:#374151;text-decoration:none;border-bottom:1px solid #f3f4f6}
+.axmt-item>span:first-child{overflow-wrap:anywhere}
+.axmt-item:last-child{border-bottom:none}
+.axmt-item:hover{background:#f0fdf4;text-decoration:none}
+.axmt-r{color:#6b7280;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
+.axmt-badge{background:#dbeafe;color:#1e3a8a;border-radius:999px;font-size:10px;padding:1px 8px;font-weight:700;white-space:nowrap;flex:none}
+.axmt-danger{background:#fee2e2;color:#991b1b}
+.axmt-empty{padding:14px;color:#9ca3af;font-size:12px;text-align:center}
+
+/* Sehr schmal: Titel und Kennzahl der Zeile untereinander statt abgeschnitten */
+@container axmt (max-width:380px){
+  .axmt-item{flex-wrap:wrap;gap:2px}
+  .axmt-r{width:100%}
+}
+@supports not (container-type:inline-size){
+  @media (max-width:380px){
+    .axmt-item{flex-wrap:wrap;gap:2px}
+    .axmt-r{width:100%}
+  }
+}

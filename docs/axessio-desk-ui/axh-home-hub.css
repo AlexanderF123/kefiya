@@ -1,0 +1,81 @@
+/* axessio Home Hub (.axh) - Startseite /app/axessio-hausverwaltung
+   Gleiche Responsive-Regeln wie axih-hub.css: Container Queries statt fester
+   Breiten, Pixel-Fallback vor jeder cq-Angabe. */
+
+.axh{
+  font-family:"Segoe UI",system-ui,-apple-system,Inter,sans-serif;
+  color:#14211a;
+  width:100%;
+  max-width:100%;
+  margin:0 auto;
+  padding:4px 0;
+  container-type:inline-size;
+  container-name:axh;
+}
+.axh *{box-sizing:border-box;min-width:0}
+
+.axh-hero{
+  background:radial-gradient(120% 140% at 88% -10%,rgba(146,64,14,.16),transparent 55%),linear-gradient(158deg,#14532d,#0f3d21 62%,#0b2f19);
+  border-radius:16px;
+  padding:30px 34px;padding:clamp(18px,3cqi,34px);
+  margin-bottom:22px;margin-bottom:clamp(14px,2.2cqi,22px);
+}
+.axh-brand{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:18px}
+.axh-logo{height:40px;min-width:40px;padding:4px 8px;border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.axh-logo img{height:28px;width:auto;max-width:130px;object-fit:contain;display:block}
+.axh-wm{font-weight:700;font-size:16px;line-height:1.15;color:#eaf3ec !important}
+.axh-wm small{display:block;font-weight:500;font-size:11px;opacity:.75;text-transform:uppercase;letter-spacing:.4px;color:#eaf3ec}
+.axh-title{
+  margin:0;font-weight:800;letter-spacing:-.8px;color:#ffffff !important;
+  font-size:30px;font-size:clamp(20px,3.6cqi,30px);
+  overflow-wrap:anywhere;
+}
+.axh-sub{
+  margin:6px 0 0;color:#cfe4d5 !important;max-width:60ch;
+  font-size:15px;font-size:clamp(13px,1.7cqi,15px);
+}
+
+.axh-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(232px,100%),1fr));
+  gap:14px;gap:clamp(10px,1.4cqi,14px);
+}
+.axh-tile{
+  display:flex;flex-direction:column;gap:6px;
+  padding:18px 18px 16px;padding:clamp(13px,1.8cqi,18px);
+  background:#fff;border:1px solid #e3e8e3;border-radius:12px;
+  box-shadow:0 1px 3px rgba(20,33,26,.06);
+  text-decoration:none;color:inherit;overflow-wrap:anywhere;
+  transition:border-color .15s,background-color .15s,transform .15s,box-shadow .15s;
+}
+.axh-tile:hover{border-color:#14532d;background:#f0fdf4;transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,33,26,.10);text-decoration:none}
+.axh-tile:focus-visible{outline:2px solid #14532d;outline-offset:2px}
+.axh-ic{font-size:26px;font-size:clamp(22px,2.6cqi,26px);line-height:1}
+.axh-tt{font-weight:700;color:#14532d;font-size:16px;font-size:clamp(14.5px,1.8cqi,16px)}
+.axh-td{color:#6b7280;line-height:1.45;flex:1;font-size:12.5px;font-size:clamp(12px,1.4cqi,12.5px)}
+.axh-go{font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.4px}
+.axh-note{grid-column:1/-1;padding:18px;border:1px dashed #d1d5db;border-radius:12px;background:#f9fafb;color:#6b7280;font-size:13px;text-align:center}
+.axh-foot{margin-top:22px;padding-top:14px;border-top:1px solid #e3e8e3;font-size:11.5px;color:#9ca3af;text-align:center}
+
+.axh-admin{margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:center;padding:12px;border:1px dashed #d1d5db;border-radius:10px;background:#f9fafb;text-align:center}
+.axh-admin-btn{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border:1px solid #6b7280;border-radius:6px;background:#fff;color:#374151;font-size:12.5px;font-weight:600;text-decoration:none;transition:background-color .15s,color .15s}
+.axh-admin-btn:hover{background:#374151;color:#fff;text-decoration:none}
+.axh-admin-note{font-size:11px;color:#9ca3af}
+
+@container axh (max-width:640px){
+  .axh-grid{grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr))}
+}
+@container axh (max-width:420px){
+  .axh-grid{grid-template-columns:1fr}
+}
+@supports not (container-type:inline-size){
+  @media (max-width:640px){.axh-grid{grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr))}}
+  @media (max-width:420px){.axh-grid{grid-template-columns:1fr}}
+}
+@media (hover:none){
+  .axh-tile:hover{transform:none;box-shadow:0 1px 3px rgba(20,33,26,.06)}
+}
+@media (prefers-reduced-motion:reduce){
+  .axh-tile{transition:none}
+  .axh-tile:hover{transform:none}
+}

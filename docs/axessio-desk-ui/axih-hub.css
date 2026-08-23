@@ -1,0 +1,99 @@
+/* axessio Uebersichtsseiten - gemeinsames Stylesheet der Hub-Kacheln (.axih)
+   Verwendet von: axessio Property Hub, axessio Finance Hub,
+   axessio Instandhaltung Hub, axessio Lawyer Hub, axessio Management Hub.
+
+   Responsive-Grundsatz: keine festen Breiten, keine festen Schriftgroessen.
+   Die Seite misst sich am eigenen Container (Container Queries), nicht am
+   Fenster - so passt sie sich auch an die ein- und ausgeklappte Seitenleiste an.
+   Jede cq-Angabe hat eine vorangestellte Pixel-Zeile als Fallback. */
+
+.axih{
+  font-family:"Segoe UI",system-ui,-apple-system,Inter,sans-serif;
+  color:#14211a;
+  width:100%;
+  max-width:100%;
+  margin:0 auto;
+  padding:4px 0;
+  container-type:inline-size;
+  container-name:axih;
+}
+.axih *{box-sizing:border-box;min-width:0}
+
+/* Kopfbereich - bricht auf schmalen Flaechen um statt zu quetschen */
+.axih-hero{
+  display:flex;flex-wrap:wrap;align-items:center;
+  gap:16px;gap:clamp(12px,2cqi,16px);
+  background:radial-gradient(120% 140% at 88% -10%,rgba(146,64,14,.16),transparent 55%),linear-gradient(158deg,#14532d,#0f3d21 62%,#0b2f19);
+  border-radius:16px;
+  padding:24px 28px;padding:clamp(16px,2.6cqi,28px);
+  margin-bottom:20px;margin-bottom:clamp(14px,2cqi,20px);
+}
+.axih-hero>div{flex:1 1 260px}
+.axih-ic-hero{
+  font-size:34px;font-size:clamp(24px,4cqi,34px);
+  background:#fff;border-radius:12px;
+  width:56px;height:56px;
+  width:clamp(44px,6.5cqi,56px);height:clamp(44px,6.5cqi,56px);
+  display:grid;place-items:center;flex:none;
+}
+.axih-title{
+  margin:0;font-weight:800;letter-spacing:-.6px;color:#fff;
+  font-size:26px;font-size:clamp(19px,3.2cqi,26px);
+  overflow-wrap:anywhere;
+}
+.axih-sub{
+  margin:4px 0 0;color:#cfe4d5;max-width:60ch;
+  font-size:14px;font-size:clamp(12.5px,1.6cqi,14px);
+}
+
+/* Kachelraster - Spaltenzahl folgt der verfuegbaren Breite, nie ein Ueberlauf */
+.axih-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(232px,100%),1fr));
+  gap:14px;gap:clamp(10px,1.4cqi,14px);
+}
+.axih-tile{
+  display:flex;flex-direction:column;gap:6px;
+  padding:18px;padding:clamp(13px,1.8cqi,18px);
+  background:#fff;border:1px solid #e3e8e3;border-radius:12px;
+  box-shadow:0 1px 3px rgba(20,33,26,.06);
+  text-decoration:none;color:inherit;overflow-wrap:anywhere;
+  transition:border-color .15s,background-color .15s,transform .15s,box-shadow .15s;
+}
+.axih-tile:hover{border-color:#14532d;background:#f0fdf4;transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,33,26,.10);text-decoration:none}
+.axih-tile:focus-visible{outline:2px solid #14532d;outline-offset:2px}
+.axih-ic{font-size:26px;font-size:clamp(22px,2.6cqi,26px);line-height:1}
+.axih-tt{font-weight:700;color:#14532d;font-size:16px;font-size:clamp(14.5px,1.8cqi,16px)}
+.axih-td{color:#6b7280;line-height:1.45;flex:1;font-size:12.5px;font-size:clamp(12px,1.4cqi,12.5px)}
+.axih-go{font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.4px}
+
+/* Schmale Flaeche (Tablet hochkant, halbes Fenster): Kopf gestapelt */
+@container axih (max-width:640px){
+  .axih-hero{align-items:flex-start}
+  .axih-grid{grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr))}
+}
+/* Telefon: eine Kachel je Zeile */
+@container axih (max-width:420px){
+  .axih-hero>div{flex-basis:100%}
+  .axih-grid{grid-template-columns:1fr}
+}
+/* Ohne Container-Query-Unterstuetzung greift ersatzweise die Fensterbreite */
+@supports not (container-type:inline-size){
+  @media (max-width:640px){
+    .axih-hero{align-items:flex-start}
+    .axih-grid{grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr))}
+  }
+  @media (max-width:420px){
+    .axih-hero>div{flex-basis:100%}
+    .axih-grid{grid-template-columns:1fr}
+  }
+}
+
+/* Touch-Bedienung und reduzierte Bewegung: kein Anheben der Kachel */
+@media (hover:none){
+  .axih-tile:hover{transform:none;box-shadow:0 1px 3px rgba(20,33,26,.06)}
+}
+@media (prefers-reduced-motion:reduce){
+  .axih-tile{transition:none}
+  .axih-tile:hover{transform:none}
+}
