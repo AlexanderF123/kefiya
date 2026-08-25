@@ -187,23 +187,34 @@ NOT_AN_ACCOUNT_TYPE = ("Darlehen", "Aval", "Collar", "Call")
 def _accounts_that_cannot_pay():
     """Bank Accounts no transfer may start from, whatever their kind says.
 
-    Three answers, and each of them was already being asked -- by the page,
-    not by the app. The page is being taken apart, so they move here, where
-    the one helper that answers "which accounts may pay" can apply them.
+    Two answers, and both were already being asked -- by the page, not by the
+    app. The page is being taken apart, so they move here, where the one
+    helper that answers "which accounts may pay" can apply them.
 
         the bank's own word   HIUPD said "transfer" is not allowed here
-        a loan hangs on it    a Property Loan names it as its account
         the account type      somebody wrote "Darlehen" or "Aval" on it
 
-    All three miss on their own, which is how five loans and a credit card
-    once stood in the payer dropdown: the type is not maintained, the loan
-    link is not either, and HIUPD is never fetched for an account nobody
-    fetches. Together with the kind they do not miss.
+    The page asked a third: whether a Property Loan names the account. That
+    one is NOT carried over, and deliberately.
+
+    It reads a field this app does not own, and the meaning of that field is
+    not settled -- "the loan's own account" and "the account the loan is
+    serviced from" are both plausible readings, and only the first makes the
+    exclusion correct. Under the second reading, a company that pays its
+    mortgage from its main giro account loses that giro account from every
+    payer list, and the transfer form says "no account available" with no way
+    to find out why. The rule cannot fire on anything BUT a giro or savings
+    account, because account_kind has already removed the loans -- so its only
+    possible effect is the false positive.
+
+    And it earns nothing: on this instance every account it would remove is
+    already removed by the bank's own refusal or by the account type. A rule
+    whose upside is zero and whose downside is a payer list that cannot pay is
+    not a belt, it is a hazard.
 
     get_all rather than get_list on purpose: what is wanted is WHICH accounts
-    to take out. Nothing here is shown, and a reader without the right to see
-    Property Loan -- the bookkeeping, say -- would get a permission error
-    instead of an account list. The result is stricter, never wider.
+    to take out. Nothing here is shown, so a reader without the right to see
+    every Bank Account gets a stricter list, never a wider one.
     """
     refused = set()
 
@@ -213,15 +224,6 @@ def _accounts_that_cannot_pay():
                      "allowed": 0},
             fields=["parent"], limit_page_length=0):
         refused.add(row["parent"])
-
-    if frappe.db.exists("DocType", "Property Loan"):
-        meta = frappe.get_meta("Property Loan")
-        if meta.has_field("custom_bank_account"):
-            for row in frappe.get_all(
-                    "Property Loan",
-                    filters={"custom_bank_account": ["is", "set"]},
-                    fields=["custom_bank_account"], limit_page_length=0):
-                refused.add(row["custom_bank_account"])
 
     for row in frappe.get_all(
             "Bank Account",

@@ -41,6 +41,7 @@ asked, nothing leaves the house.
 import re
 
 import frappe
+from frappe.utils import cint
 
 #: Legal forms and decorations that say nothing about identity. Two invoices
 #: from one company write the name three ways; a check that trips over "GmbH"
@@ -266,7 +267,11 @@ def known_payees(limit=PAYEE_SCAN):
     """
     frappe.has_permission("Kefiya Transfer", ptype="create", throw=True)
 
-    limit = int(limit or PAYEE_SCAN)
+    # Whitelisted, so `limit` arrives from the browser and may be anything.
+    # cint turns "abc" into 0 rather than into a 500, and the cap keeps a
+    # crafted limit=100000000 from turning a suggestion list into two
+    # unbounded ordered scans on demand.
+    limit = min(cint(limit) or PAYEE_SCAN, PAYEE_SCAN)
     payees = {}
 
     def remember(name, iban, source):

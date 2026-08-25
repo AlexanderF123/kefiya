@@ -74,12 +74,27 @@ kefiya.transfer_details = function (row, options) {
 //: of the recipient and go looking for documents that are not ours.
 kefiya.DOCNAME_IN_TEXT = /\b[A-Z]{2,8}(?:-[A-Z0-9]{2,6})*-\d{3,}\b/g;
 
+//: The documents this order names, as {name, doctype}.
+//:
+//: The server answers this on the outbox rows and resolves the doctype on the
+//: way, because it is the only side that can. Read from the row where it is
+//: there; parsed here where it is not, so a caller that hands over a bare
+//: document still gets the names.
 kefiya.transfer_referenced_documents = function (row) {
+	if (row && Array.isArray(row.referenced)) {
+		return row.referenced.map(function (entry) {
+			return typeof entry === "string"
+				? { name: entry, doctype: null } : entry;
+		});
+	}
+
 	const found = [];
 	((row && row.items) || []).forEach(function (item) {
 		const hits = String(item.purpose || "").match(kefiya.DOCNAME_IN_TEXT);
 		(hits || []).forEach(function (hit) {
-			if (hit !== row.name && found.indexOf(hit) < 0) found.push(hit);
+			if (hit !== row.name && !found.some(function (f) {
+				return f.name === hit;
+			})) found.push({ name: hit, doctype: null });
 		});
 	});
 	return found;
@@ -96,8 +111,8 @@ kefiya.transfer_referenced_documents = function (row) {
 kefiya.transfer_attachments = function (row) {
 	const names = [typeof row === "string" ? row : row.name];
 	if (typeof row !== "string") {
-		kefiya.transfer_referenced_documents(row).forEach(function (n) {
-			names.push(n);
+		kefiya.transfer_referenced_documents(row).forEach(function (entry) {
+			names.push(entry.name);
 		});
 	}
 
@@ -207,7 +222,8 @@ kefiya.transfer_details_html = function (row, files) {
 	} else if (files === undefined) {
 		receipts = "<div class='text-muted'>" + __("Loading …") + "</div>";
 	} else if (!files.length) {
-		const named = kefiya.transfer_referenced_documents(row);
+		const named = kefiya.transfer_referenced_documents(row)
+			.map(function (entry) { return entry.name; });
 		receipts = "<div class='text-muted'>"
 			+ (named.length
 				? __("No receipt is attached, neither here nor on {0}.",
@@ -246,21 +262,24 @@ kefiya.transfer_details_html = function (row, files) {
 	if (named.length) {
 		connected = "<div class='kef-h'>" + __("Connected documents")
 			+ "</div><div class='kef-slip'>"
-			+ named.map(function (n) {
-				const fromFiles = (files || []).find(function (fl) {
-					return fl.attached_to_name === n;
-				});
-				const doctype = (fromFiles && fromFiles.attached_to_doctype)
-					|| "";
-				const href = doctype
-					? "/app/" + encodeURIComponent(
-						frappe.router.slug(doctype)) + "/"
-						+ encodeURIComponent(n)
-					: "/app/search?q=" + encodeURIComponent(n);
-				return "<div><a href='" + esc(href) + "'>" + esc(n) + "</a>"
-					+ (doctype
-						? " <span class='text-muted small'>" + esc(doctype)
-							+ "</span>" : "") + "</div>";
+			+ named.map(function (entry) {
+				const n = entry.name;
+				// A name is not an address. Where the doctype is known -- the
+				// server resolves it from the receipt that hangs on the
+				// document -- this links straight to the form. Where it is
+				// not, it says the name and stops: a link to /app/search is a
+				// link to "could not find what you were looking for", and
+				// that page teaches the reader nothing they did not know.
+				if (!entry.doctype) {
+					return "<div>" + esc(n)
+						+ " <span class='text-muted small'>"
+						+ __("not found in this system") + "</span></div>";
+				}
+				return "<div><a href='/app/"
+					+ esc(frappe.router.slug(entry.doctype)) + "/"
+					+ encodeURIComponent(n) + "'>" + esc(n) + "</a>"
+					+ " <span class='text-muted small'>"
+					+ esc(__(entry.doctype)) + "</span></div>";
 			}).join("")
 			+ "<div class='text-muted small' style='margin-top:6px'>"
 			+ __("Named in the reference of this order. Amounts and receipts"

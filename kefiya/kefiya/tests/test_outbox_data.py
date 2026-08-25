@@ -127,6 +127,27 @@ class TestTheReceiptsAreCounted(unittest.TestCase):
             "def _receipt_counts(")[1].split("\ndef ")[0]
         self.assertEqual(body.count("frappe.get_all"), 1)
 
+    def test_only_receipts_the_reader_may_see_are_counted(self):
+        """Otherwise the column says "3" and the dialog -- which reads the
+        same files through File's permissions -- opens empty."""
+        body = _source("utils", "outbox.py").split(
+            "def _receipt_counts(")[1].split("\ndef ")[0]
+        self.assertIn("frappe.has_permission", body)
+
+    def test_the_doctype_is_checked_and_not_only_the_name(self):
+        """"BT-0001" is a name, not an address. A File hanging on some other
+        doctype whose document happens to be called that is not a receipt for
+        this payment."""
+        body = _source("utils", "outbox.py").split(
+            "def _receipt_counts(")[1].split("\ndef ")[0]
+        self.assertIn("attached_to_doctype", body)
+
+    def test_the_purpose_lines_are_read_once_per_page(self):
+        """They were read twice -- once for the count, once per row -- which
+        is a regex pass per item nobody asked for."""
+        body = _source("utils", "outbox.py").split("def outbox_data(")[1]
+        self.assertEqual(body.count("_referenced_documents("), 1)
+
     def test_the_page_shows_the_count(self):
         body = _source("public", "js", "controllers", "payment_outbox.js")
         self.assertIn('key: "receipt"', body)
@@ -141,18 +162,25 @@ class TestSendingApproves(unittest.TestCase):
         body = _source("public", "js", "controllers", "payment_outbox.js")
         self.assertIn("outbox_only_lacks_approval", body)
 
-    def test_a_held_back_draft_is_not(self):
+    def test_the_browser_does_not_decide_it_for_itself(self):
+        """It did, and that made three copies of "is this order due yet":
+        outbox.py, client.py and here. The browser copy chose which drafts the
+        send button offered; the server copy refused the send afterwards."""
         body = _source("public", "js", "controllers", "payment_outbox.js")
         rule = body.split("kefiya.outbox_only_lacks_approval = function")[1] \
             .split("\n};")[0]
-        self.assertIn("r.on_hold", rule)
-        self.assertIn("r.docstatus !== 0", rule)
+        self.assertIn("sendable_if_approved", rule)
+        for own_opinion in ("on_hold", "execution_date", "docstatus"):
+            self.assertNotIn(own_opinion, rule, own_opinion)
 
-    def test_a_draft_dated_for_a_later_day_is_not_either(self):
-        body = _source("public", "js", "controllers", "payment_outbox.js")
-        rule = body.split("kefiya.outbox_only_lacks_approval = function")[1] \
-            .split("\n};")[0]
-        self.assertIn("execution_date", rule)
+    def test_the_server_answers_it_with_the_same_function(self):
+        """Asked with the approval assumed -- so the rule that offers an order
+        and the rule that blocks it cannot drift apart."""
+        body = _source("utils", "outbox.py")
+        self.assertIn("as_if_approved", body)
+        self.assertIn('"sendable_if_approved"', body)
+        held = body.split("def _blocked_reason(")[1].split("\ndef ")[0]
+        self.assertIn("as_if_approved", held)
 
     def test_the_button_says_it_approves(self):
         body = _source("public", "js", "controllers", "payment_outbox.js")
@@ -162,13 +190,45 @@ class TestSendingApproves(unittest.TestCase):
         body = _source("public", "js", "controllers", "payment_outbox.js")
         self.assertIn("are approved as they", body)
 
-    def test_only_what_was_really_approved_is_sent(self):
-        """A name the approval refused would take the whole collective order
-        down with it at the bank."""
+    def test_the_approval_happens_after_every_refusal(self):
+        """The one that matters. Approving is irreversible; send_transfer_outbox
+        has nine ways to refuse a batch, and every one of them used to fire
+        after the browser had already locked the drafts."""
+        body = _source("utils", "client.py").split(
+            "def send_transfer_outbox(")[1].split("\n@frappe.whitelist()")[0]
+        approval = body.index("doc.submit()")
+        for refusal in ("_refuse_unsupported", "_refuse_over_limit",
+                        "len(scheduling) > 1", "is held back",
+                        "_not_due_yet"):
+            self.assertLess(body.index(refusal), approval,
+                            refusal + " must be checked before approving.")
+
+    def test_the_browser_does_not_approve_first(self):
         body = _source("public", "js", "controllers", "payment_outbox.js")
-        chain = body.split("function approveThenSend(")[1] \
+        self.assertNotIn("approveThenSend", body)
+        send = body.split("\n\tfunction send() {")[1] \
             .split("\n\tfunction handToBank(")[0]
-        self.assertIn("approved[row.name]", chain)
+        self.assertNotIn("approve_transfers", send)
+        self.assertIn("approve_drafts", _source(
+            "public", "js", "controllers", "payment_outbox.js"))
+
+    def test_only_what_was_really_approved_is_sent(self):
+        """A name the approval refused carries no end-to-end identifier and
+        would take the whole collective order down with it at the bank."""
+        body = _source("utils", "client.py").split(
+            "def send_transfer_outbox(")[1].split("\n@frappe.whitelist()")[0]
+        self.assertIn("docs = [doc for doc in docs if doc.name not in gone]",
+                      body)
+
+    def test_an_approval_that_went_through_is_reported_either_way(self):
+        """A draft locked on the way to a send that then failed must be named,
+        or it goes missing between two states."""
+        body = _source("utils", "client.py").split(
+            "def send_transfer_outbox(")[1].split("\n@frappe.whitelist()")[0]
+        self.assertIn('result["approved"] = approved', body)
+        page = _source("public", "js", "controllers", "payment_outbox.js")
+        hand = page.split("function handToBank(")[1].split("\n\t}")[0]
+        self.assertIn("m.refused", hand)
 
 
 class TestTheReceiptsCanBeSeen(unittest.TestCase):

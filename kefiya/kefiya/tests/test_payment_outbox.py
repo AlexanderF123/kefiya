@@ -132,10 +132,12 @@ class TestSendingRefusesRatherThanGuesses(unittest.TestCase):
 
     def test_the_bank_is_told_the_send_was_confirmed(self):
         """Split out of the send itself when the send button took on the
-        approval: what goes to the bank now goes from handToBank(), after the
-        approval had its say about which orders are left."""
-        body = _function(_source(), "function handToBank(names, login) {")
+        approval: what goes to the bank now goes from handToBank(), and the
+        approval happens inside that one call, behind the server's refusals."""
+        body = _function(
+            _source(), "function handToBank(names, login, approving) {")
         self.assertIn("confirmed: 1", body)
+        self.assertIn("approve_drafts", body)
 
 
 class TestApprovingIsNotSending(unittest.TestCase):

@@ -242,3 +242,6 @@ With the bank until its date,Liegt bei der Bank bis zum Termin
 {0} of them are still drafts and are approved as they are sent. Approving locks their amounts and recipients.,Davon sind {0} noch Entwürfe; sie werden mit dem Senden freigegeben. Die Freigabe schreibt Beträge und Empfänger fest.
 {0} orders are being sent; the rest were not approved.,{0} Aufträge gehen raus; der Rest wurde nicht freigegeben.
 "{0} selected orders are not being sent — they are held back, already sent, or not due yet.","{0} ausgewählte Aufträge gehen nicht raus — sie sind zurückgestellt, schon abgesendet oder noch nicht fällig."
+Approving and sending …,Freigeben und senden …
+We have paid this payee at these IBANs:,An diesen IBANs haben wir diesen Empfänger schon bezahlt:
+not found in this system,in diesem System nicht gefunden

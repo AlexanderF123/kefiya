@@ -95,17 +95,16 @@ kefiya.outbox_state = function (r) {
 
 //: A draft that would go out today if somebody approved it.
 //:
-//: The same rule the server applies to an approved order, minus the approval:
-//: nothing held back, and nothing dated for a day that has not come. It is
-//: written here rather than asked of the server because the server does not
-//: answer it -- `sendable` means "approved and ready", and this is the row
-//: the send button is about to approve.
-kefiya.outbox_only_lacks_approval = function (r, today) {
-	if (!r || r.docstatus !== 0 || r.on_hold) return false;
-	if (r.manage_due_date && r.execution_date && today) {
-		return String(r.execution_date) <= String(today);
-	}
-	return true;
+//: The server's answer, not a second opinion. It was written here first --
+//: docstatus, on_hold and a date comparison -- which made three copies of
+//: "is this order due yet": one in outbox.py, one in client.py, one here. The
+//: browser copy decided which drafts the send button offered to approve and
+//: the server copy decided whether to refuse the send, so the day they
+//: disagreed the user would confirm a batch, watch it be approved, and then
+//: be told it could not go. sendable_if_approved is the same function that
+//: writes `blocked`, asked with the approval assumed.
+kefiya.outbox_only_lacks_approval = function (r) {
+	return !!(r && r.sendable_if_approved);
 };
 
 kefiya.outbox_recipient = function (r) {
@@ -331,12 +330,10 @@ kefiya.payment_outbox = function (root) {
 			// approval -- it is a click. "Approve for sending" stays for the
 			// case where somebody really only wants to approve.
 			if (what === "send") {
-				return !!r.sendable || kefiya.outbox_only_lacks_approval(r,
-					view.today);
+				return !!r.sendable || kefiya.outbox_only_lacks_approval(r);
 			}
 			if (what === "approve_to_send") {
-				return !r.sendable && kefiya.outbox_only_lacks_approval(r,
-					view.today);
+				return !r.sendable && kefiya.outbox_only_lacks_approval(r);
 			}
 			return false;
 		});
@@ -777,72 +774,37 @@ kefiya.payment_outbox = function (root) {
 			+ "</div>";
 
 		frappe.confirm(message, function () {
-			view.busy = true;
-			// Approve first, then send what really got approved. Sending a
-			// name the approval refused would take the whole collective order
-			// down with it.
-			approveThenSend(rows, toApprove);
-		});
-	}
-
-	function approveThenSend(rows, toApprove) {
-		if (!toApprove.length) {
+			// One call, and the approval happens inside it -- AFTER the server
+			// has accepted the batch. Approving here first, as this page did,
+			// meant a batch refused for mixing execution dates left its drafts
+			// locked for nothing, undoable only by cancelling and re-entering
+			// them. The endpoint knows every refusal; the browser knows none.
 			handToBank(rows.map(function (r) { return r.name; }),
-				rows[0].kefiya_login);
-			return;
-		}
-
-		frappe.call({
-			method: "kefiya.utils.client.approve_transfers",
-			args: { transfer_names: JSON.stringify(
-				toApprove.map(function (r) { return r.name; })) },
-			freeze: true,
-			freeze_message: __("Approving …"),
-		}).then(function (r) {
-			const m = (r && r.message) || {};
-			const refused = m.refused || [];
-			const approved = {};
-			(m.approved || []).forEach(function (n) { approved[n] = 1; });
-
-			const going = rows.filter(function (row) {
-				return row.docstatus === 1 || approved[row.name];
-			});
-			if (!going.length) {
-				view.busy = false;
-				reportBatch([], refused, __("Nothing was approved."),
-					__("Not approved"));
-				load();
-				return;
-			}
-			if (refused.length) {
-				// Named before the TAN, not after: what is about to be signed
-				// for is a smaller batch than what was confirmed.
-				reportBatch([], refused,
-					__("{0} orders are being sent; the rest were not"
-						+ " approved.", [going.length]),
-					__("Not approved"));
-			}
-			handToBank(going.map(function (row) { return row.name; }),
-				going[0].kefiya_login);
-		}).catch(function (r) {
-			view.busy = false;
-			frappe.msgprint({ title: __("Not approved"), indicator: "red",
-				message: esc(errText(r)) });
-			load();
+				rows[0].kefiya_login, toApprove.length);
 		});
 	}
 
-	function handToBank(names, login) {
+	function handToBank(names, login, approving) {
 		view.busy = true;
 		frappe.call({
 			method: "kefiya.utils.client.send_transfer_outbox",
 			args: { transfer_names: JSON.stringify(names),
-				user_scope: login, confirmed: 1 },
+				user_scope: login, confirmed: 1,
+				approve_drafts: approving ? 1 : 0 },
 			freeze: true,
-			freeze_message: __("Sending to the bank …"),
+			freeze_message: approving
+				? __("Approving and sending …") : __("Sending to the bank …"),
 		}).then(function (r) {
 			view.busy = false;
 			const m = (r && r.message) || {};
+			// An order the approval turned away is named, whatever else
+			// happened. A batch that reports only its successes is how half a
+			// selection goes missing without anybody noticing.
+			if ((m.refused || []).length) {
+				reportBatch([], m.refused,
+					__("Approved: {0}", [(m.approved || []).length]),
+					__("Not approved"));
+			}
 			if (m.status === "error") {
 				frappe.msgprint({ title: __("Not sent"), indicator: "red",
 					message: esc(m.message || "") });

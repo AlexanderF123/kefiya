@@ -120,6 +120,7 @@ kefiya.transfer_form = function (options) {
 			label: __("IBAN"), default: item.recipient_iban || "",
 			description: __("Checked against its checksum before it is stored."),
 		},
+		{ fieldtype: "HTML", fieldname: "known_ibans" },
 		{ fieldtype: "HTML", fieldname: "payee_verdict" },
 		{ fieldtype: "Section Break" },
 		{
@@ -271,14 +272,21 @@ kefiya.transfer_form = function (options) {
 	// Asked as soon as both halves of the recipient are there. Not on submit:
 	// the answer is meant to change what gets typed, and after the save it is
 	// only a reproach.
+	let asked = 0;
 	const checkPayee = function () {
 		const iban = kefiya.iban_plain(dialog.get_value("recipient_iban"));
 		const who = dialog.get_value("recipient_name");
 		if (!iban || iban.length < 15) {
+			dialog.payee_answer = null;
 			dialog.fields_dict.payee_verdict.$wrapper.html("");
 			return;
 		}
+		// Which question this answer belongs to. Two checks can be in flight
+		// -- the name changes, then the IBAN is filled from it -- and the
+		// slower one must not paint its verdict over the newer one.
+		const mine = ++asked;
 		kefiya.payee_check(who, iban).then(function (answer) {
+			if (mine !== asked) return;
 			dialog.payee_answer = answer;
 			dialog.fields_dict.payee_verdict.$wrapper.html(
 				kefiya.payee_check_html(answer));
@@ -290,44 +298,74 @@ kefiya.transfer_form = function (options) {
 	// transfer with no invoice behind it is what this document is for. Picking
 	// a known payee offers the IBANs we have paid them at -- which is the half
 	// that saves the typing, and the half that was never there.
-	dialog.fields_dict.recipient_name.df.onchange = checkPayee;
+	dialog.fields_dict.recipient_name.df.onchange = function () {
+		// When the pick fills the IBAN, set_value has already fired that
+		// field's onchange -- which IS checkPayee. Asking again here would be
+		// a second round trip for one click.
+		if (!offerTheirIbans(dialog.get_value("recipient_name"))) checkPayee();
+	};
+
+	// Their IBANs, offered but never forced: an IBAN already typed stands,
+	// because it is the one taken off the invoice in front of the person.
+	//
+	// Where there are several, they are offered as buttons rather than by
+	// opening a dropdown. A dropdown on an empty field shows nothing -- the
+	// browser has no prefix to filter by -- so "we know two IBANs for them"
+	// would have been said by opening an empty box. 32 payees here have more
+	// than one.
+	let payeeList = [];
+	let fillIbans = null;
+	//: :return: true when it filled the IBAN itself -- the caller then leaves
+	//: the payee check to that field's own change handler.
+	const offerTheirIbans = function (name) {
+		const payee = kefiya.payee_named(payeeList, name);
+		const ibans = (payee && payee.ibans) || [];
+		const box = dialog.fields_dict.known_ibans.$wrapper;
+		box.empty();
+		if (!ibans.length) return false;
+
+		if (fillIbans) {
+			fillIbans(ibans.map(function (i) {
+				return { label: kefiya.iban_pretty(i.iban), value: i.iban };
+			}));
+		}
+
+		if (kefiya.iban_plain(dialog.get_value("recipient_iban"))) return false;
+		if (ibans.length === 1) {
+			dialog.set_value("recipient_iban", ibans[0].iban);
+			return true;
+		}
+
+		box.html("<div class='text-muted small' style='margin-bottom:4px'>"
+			+ __("We have paid this payee at these IBANs:") + "</div>"
+			+ ibans.map(function (i) {
+				return "<button type='button' class='btn btn-xs btn-default'"
+					+ " style='margin:0 4px 4px 0;font-family:ui-monospace,"
+					+ "Menlo,monospace' data-iban='"
+					+ frappe.utils.escape_html(i.iban) + "'>"
+					+ frappe.utils.escape_html(kefiya.iban_pretty(i.iban))
+					+ "</button>";
+			}).join(""));
+		box.find("button").on("click", function () {
+			dialog.set_value("recipient_iban", $(this).attr("data-iban"));
+			box.empty();
+		});
+		return false;
+	};
+
 	kefiya.known_payees().then(function (payees) {
 		if (!payees.length || !dialog.$wrapper) return;
-
-		// Their IBANs, offered but never forced: an IBAN already typed stands,
-		// because it is the one taken off the invoice in front of the person.
-		const offerTheirIbans = function (name) {
-			const payee = kefiya.payee_named(payees, name);
-			const ibans = (payee && payee.ibans) || [];
-			if (!ibans.length) return;
-
-			const field = dialog.fields_dict.recipient_iban;
-			const suggestions = ibans.map(function (i) {
-				return { label: kefiya.iban_pretty(i.iban), value: i.iban };
-			});
-			const list = kefiya.suggest(field.$input, suggestions, checkPayee);
-
-			if (kefiya.iban_plain(dialog.get_value("recipient_iban"))) return;
-			if (ibans.length === 1) {
-				dialog.set_value("recipient_iban", ibans[0].iban);
-				checkPayee();
-			} else if (list) {
-				// Several, and no way to know which: the choice is opened
-				// where it belongs rather than guessing at the newest.
-				field.$input.focus();
-				try { list.open(); } catch (ignored) {}
-			}
-		};
+		payeeList = payees;
 
 		kefiya.suggest(dialog.fields_dict.recipient_name.$input,
-			payees.map(function (p) { return p.name; }), offerTheirIbans);
+			payees.map(function (p) { return p.name; }));
+		fillIbans = kefiya.suggest(dialog.fields_dict.recipient_iban.$input,
+			[]);
 
 		// A name already in the field -- correcting an order -- gets its
 		// IBAN list too, without touching what is stored.
 		const current = dialog.get_value("recipient_name");
-		if (current && !kefiya.iban_plain(dialog.get_value("recipient_iban"))) {
-			offerTheirIbans(current);
-		}
+		if (current) offerTheirIbans(current);
 	});
 
 	dialog.show();

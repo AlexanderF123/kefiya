@@ -39,15 +39,21 @@ from frappe import _
 from kefiya.utils.account_kind import transfer_sources
 
 
-def _blocked_reason(row, today):
+def _blocked_reason(row, today, as_if_approved=False):
     """Why this order is not going out today, in words.
 
     In words rather than as a flag, because "not sendable" is the answer to a
     question nobody asked: the person looking at the list wants to know what
     to DO about it, and "held back" and "due on the 3rd" call for opposite
     things.
+
+    :param as_if_approved: answer for a draft as though it had been approved.
+        The send button approves what it sends, so it has to know which drafts
+        are held up ONLY by the missing approval -- and that question has to be
+        answered by the same code as the other one, or the page offers a batch
+        the send then refuses.
     """
-    if row["docstatus"] == 0:
+    if row["docstatus"] == 0 and not as_if_approved:
         return _("Not approved yet")
     if row.get("on_hold"):
         return _("Held back")
@@ -82,7 +88,7 @@ def _referenced_documents(items, own_name):
     return found
 
 
-def _receipt_counts(items_by, names):
+def _receipt_counts(names, referenced):
     """How many receipts each order has, counting the ones it does not hold.
 
     Nobody attaches the travel expense PDF to the transfer. It is created on
@@ -91,24 +97,58 @@ def _receipt_counts(items_by, names):
     what it names are counted too -- a receipt that cannot be found from the
     payment is a receipt that gets asked for twice.
 
-    One query for the whole page: asking per row would be a request per order
-    to show a single number.
+    Two things this has to get right, and both are about the count agreeing
+    with the dialog it points at.
+
+    The names come out of free text, so a File is only counted when the caller
+    may actually read the document it hangs on. Otherwise the column says
+    "3 receipts" and the dialog -- which reads the same files through
+    frappe.client.get_list, and therefore through File's permissions -- opens
+    empty, and the reader is left to wonder which of the two is lying.
+
+    And the doctype is checked, not just the name. "BT-0001" is a name, not an
+    address: a File hanging on some other doctype whose document happens to be
+    called that is not a receipt for this payment.
+
+    One query for the whole page, plus one permission question per distinct
+    document. Asking per row would be a request per order to show one number.
+
+    :param referenced: {transfer name: [document names in its purpose]}
+    :return: ({transfer name: count}, {document name: its doctype})
     """
     wanted = {}
     for name in names:
-        for other in [name] + _referenced_documents(items_by.get(name), name):
+        for other in [name] + (referenced.get(name) or []):
             wanted.setdefault(other, []).append(name)
 
     if not wanted:
-        return {}
+        return {}, {}
 
     counts = {name: 0 for name in names}
+    doctypes = {}
+    allowed = {}
     for row in frappe.get_all(
             "File", filters={"attached_to_name": ["in", list(wanted)]},
-            fields=["attached_to_name"], limit_page_length=0):
-        for owner in wanted.get(row["attached_to_name"], []):
+            fields=["attached_to_name", "attached_to_doctype"],
+            limit_page_length=0):
+        doctype = row.get("attached_to_doctype")
+        target = row["attached_to_name"]
+        if not doctype:
+            continue
+
+        key = (doctype, target)
+        if key not in allowed:
+            allowed[key] = bool(frappe.has_permission(
+                doctype, ptype="read", doc=target))
+        if not allowed[key]:
+            continue
+
+        doctypes.setdefault(target, doctype)
+        for owner in wanted.get(target, []):
             counts[owner] = counts.get(owner, 0) + 1
-    return counts
+
+    return counts, doctypes
+
 
 
 @frappe.whitelist()
@@ -166,7 +206,12 @@ def outbox_data(q=None, show_sent=0):
         "Kefiya Login", fields=["name", "bank_account", "company"],
         limit_page_length=0)}
 
-    receipts = _receipt_counts(items_by, names)
+    # The purpose lines are read once, here, and the result is handed on. The
+    # count needs them and so does every row; scanning them twice per page
+    # load is a regex pass per item nobody asked for.
+    referenced = {name: _referenced_documents(items_by.get(name), name)
+                  for name in names}
+    receipts, doctypes = _receipt_counts(names, referenced)
     today = frappe.utils.today()
 
     out = []
@@ -178,6 +223,11 @@ def outbox_data(q=None, show_sent=0):
             continue
 
         blocked = _blocked_reason(row, today)
+        # A draft the send button may approve on its way out: nothing else
+        # stands in its way. Answered here rather than in the browser, so the
+        # rule that offers the order and the rule that refuses it are one.
+        ready = (row["docstatus"] == 0
+                 and not _blocked_reason(row, today, as_if_approved=True))
         out.append({
             "name": row["name"],
             "kefiya_login": row["kefiya_login"],
@@ -199,9 +249,14 @@ def outbox_data(q=None, show_sent=0):
             "modified": str(row.get("modified")),
             "items": items,
             "receipts": receipts.get(row["name"], 0),
-            "referenced": _referenced_documents(items, row["name"]),
+            # Name and doctype together. The name alone is not an address, and
+            # a link built from a name the reader cannot resolve is a link to
+            # the "could not find what you were looking for" page.
+            "referenced": [{"name": n, "doctype": doctypes.get(n)}
+                           for n in referenced.get(row["name"], [])],
             "blocked": blocked,
             "sendable": 1 if (row["docstatus"] == 1 and not blocked) else 0,
+            "sendable_if_approved": 1 if ready else 0,
         })
 
     return {

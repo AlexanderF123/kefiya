@@ -93,17 +93,25 @@ kefiya.payee_check_html = function (answer) {
 
 // --- suggestions while typing ------------------------------------------------
 //
-// The form has always advertised that known payees are suggested. They were
-// not: the field called input.autocomplete({source: names}), which is the
-// jQuery UI widget, and Frappe does not ship jQuery UI. The call landed on
-// undefined, threw nothing, and did nothing -- so the description promised a
-// list that no version of this page has ever shown.
+// The form has always advertised this: "Known payees are suggested while you
+// type". They were not. The field called
 //
-// Awesomplete is what Frappe itself uses for its link fields, so it is loaded
-// on every desk page and behaves the way the rest of the desk behaves. It is
-// attached to a plain Data field on purpose: a payee that is not in the list
-// must stay typeable, because a transfer without an invoice behind it is the
-// entire reason this document exists.
+//     input.autocomplete({ source: names, minLength: 2 })
+//
+// which is the jQuery UI widget. Frappe does not ship jQuery UI, so the call
+// landed on undefined, threw nothing, and did nothing.
+//
+// The first replacement reached for window.Awesomplete, on the grounds that
+// Frappe uses awesomplete itself. It does -- through `import Awesomplete from
+// "awesomplete"` inside its own controls, which esbuild scopes to those
+// modules. Nothing puts it on window. That fix would have been the same silent
+// nothing as the one it replaced, with a different reason, and the form would
+// have gone on promising a list nobody sees.
+//
+// So: <datalist>. It is part of the HTML the browser already implements, it
+// needs no library, it cannot be scoped away by a bundler, and free text is
+// its default rather than a workaround -- which matters here, because the
+// transfer with no invoice behind it is what this document exists for.
 
 //: Everyone we have paid, asked once per page. The list is a few hundred
 //: names; fetching it per dialog would be a request for every order entered.
@@ -115,7 +123,11 @@ kefiya.known_payees = function () {
 		}).then(function (r) {
 			return (r && r.message) || [];
 		}).catch(function () {
-			// No suggestions is a worse form, not a broken one.
+			// No suggestions is a worse form, not a broken one -- but the
+			// cache is dropped, because a connection blip while the first
+			// dialog of the day opens must not silence the list until the
+			// next full page load.
+			kefiya._known_payees = null;
 			return [];
 		});
 	}
@@ -124,42 +136,85 @@ kefiya.known_payees = function () {
 
 //: Attach a suggestion list to a plain input.
 //:
-//: :param items: strings, or {label, value} where the label is what is read
-//:     and the value is what lands in the field
-//: :param onPick: called with the chosen value once something is picked
-kefiya.suggest = function (input, items, onPick) {
+//: :param items: strings, or {label, value} where the value lands in the
+//:     field and the label is what the browser shows beside it
+//: :return: a function that replaces the list, or null
+kefiya.suggest = function (input, items) {
 	const el = (input && input.get) ? input.get(0) : input;
-	if (!el || typeof window.Awesomplete !== "function") return null;
+	if (!el || !el.parentNode) return null;
 
-	if (el._kefiya_suggest) {
-		el._kefiya_suggest.list = items;
-		return el._kefiya_suggest;
+	let list = el._kefiya_suggest;
+	if (!list) {
+		list = document.createElement("datalist");
+		list.id = "kef-suggest-" + (kefiya._suggest_id = (
+			kefiya._suggest_id || 0) + 1);
+		el.parentNode.appendChild(list);
+		el.setAttribute("list", list.id);
+		el._kefiya_suggest = list;
 	}
 
-	const list = new window.Awesomplete(el, {
-		minChars: 1,
-		maxItems: 12,
-		autoFirst: false,
-		list: items,
-	});
-	el._kefiya_suggest = list;
-	$(el).on("awesomplete-selectcomplete", function () {
-		// The control's own change event does not fire for a value the widget
-		// wrote, so the field is told about it here -- otherwise the payee
-		// check would go on judging what was typed before the pick.
-		$(el).trigger("change");
-		if (onPick) onPick(el.value);
-	});
-	return list;
+	const fill = function (values) {
+		list.innerHTML = "";
+		(values || []).forEach(function (item) {
+			const option = document.createElement("option");
+			if (typeof item === "string") {
+				option.value = item;
+			} else {
+				option.value = item.value;
+				if (item.label) option.label = item.label;
+			}
+			list.appendChild(option);
+		});
+	};
+	fill(items);
+	return fill;
 };
 
-//: The payee whose name this is, out of what known_payees() returned. Matched
-//: by the same rule the check uses, so picking a suggestion and being told
-//: "new payee" a second later cannot happen.
+//: The payee whose name this is, out of what known_payees() returned.
+//:
+//: Matched by normalise_payee_name, which is the rule the check itself uses.
+//: A plain lowercased comparison was not: the history holds "Sofienstraße
+//: GmbH & Co. KG", this invoice says "Sofienstrasse GmbH", and the two are
+//: the same payee -- check_payee says so, and a suggestion list that
+//: disagreed would offer no IBAN for a payee it had just called known.
 kefiya.payee_named = function (payees, name) {
-	const wanted = String(name || "").trim().toLowerCase();
-	if (!wanted) return null;
+	const wanted = kefiya.normalise_payee_name(name);
+	if (!wanted.length) return null;
 	return (payees || []).find(function (p) {
-		return String(p.name || "").trim().toLowerCase() === wanted;
+		return kefiya.same_payee_name(
+			wanted, kefiya.normalise_payee_name(p.name));
 	}) || null;
+};
+
+//: Legal forms and decorations that say nothing about identity. The same set
+//: as kefiya.utils.payee_check.NOISE, and a test compares the two -- two
+//: lists mean the browser and the server disagree about who a payee is.
+kefiya.PAYEE_NOISE = [
+	"GMBH", "AG", "KG", "CO", "OHG", "GBR", "UG", "EK", "EV", "SE", "MBH",
+	"COKG", "GMBHCOKG", "HAFTUNGSBESCHRAENKT", "UND", "AND", "THE",
+	"HERR", "FRAU", "DR", "PROF", "DIPLING",
+];
+
+//: A name reduced to what identifies it. Umlauts stay as they are, because
+//: "Müller" and "Mueller" are a real question and folding them together here
+//: would answer it silently in the wrong direction.
+kefiya.normalise_payee_name = function (value) {
+	const text = String(value || "").toUpperCase()
+		.replace(/[^A-Z0-9ÄÖÜß]+/g, " ");
+	return text.split(" ").filter(function (word) {
+		return word && kefiya.PAYEE_NOISE.indexOf(word) < 0;
+	});
+};
+
+//: Exact or a subset, the same two cases names_match() calls "exact" and
+//: "close". An overlap of one word out of five is not a match in either.
+kefiya.same_payee_name = function (left, right) {
+	if (!left.length || !right.length) return false;
+	const a = left.slice().sort().join(" ");
+	const b = right.slice().sort().join(" ");
+	if (a === b) return true;
+	const subset = function (small, big) {
+		return small.every(function (w) { return big.indexOf(w) >= 0; });
+	};
+	return subset(left, right) || subset(right, left);
 };
