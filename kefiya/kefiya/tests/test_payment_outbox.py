@@ -62,10 +62,15 @@ class TestABatchOffersOnlyWhatItWillDo(unittest.TestCase):
 
     def test_sending_follows_the_flag_the_server_sets(self):
         """`sendable` is the server's answer, which knows about hold, due date
-        and payee verification. Re-deriving it here would drift from it."""
+        and payee verification. Re-deriving it here would drift from it.
+
+        A draft is the one addition, and it is not a second opinion about a
+        sendable order: it is the row the send button is about to approve.
+        """
         body = _function(_source(), "function applicable(what) {")
-        line = [ln for ln in body.splitlines() if '=== "send"' in ln][0]
-        self.assertIn("r.sendable", line)
+        rule = body.split('if (what === "send")')[1].split("}")[0]
+        self.assertIn("r.sendable", rule)
+        self.assertIn("outbox_only_lacks_approval", rule)
 
     def test_the_buttons_count_what_is_applicable_and_not_the_selection(self):
         source = _source()
@@ -123,8 +128,14 @@ class TestSendingRefusesRatherThanGuesses(unittest.TestCase):
     def test_the_send_is_confirmed_and_says_nothing_is_debited_yet(self):
         body = _function(_source(), "function send() {")
         self.assertIn("frappe.confirm(message, function () {", body)
-        self.assertIn("confirmed: 1", body)
         self.assertIn("Nothing is debited until then.", body)
+
+    def test_the_bank_is_told_the_send_was_confirmed(self):
+        """Split out of the send itself when the send button took on the
+        approval: what goes to the bank now goes from handToBank(), after the
+        approval had its say about which orders are left."""
+        body = _function(_source(), "function handToBank(names, login) {")
+        self.assertIn("confirmed: 1", body)
 
 
 class TestApprovingIsNotSending(unittest.TestCase):
@@ -250,7 +261,7 @@ class TestEverySortableColumnSortsByWhatItShows(unittest.TestCase):
                          "A column without a sort key would render a header "
                          "that does nothing when clicked.")
         self.assertEqual(keys, ["state", "account", "recipient", "due",
-                                "amount", "note"])
+                                "amount", "receipt", "note"])
 
     def test_an_undated_order_sorts_before_every_dated_one(self):
         """No date means "as soon as possible", which is sooner than any

@@ -28,7 +28,13 @@ Nothing clears it, and inside a fetch session that client is shared by every
 login of the bank access, so each of them in turn joins the wreck.
 """
 
-import frappe
+# No import of frappe at module level, deliberately. The docstring above says
+# these are two predicates about an object's state and nothing else, and that
+# claim is only worth anything if the module can be imported without a site --
+# otherwise the tests that check the rule cannot run, which is exactly what
+# happened: eight of them errored out on the import for as long as it stood
+# here. The one place frappe is wanted is a log line, and a log line asks for
+# it where it writes.
 
 
 def dialog_is_usable(conn):
@@ -72,6 +78,8 @@ def discard_unusable_dialog(conn):
 
     conn._standing_dialog = None
     try:
+        import frappe
+
         frappe.logger("kefiya").info(
             "Kefiya: dropped an ended FinTS dialog that was still registered")
     except Exception:

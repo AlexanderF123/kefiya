@@ -166,11 +166,70 @@ def transfer_sources():
         "Bank Account", filters={"disabled": 1}, fields=["name"],
         limit_page_length=0)}
 
+    refused = _accounts_that_cannot_pay()
+
     return [dict({"login": r["name"], "bank_account": r["bank_account"],
                   "company": r.get("company"), "kind": r.get("account_kind"),
                   "iban": r.get("account_iban")},
                  **account_standing(r["bank_account"]))
-            for r in rows if r["bank_account"] not in disabled]
+            for r in rows
+            if r["bank_account"] not in disabled
+            and r["bank_account"] not in refused]
+
+
+#: Bank Account.account_type values that name a facility rather than an
+#: account. They are German because that is what somebody typed into the field
+#: on this instance; the kind above is the reliable answer and this is the
+#: belt to its braces.
+NOT_AN_ACCOUNT_TYPE = ("Darlehen", "Aval", "Collar", "Call")
+
+
+def _accounts_that_cannot_pay():
+    """Bank Accounts no transfer may start from, whatever their kind says.
+
+    Three answers, and each of them was already being asked -- by the page,
+    not by the app. The page is being taken apart, so they move here, where
+    the one helper that answers "which accounts may pay" can apply them.
+
+        the bank's own word   HIUPD said "transfer" is not allowed here
+        a loan hangs on it    a Property Loan names it as its account
+        the account type      somebody wrote "Darlehen" or "Aval" on it
+
+    All three miss on their own, which is how five loans and a credit card
+    once stood in the payer dropdown: the type is not maintained, the loan
+    link is not either, and HIUPD is never fetched for an account nobody
+    fetches. Together with the kind they do not miss.
+
+    get_all rather than get_list on purpose: what is wanted is WHICH accounts
+    to take out. Nothing here is shown, and a reader without the right to see
+    Property Loan -- the bookkeeping, say -- would get a permission error
+    instead of an account list. The result is stricter, never wider.
+    """
+    refused = set()
+
+    for row in frappe.get_all(
+            "Kefiya Account Capability", parent_doctype="Bank Account",
+            filters={"parenttype": "Bank Account", "capability": "transfer",
+                     "allowed": 0},
+            fields=["parent"], limit_page_length=0):
+        refused.add(row["parent"])
+
+    if frappe.db.exists("DocType", "Property Loan"):
+        meta = frappe.get_meta("Property Loan")
+        if meta.has_field("custom_bank_account"):
+            for row in frappe.get_all(
+                    "Property Loan",
+                    filters={"custom_bank_account": ["is", "set"]},
+                    fields=["custom_bank_account"], limit_page_length=0):
+                refused.add(row["custom_bank_account"])
+
+    for row in frappe.get_all(
+            "Bank Account",
+            filters={"account_type": ["in", list(NOT_AN_ACCOUNT_TYPE)]},
+            fields=["name"], limit_page_length=0):
+        refused.add(row["name"])
+
+    return refused
 
 
 def account_standing(bank_account):

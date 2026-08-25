@@ -172,7 +172,6 @@ Not deleted,Nicht gelöscht
 One account at a time,Nur ein Konto auf einmal
 Orders from several accounts are selected. A collective order always leaves from exactly one account — please send them one account at a time.,Es sind Aufträge von mehreren Konten markiert. Ein Sammelauftrag geht immer von genau einem Konto ab — bitte je Konto einzeln senden.
 {0} orders over {1} go from {2} to the bank.,{0} Aufträge über {1} gehen von {2} an die Bank.
-"{0} selected orders are not being sent — they are drafts, held back or already sent.","{0} markierte Aufträge gehen nicht mit — sie sind Entwürfe, zurückgestellt oder schon abgesendet."
 The bank will usually ask for a release (TAN or a confirmation in its app). Nothing is debited until then.,Die Bank verlangt in aller Regel eine Freigabe (TAN oder Bestätigung in ihrer App). Bis dahin ist nichts abgebucht.
 Sending to the bank …,Sende an die Bank …
 Not sent,Nicht abgesendet
@@ -228,3 +227,18 @@ Paid before under this name.,Vorher unter diesem Namen bezahlt.
 another name,einem anderen Namen
 "We have paid this payee before, always to a different IBAN: {0}. Check the invoice against an earlier one before releasing this.","Diesen Empfänger haben wir schon bezahlt, bisher immer an eine andere IBAN: {0}. Bitte die Rechnung mit einer früheren vergleichen, bevor Sie freigeben."
 "First payment to this IBAN, and this payee is not in our history. Worth a second pair of eyes.","Erste Zahlung an diese IBAN, und dieser Empfänger steht nicht in unserer Historie. Ein zweiter Blick lohnt sich."
+Already sent,Schon abgesendet
+Approve and send,Freigeben und senden
+Connected documents,Verbundene Dokumente
+"Named in the reference of this order. Amounts and receipts are changed there, not here.","Im Verwendungszweck dieses Auftrags genannt. Beträge und Belege werden dort geändert, nicht hier."
+No receipt,Kein Beleg
+Not approved yet,Noch nicht freigegeben
+Not due until {0},Fällig erst am {0}
+Nothing was approved.,Es wurde nichts freigegeben.
+Open the order to see the receipts,"Auftrag öffnen, um die Belege zu sehen"
+Payee verification still open,Empfängerprüfung offen
+This file type cannot be shown here — open it with the link above.,Dieser Dateityp lässt sich hier nicht anzeigen — bitte über den Link darüber öffnen.
+With the bank until its date,Liegt bei der Bank bis zum Termin
+{0} of them are still drafts and are approved as they are sent. Approving locks their amounts and recipients.,Davon sind {0} noch Entwürfe; sie werden mit dem Senden freigegeben. Die Freigabe schreibt Beträge und Empfänger fest.
+{0} orders are being sent; the rest were not approved.,{0} Aufträge gehen raus; der Rest wurde nicht freigegeben.
+"{0} selected orders are not being sent — they are held back, already sent, or not due yet.","{0} ausgewählte Aufträge gehen nicht raus — sie sind zurückgestellt, schon abgesendet oder noch nicht fällig."

@@ -238,3 +238,61 @@ def check_payee(name, iban):
     """
     frappe.has_permission("Kefiya Transfer", ptype="create", throw=True)
     return check(name, iban)
+
+
+#: How many rows are scanned per source. Not how many payees come back: the
+#: answer is deduplicated names, and the newest 400 withdrawals of this
+#: instance turned out to be 127 payees -- a suggestion list that stops at the
+#: last few months is one people give up on. Two indexed reads of a few
+#: thousand rows, once per page.
+PAYEE_SCAN = 2000
+
+
+@frappe.whitelist()
+def known_payees(limit=PAYEE_SCAN):
+    """Everyone we have paid, with the IBANs we paid them at.
+
+    For the suggestion list while a transfer is typed. It exists here, in the
+    app, because the entry form used to ask a Server Script stored on one site
+    for this -- so the form worked on that site and nowhere else, and nothing
+    in the app's own tests could see the dependency.
+
+    Same two sources as the check itself, so what is suggested and what is
+    later verified cannot disagree: IBANs the bank accepted from us, and
+    counterparties of transactions that were actually booked.
+
+    :param limit: rows scanned per source, not payees returned
+    :return: [{"name", "ibans": [{"iban", "source"}]}] newest payee first
+    """
+    frappe.has_permission("Kefiya Transfer", ptype="create", throw=True)
+
+    limit = int(limit or PAYEE_SCAN)
+    payees = {}
+
+    def remember(name, iban, source):
+        iban = clean_iban(iban)
+        if not name or not iban:
+            return
+        key = normalise_name(name)
+        if not key:
+            return
+        entry = payees.setdefault(key, {"name": name, "ibans": []})
+        if not any(i["iban"] == iban for i in entry["ibans"]):
+            entry["ibans"].append({"iban": iban, "source": source})
+
+    for row in frappe.get_all(
+            "Kefiya Transfer Item", filters={"docstatus": 1},
+            fields=["recipient_name", "recipient_iban"],
+            order_by="modified desc", limit_page_length=limit):
+        remember(row.get("recipient_name"), row.get("recipient_iban"),
+                 "transfer")
+
+    for row in frappe.get_all(
+            "Bank Transaction",
+            filters={"withdrawal": [">", 0], "bank_party_iban": ["is", "set"]},
+            fields=["bank_party_name", "bank_party_iban"],
+            order_by="date desc", limit_page_length=limit):
+        remember(row.get("bank_party_name"), row.get("bank_party_iban"),
+                 "booking")
+
+    return list(payees.values())

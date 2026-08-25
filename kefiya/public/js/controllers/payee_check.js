@@ -90,3 +90,76 @@ kefiya.payee_check_html = function (answer) {
 	return "<div style='color:" + tone + ";font-size:12px'><b>"
 		+ esc(info.short) + "</b> — " + esc(detail) + "</div>";
 };
+
+// --- suggestions while typing ------------------------------------------------
+//
+// The form has always advertised that known payees are suggested. They were
+// not: the field called input.autocomplete({source: names}), which is the
+// jQuery UI widget, and Frappe does not ship jQuery UI. The call landed on
+// undefined, threw nothing, and did nothing -- so the description promised a
+// list that no version of this page has ever shown.
+//
+// Awesomplete is what Frappe itself uses for its link fields, so it is loaded
+// on every desk page and behaves the way the rest of the desk behaves. It is
+// attached to a plain Data field on purpose: a payee that is not in the list
+// must stay typeable, because a transfer without an invoice behind it is the
+// entire reason this document exists.
+
+//: Everyone we have paid, asked once per page. The list is a few hundred
+//: names; fetching it per dialog would be a request for every order entered.
+kefiya.known_payees = function () {
+	if (!kefiya._known_payees) {
+		kefiya._known_payees = frappe.call({
+			method: "kefiya.utils.payee_check.known_payees",
+			silent: true,
+		}).then(function (r) {
+			return (r && r.message) || [];
+		}).catch(function () {
+			// No suggestions is a worse form, not a broken one.
+			return [];
+		});
+	}
+	return kefiya._known_payees;
+};
+
+//: Attach a suggestion list to a plain input.
+//:
+//: :param items: strings, or {label, value} where the label is what is read
+//:     and the value is what lands in the field
+//: :param onPick: called with the chosen value once something is picked
+kefiya.suggest = function (input, items, onPick) {
+	const el = (input && input.get) ? input.get(0) : input;
+	if (!el || typeof window.Awesomplete !== "function") return null;
+
+	if (el._kefiya_suggest) {
+		el._kefiya_suggest.list = items;
+		return el._kefiya_suggest;
+	}
+
+	const list = new window.Awesomplete(el, {
+		minChars: 1,
+		maxItems: 12,
+		autoFirst: false,
+		list: items,
+	});
+	el._kefiya_suggest = list;
+	$(el).on("awesomplete-selectcomplete", function () {
+		// The control's own change event does not fire for a value the widget
+		// wrote, so the field is told about it here -- otherwise the payee
+		// check would go on judging what was typed before the pick.
+		$(el).trigger("change");
+		if (onPick) onPick(el.value);
+	});
+	return list;
+};
+
+//: The payee whose name this is, out of what known_payees() returned. Matched
+//: by the same rule the check uses, so picking a suggestion and being told
+//: "new payee" a second later cannot happen.
+kefiya.payee_named = function (payees, name) {
+	const wanted = String(name || "").trim().toLowerCase();
+	if (!wanted) return null;
+	return (payees || []).find(function (p) {
+		return String(p.name || "").trim().toLowerCase() === wanted;
+	}) || null;
+};

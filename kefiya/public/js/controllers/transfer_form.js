@@ -286,15 +286,49 @@ kefiya.transfer_form = function (options) {
 	};
 	dialog.fields_dict.recipient_iban.df.onchange = checkPayee;
 
-	// Suggestions without a requirement: an Autocomplete would refuse a name
-	// it does not know, which is exactly the case this document exists for.
-	kefiya.known_payees().then(function (names) {
-		const input = dialog.fields_dict.recipient_name.$input;
-		if (input && input.length && names.length) {
-			input.autocomplete({ source: names, minLength: 2 });
+	// Suggestions without a requirement: the name stays free text, because a
+	// transfer with no invoice behind it is what this document is for. Picking
+	// a known payee offers the IBANs we have paid them at -- which is the half
+	// that saves the typing, and the half that was never there.
+	dialog.fields_dict.recipient_name.df.onchange = checkPayee;
+	kefiya.known_payees().then(function (payees) {
+		if (!payees.length || !dialog.$wrapper) return;
+
+		// Their IBANs, offered but never forced: an IBAN already typed stands,
+		// because it is the one taken off the invoice in front of the person.
+		const offerTheirIbans = function (name) {
+			const payee = kefiya.payee_named(payees, name);
+			const ibans = (payee && payee.ibans) || [];
+			if (!ibans.length) return;
+
+			const field = dialog.fields_dict.recipient_iban;
+			const suggestions = ibans.map(function (i) {
+				return { label: kefiya.iban_pretty(i.iban), value: i.iban };
+			});
+			const list = kefiya.suggest(field.$input, suggestions, checkPayee);
+
+			if (kefiya.iban_plain(dialog.get_value("recipient_iban"))) return;
+			if (ibans.length === 1) {
+				dialog.set_value("recipient_iban", ibans[0].iban);
+				checkPayee();
+			} else if (list) {
+				// Several, and no way to know which: the choice is opened
+				// where it belongs rather than guessing at the newest.
+				field.$input.focus();
+				try { list.open(); } catch (ignored) {}
+			}
+		};
+
+		kefiya.suggest(dialog.fields_dict.recipient_name.$input,
+			payees.map(function (p) { return p.name; }), offerTheirIbans);
+
+		// A name already in the field -- correcting an order -- gets its
+		// IBAN list too, without touching what is stored.
+		const current = dialog.get_value("recipient_name");
+		if (current && !kefiya.iban_plain(dialog.get_value("recipient_iban"))) {
+			offerTheirIbans(current);
 		}
 	});
-	dialog.fields_dict.recipient_name.df.onchange = checkPayee;
 
 	dialog.show();
 	showHint();
@@ -335,17 +369,6 @@ kefiya.account_standing_html = function (payer) {
 			+ "</div>";
 	}
 	return line;
-};
-
-kefiya.known_payees = function () {
-	return frappe.call({ method: "zk_payees" }).then(function (r) {
-		const list = (r && r.message && r.message.payees) || [];
-		return list.map(function (p) {
-			return typeof p === "string" ? p : (p.name || p.recipient_name);
-		}).filter(Boolean);
-	}).catch(function () {
-		return [];
-	});
 };
 
 kefiya.transfer_form_submit = function (dialog, values, payers, existing, onSaved) {
