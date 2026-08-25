@@ -61,14 +61,54 @@ class TestTheCompanyFollowsTheAccount(unittest.TestCase):
             "def company_of_the_paying_account(")[1].split("\n    def ")[0]
         self.assertIn("frappe.throw(", body)
 
-    def test_the_form_cannot_diverge_either(self):
-        """Policing a field the user can still set is second best; the field
-        is fetched from the account and read-only."""
+    def test_the_company_still_leads_the_form(self):
+        """It is asked first, because it narrows the accounts below it. That
+        makes it a filter, so it cannot be read-only -- which is why the server
+        deriving it is the guarantee and not the form."""
         import json
         meta = json.loads(_read(*(DOCTYPE + ("kefiya_transfer.json",))))
+        order = meta["field_order"]
+        self.assertLess(order.index("company"), order.index("kefiya_login"))
         company = [f for f in meta["fields"] if f["fieldname"] == "company"][0]
-        self.assertEqual(company.get("fetch_from"), "kefiya_login.company")
-        self.assertEqual(company.get("read_only"), 1)
+        self.assertNotIn("read_only", company)
+
+
+class TestTheTwoFieldsPointAtEachOther(unittest.TestCase):
+    """A company chosen first narrows the accounts; an account chosen first
+    answers the company. Either order has to arrive at the same pair."""
+
+    def _form(self):
+        return _read(*(DOCTYPE + ("kefiya_transfer.js",)))
+
+    def test_a_chosen_company_narrows_the_account_list(self):
+        form = self._form()
+        self.assertIn('frm.set_query("kefiya_login", function () {', form)
+        self.assertIn("filters: { company: frm.doc.company }", form)
+
+    def test_without_a_company_every_account_is_offered(self):
+        """Narrowing by an empty company would offer nothing at all."""
+        body = self._form().split('frm.set_query("kefiya_login"')[1][:300]
+        self.assertIn(": {};", body,
+                      "No company means no filter, not an empty list.")
+
+    def test_a_chosen_account_sets_the_company(self):
+        form = self._form()
+        self.assertIn('frm.set_value("company", info.company)', form)
+
+    def test_the_account_wins_over_the_company(self):
+        """It holds the money. Changing the company removes an account that no
+        longer belongs to it; it never rewrites one."""
+        body = self._form().split("company: function (frm) {")[1].split(
+            "\n\n\t")[0]
+        self.assertIn('frm.set_value("kefiya_login", null)', body)
+        self.assertNotIn('set_value("company"', body)
+
+    def test_a_cleared_account_is_said_out_loud(self):
+        """An account disappearing from a money form without a word is how the
+        next order goes from whatever happened to be selected afterwards."""
+        body = self._form().split("company: function (frm) {")[1][:900]
+        self.assertIn("frappe.show_alert", body)
+        self.assertIn("belongs to {1}, not to {2}", body)
 
 
 class TestAnIbanIsShownInFours(unittest.TestCase):

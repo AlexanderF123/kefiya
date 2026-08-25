@@ -8,8 +8,8 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
-  "kefiya_login",
   "company",
+  "kefiya_login",
   "column_break_head",
   "execution_date",
   "manage_due_date",
@@ -47,13 +47,11 @@
    "reqd": 1
   },
   {
-   "description": "Comes from the paying account. Whose money is sent is decided by the account, not chosen here.",
-   "fetch_from": "kefiya_login.company",
+   "description": "Optional first: it narrows the accounts below to that company. Choosing an account sets it.",
    "fieldname": "company",
    "fieldtype": "Link",
    "label": "Company",
-   "options": "Company",
-   "read_only": 1
+   "options": "Company"
   },
   {
    "fieldname": "column_break_head",

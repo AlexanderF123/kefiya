@@ -22,6 +22,16 @@ frappe.ui.form.on("Kefiya Transfer", {
 			};
 		}
 
+		// The company comes first on the form and narrows what follows: with
+		// one chosen, only its own accounts are offered. Without one, all of
+		// them are -- picking the account is the other way round, and it sets
+		// the company itself.
+		frm.set_query("kefiya_login", function () {
+			return frm.doc.company
+				? { filters: { company: frm.doc.company } }
+				: {};
+		});
+
 		// Only the company's own accounts are offered, and never the one the
 		// money is drawn from: a transfer from an account to itself is not a
 		// transfer, and the bank only says so after a TAN was spent on it.
@@ -39,6 +49,30 @@ frappe.ui.form.on("Kefiya Transfer", {
 	kefiya_login: function (frm) {
 		kefiya_apply_capabilities(frm);
 		kefiya_describe_paying_account(frm);
+	},
+
+	// The two fields point at each other, and the account is the stronger of
+	// the two: it holds the money. So changing the company only ever removes
+	// an account that no longer belongs to it -- it never rewrites one.
+	//
+	// Said out loud rather than done quietly: an account disappearing from a
+	// money form without a word is how somebody sends the next order from
+	// whatever happened to be selected afterwards.
+	company: function (frm) {
+		if (!frm.doc.company || !frm.doc.kefiya_login) return;
+		frappe.db.get_value("Kefiya Login", frm.doc.kefiya_login, "company")
+			.then(function (r) {
+				const owner = (r && r.message && r.message.company) || null;
+				if (!owner || owner === frm.doc.company) return;
+				const dropped = frm.doc.kefiya_login;
+				frm.set_value("kefiya_login", null);
+				frappe.show_alert({
+					message: __("{0} belongs to {1}, not to {2} — the paying"
+						+ " account was cleared.",
+						[dropped, owner, frm.doc.company]),
+					indicator: "orange",
+				}, 8);
+			});
 	},
 
 	instant_payment: function (frm) {
@@ -176,7 +210,14 @@ function kefiya_describe_paying_account(frm) {
 		const info = (r && r.message) || {};
 		const parts = [];
 		if (info.account_iban) parts.push(kefiya.iban_pretty(info.account_iban));
-		if (info.company) parts.push(info.company);
+		if (info.company) {
+			parts.push(info.company);
+			// The account decides whose money this is. Picking one is the
+			// answer to the company question, not a second question.
+			if (frm.doc.docstatus === 0 && frm.doc.company !== info.company) {
+				frm.set_value("company", info.company);
+			}
+		}
 		frm.set_df_property("kefiya_login", "description",
 			parts.length
 				? __("The account the money is paid from.") + " · "
