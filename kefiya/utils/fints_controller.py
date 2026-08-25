@@ -20,6 +20,9 @@ from frappe.utils.file_manager import (
     get_content_hash,
 )
 from kefiya.utils import tan_challenge
+from kefiya.utils.fints_dialog_state import (
+    dialog_is_usable, discard_unusable_dialog,
+)
 from .import_bank_transaction import (
     ImportBankTransaction,
     resolve_incremental_from_date,
@@ -246,19 +249,16 @@ class FinTSController:
         # to unlock.
         if self.kefiya_login.stored_tan_blob \
                 and not self.fints_connection._standing_dialog:
-            with self.fints_connection.resume_dialog(self.kefiya_login.stored_dialog_blob):
-                tan_request = NeedRetryResponse.from_data(self.kefiya_login.stored_tan_blob)
-
-                # this decoupled setting is missing everywhere, so decoupled requests (like pushTAN 2.0) cannot be handled without this
-                tan_request.decoupled = self.kefiya_login.stored_tan_state_decoupled
-                self.fints_connection.init_tan_response = self.fints_connection.send_tan(tan_request, tan)
-
-                # on failure update status and skip
-                if self.is_tan_required_and_requested(self.fints_connection.init_tan_response):
-                    raise TanInteractionRequired()
-
-                # on success clear stored tan state
-                self.__persist_fints_state()
+            # resume_dialog() clears the client's reference to the dialog when
+            # its block ends -- but it has no try/finally, so an exception in
+            # the block (an unanswered TAN raises one, which is the ordinary
+            # case here) skips that line and leaves an ENDED dialog registered.
+            # Everything afterwards then sends on a dialog that is not open.
+            try:
+                self._resume_and_answer_the_parked_tan(tan)
+            except Exception:
+                discard_unusable_dialog(self.fints_connection)
+                raise
 
         # After successful login/tan verification fetch available accounts if not already present
         if self.__fetch_fints_accounts() is False:
@@ -272,6 +272,28 @@ class FinTSController:
         self.interactive.show_progress_realtime(
            _("Connection established"), 100, reload=False
         )
+
+    def _resume_and_answer_the_parked_tan(self, tan):
+        """Resume the parked dialog and answer the challenge waiting in it."""
+        blob = self.kefiya_login.stored_dialog_blob
+        with self.fints_connection.resume_dialog(blob):
+            tan_request = NeedRetryResponse.from_data(
+                self.kefiya_login.stored_tan_blob)
+
+            # this decoupled setting is missing everywhere, so decoupled
+            # requests (like pushTAN 2.0) cannot be handled without this
+            tan_request.decoupled = \
+                self.kefiya_login.stored_tan_state_decoupled
+            self.fints_connection.init_tan_response = \
+                self.fints_connection.send_tan(tan_request, tan)
+
+            # on failure update status and skip
+            if self.is_tan_required_and_requested(
+                    self.fints_connection.init_tan_response):
+                raise TanInteractionRequired()
+
+            # on success clear stored tan state
+            self.__persist_fints_state()
 
     def __init_fints_connection(self):
         """Private: Initialise new fints connection.
@@ -355,6 +377,17 @@ class FinTSController:
         """
         conn = self.fints_connection
         session = _active_session()
+
+        # A dialog that was ended but never unregistered cannot be sent on, and
+        # joining it is how one login's parked TAN broke every later login of
+        # the same access. Dropped here so the normal open path runs.
+        if conn._standing_dialog and not dialog_is_usable(conn):
+            if discard_unusable_dialog(conn) and session is not None:
+                # The shared client is only as good as its dialog was: take it
+                # out so the next login builds a clean one rather than
+                # inheriting whatever put this one in this state.
+                session.get("connections", {}).pop(
+                    _access_key(self.kefiya_login), None)
 
         if conn._standing_dialog:
             # Joining a dialog somebody else opened. Inside a session that is
