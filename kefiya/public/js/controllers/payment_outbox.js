@@ -93,6 +93,98 @@ kefiya.outbox_state = function (r) {
 		fg: "#14532d", bg: "#EDF3EE" };
 };
 
+//: Everything a person needs to say yes to, before the money leaves.
+//:
+//: The confirmation used to be a recipient name and an amount. That is not
+//: enough to check anything: it does not say which account is debited, it
+//: does not show the recipient's IBAN, it does not name the reference, and it
+//: does not say whether the order goes out today or on a date. The person
+//: pressing this button is often not the person who entered the order --
+//: which is the whole reason the payee check moved to entry time -- so what
+//: they confirm has to be readable on its own.
+//:
+//: The execution and the kind come from kefiya.execution_sentence() and
+//: kefiya.transfer_kind(), the same two the detail view uses. A confirmation
+//: that described the execution differently from the box the order was
+//: entered in would be worse than a short one.
+kefiya.outbox_confirm_html = function (rows, payer) {
+	const esc = frappe.utils.escape_html;
+	const money = function (v) { return format_currency(Number(v || 0)); };
+	const line = function (label, value) {
+		return "<div class='zk-cf'><span>" + esc(label) + "</span><b>"
+			+ value + "</b></div>";
+	};
+
+	let out = "<div class='zk-confirm'>";
+
+	// --- who pays -----------------------------------------------------------
+	out += "<div class='zk-cbox'><div class='zk-ch'>"
+		+ __("Ordering party") + "</div>"
+		+ line(__("Paying account"), esc((payer && payer.bank_account)
+			|| (rows[0] && rows[0].bank_account) || ""));
+	if (payer && payer.iban) {
+		out += line(__("IBAN"), "<span class='zk-mono'>"
+			+ esc(kefiya.iban_pretty(payer.iban)) + "</span>");
+	}
+	if (payer && payer.company) {
+		out += line(__("Company"), esc(payer.company));
+	}
+	out += "</div>";
+
+	// --- what leaves --------------------------------------------------------
+	// One block per payment, not per order: a collective order carries several
+	// recipients, and a row per order would hide all but the first.
+	rows.forEach(function (row) {
+		(row.items || []).forEach(function (item) {
+			out += "<div class='zk-cbox'>"
+				+ line(__("Recipient"), esc(item.recipient_name || "—"))
+				+ line(__("IBAN"), "<span class='zk-mono'>"
+					+ esc(kefiya.iban_pretty(item.recipient_iban)) + "</span>")
+				+ (item.recipient_bic
+					? line(__("BIC"), esc(item.recipient_bic)) : "")
+				+ line(__("Amount"), money(item.amount))
+				+ line(__("Reference"), esc(item.purpose || "—"))
+				+ line(__("Execution"), esc(kefiya.execution_sentence(row)))
+				+ line(__("Transfer type"), esc(kefiya.transfer_kind(row)))
+				+ "<div class='zk-cref'>" + esc(row.name)
+				+ (Number(row.receipts) > 0
+					? " · " + __("{0} receipts", [row.receipts])
+					: " · " + __("No receipt")) + "</div>"
+				+ "</div>";
+		});
+	});
+
+	let sum = 0;
+	rows.forEach(function (r) { sum += Number(r.total_amount || 0); });
+	if (rows.length > 1) {
+		out += "<div class='zk-csum'>" + __("Total") + ": <b>"
+			+ money(sum) + "</b></div>";
+	}
+
+	// The style travels with the markup. This is rendered by frappe.confirm,
+	// which puts it in a modal in the main document -- not inside the page's
+	// shadow root, where the outbox stylesheet lives and could not reach it.
+	return out + "</div><style>"
+		+ ".zk-confirm{max-height:52vh;overflow-y:auto;margin-top:10px}"
+		+ ".zk-confirm .zk-cbox{border:1px solid var(--border-color);"
+		+ "border-radius:6px;padding:8px 10px;margin-bottom:8px;"
+		+ "background:var(--card-bg)}"
+		+ ".zk-confirm .zk-ch{font-size:11px;text-transform:uppercase;"
+		+ "letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px}"
+		+ ".zk-confirm .zk-cf{display:flex;justify-content:space-between;"
+		+ "gap:12px;font-size:12px;padding:2px 0;border-bottom:1px solid "
+		+ "var(--border-color)}"
+		+ ".zk-confirm .zk-cf:last-of-type{border-bottom:0}"
+		+ ".zk-confirm .zk-cf>span{color:var(--text-muted);white-space:nowrap}"
+		+ ".zk-confirm .zk-cf>b{text-align:right;word-break:break-word}"
+		+ ".zk-confirm .zk-mono{font-family:ui-monospace,Menlo,monospace}"
+		+ ".zk-confirm .zk-cref{margin-top:5px;font-size:11px;"
+		+ "color:var(--text-muted)}"
+		+ ".zk-confirm .zk-csum{text-align:right;font-size:13px;padding:2px 2px"
+		+ " 6px}"
+		+ "</style>";
+};
+
 //: A draft that would go out today if somebody approved it.
 //:
 //: The server's answer, not a second opinion. It was written here first --
@@ -737,21 +829,19 @@ kefiya.payment_outbox = function (root) {
 		const skipped = selection().length - rows.length;
 		let sum = 0;
 		rows.forEach(function (r) { sum += Number(r.total_amount || 0); });
-		const list = rows.map(function (r) {
-			const items = r.items || [];
-			const who = items.length > 1
-				? __("{0} recipients", [items.length])
-				: ((items[0] && items[0].recipient_name) || "");
-			return "<tr><td>" + esc(who) + "</td>"
-				+ "<td style='text-align:right'>" + money(r.total_amount)
-				+ "</td></tr>";
-		}).join("");
+
+		// The ordering party's own account, out of the payer list the page
+		// already has. The row names the account but not its IBAN, and an
+		// IBAN is what somebody comparing this against online banking reads.
+		const payer = view.payers.find(function (p) {
+			return p.login === rows[0].kefiya_login;
+		}) || null;
 
 		let message = "<div>"
 			+ __("{0} orders over {1} go from {2} to the bank.",
 				[rows.length, money(sum), esc(rows[0].bank_account || "")])
-			+ "</div><table style='width:100%;border-collapse:collapse;"
-			+ "margin-top:8px'>" + list + "</table>";
+			+ "</div>"
+			+ kefiya.outbox_confirm_html(rows, payer);
 		if (skipped > 0) {
 			message += "<div class='text-muted small' style='margin-top:8px'>"
 				+ __("{0} selected orders are not being sent — they are held"

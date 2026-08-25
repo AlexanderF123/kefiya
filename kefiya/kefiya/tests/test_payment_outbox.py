@@ -140,6 +140,70 @@ class TestSendingRefusesRatherThanGuesses(unittest.TestCase):
         self.assertIn("approve_drafts", body)
 
 
+class TestTheConfirmationCanBeCheckedOnItsOwn(unittest.TestCase):
+    """It used to be a recipient name and an amount.
+
+    That is not enough to check anything: it did not say which account is
+    debited, it did not show the recipient's IBAN, it did not name the
+    reference, and it did not say whether the order goes out today or on a
+    date. The person pressing the button is often not the person who entered
+    the order -- which is the whole reason the payee check moved to entry
+    time -- so what they confirm has to be readable on its own.
+    """
+
+    @staticmethod
+    def _panel():
+        return _source().split("kefiya.outbox_confirm_html = function")[1] \
+            .split("\n};")[0]
+
+    def test_the_paying_account_is_named_with_its_iban(self):
+        """The row names the account but not its IBAN, and an IBAN is what
+        somebody comparing this against online banking reads."""
+        body = self._panel()
+        self.assertIn('__("Paying account")', body)
+        self.assertIn("payer.iban", body)
+        self.assertIn("kefiya.iban_pretty", body)
+
+    def test_every_field_of_a_payment_is_there(self):
+        body = self._panel()
+        for field in ('__("Recipient")', '__("IBAN")', '__("Amount")',
+                      '__("Reference")', '__("Execution")',
+                      '__("Transfer type")'):
+            self.assertIn(field, body, field)
+
+    def test_a_collective_order_shows_every_recipient(self):
+        """One block per payment, not per order -- a row per order would hide
+        all but the first recipient of a collective order."""
+        body = self._panel()
+        self.assertIn("(row.items || []).forEach", body)
+
+    def test_the_execution_is_worded_by_the_shared_helper(self):
+        """A confirmation that described the execution differently from the
+        box the order was entered in would be worse than a short one."""
+        body = self._panel()
+        self.assertIn("kefiya.execution_sentence(row)", body)
+        self.assertIn("kefiya.transfer_kind(row)", body)
+
+    def test_the_style_travels_with_the_markup(self):
+        """frappe.confirm renders into a modal in the main document, not
+        inside the page's shadow root where the outbox stylesheet lives."""
+        body = self._panel()
+        self.assertIn("<style>", body)
+
+    def test_the_send_confirmation_uses_it(self):
+        body = _function(_source(), "function send() {")
+        self.assertIn("kefiya.outbox_confirm_html(rows, payer)", body)
+
+    def test_the_payer_is_looked_up_and_may_be_missing(self):
+        """An account that is no longer offered as a payer must not take the
+        confirmation down with it."""
+        body = _function(_source(), "function send() {")
+        self.assertIn("view.payers.find", body)
+        self.assertIn("|| null", body)
+        panel = self._panel()
+        self.assertIn("(payer && payer.bank_account)", panel)
+
+
 class TestApprovingIsNotSending(unittest.TestCase):
 
     def test_the_confirmation_says_what_approving_does_and_does_not_do(self):

@@ -161,6 +161,30 @@ kefiya.receipt_preview = function (file) {
 			+ " above.") + "</div>";
 };
 
+//: When an order goes out, and who holds it until then -- in a sentence.
+//:
+//: "execution_date = null, manage_due_date = 0" is not something anybody
+//: should have to translate in their head. Shared, because the detail view
+//: and the send confirmation both say it: the box a managing director
+//: confirms must not describe the execution differently from the box the
+//: person who entered it read.
+kefiya.execution_sentence = function (row) {
+	const day = row && row.execution_date
+		? frappe.datetime.str_to_user(row.execution_date) : "";
+	if (!row || !row.execution_date) return __("As soon as possible");
+	if (row.manage_due_date) {
+		return __("On {0} — held here until then", [day]);
+	}
+	return __("On {0} — the bank holds the order", [day]);
+};
+
+//: How it travels: as an instant payment or as an ordinary SEPA transfer.
+kefiya.transfer_kind = function (row) {
+	return row && row.instant_payment
+		? __("Instant payment — arrives within seconds")
+		: __("SEPA transfer — one banking day");
+};
+
 kefiya.transfer_details_html = function (row, files) {
 	const esc = frappe.utils.escape_html;
 	const dmy = function (d) {
@@ -181,14 +205,7 @@ kefiya.transfer_details_html = function (row, files) {
 	// Written as a sentence, because "execution_date = null,
 	// manage_due_date = 0" is not something anybody should translate in their
 	// head. It says who holds the order, so no second row has to repeat it.
-	let when;
-	if (!row.execution_date) {
-		when = __("As soon as possible");
-	} else if (row.manage_due_date) {
-		when = __("On {0} — held here until then", [dmy(row.execution_date)]);
-	} else {
-		when = __("On {0} — the bank holds the order", [dmy(row.execution_date)]);
-	}
+	const when = kefiya.execution_sentence(row);
 
 	const state = kefiya.outbox_state
 		? kefiya.outbox_state(row)
@@ -318,9 +335,7 @@ kefiya.transfer_details_html = function (row, files) {
 		+ "<div class='kef-h'>" + __("Execution") + "</div>"
 		+ "<div class='kef-slip'><div class='kef-two'>"
 		+ box(__("When"), esc(when))
-		+ box(__("Instant payment"), row.instant_payment
-			? __("Yes — sent as a SEPA instant payment")
-			: __("No — ordinary SEPA transfer"))
+		+ box(__("Transfer type"), esc(kefiya.transfer_kind(row)))
 		+ "</div>"
 		+ (row.vop_pending
 			? box(__("Payee verification"), __("still open")) : "")
