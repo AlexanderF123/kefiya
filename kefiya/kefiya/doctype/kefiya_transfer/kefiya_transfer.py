@@ -121,9 +121,47 @@ class KefiyaTransfer(Document):
             # same either way.
             self.manage_due_date = 1
 
-        if not self.company and self.kefiya_login:
-            self.company = frappe.db.get_value(
-                "Kefiya Login", self.kefiya_login, "company")
+        self.company = self.company_of_the_paying_account()
+
+    def company_of_the_paying_account(self):
+        """Whose money this is. Never a choice -- a fact about the account.
+
+        This used to be filled only when the field was still empty, so a
+        company already sitting there survived. A Company link picks up the
+        user's session default, so it is rarely empty: an order drawn on the
+        Brilu-Stiftung's account went out carrying "axessio Hausverwaltung
+        GmbH", and it was a colleague who noticed, not the software.
+
+        That is not a label. build_pain001_for() takes the ordering party's
+        NAME from this field and the ordering party's IBAN from the account --
+        so a mismatch sends an order that names one company and debits
+        another. Banks reject that, and the ones that do not are worse.
+
+        The Bank Account is the authority: it is the thing that holds the
+        money. The login's own company is the fallback for an account record
+        that names none.
+        """
+        if not self.kefiya_login:
+            return self.company
+
+        login = frappe.db.get_value(
+            "Kefiya Login", self.kefiya_login, ["company", "bank_account"],
+            as_dict=True) or {}
+
+        company = None
+        if login.get("bank_account"):
+            company = frappe.db.get_value(
+                "Bank Account", login["bank_account"], "company")
+        company = company or login.get("company")
+
+        if not company:
+            frappe.throw(_(
+                "The paying account {0} does not name a company, so there is"
+                " nothing to put on the order as the ordering party. Set the"
+                " company on the Bank Account first."
+            ).format(self.kefiya_login))
+
+        return company
 
     def before_submit(self):
         # Submitting approves the transfer; it does not send it. Sending is a

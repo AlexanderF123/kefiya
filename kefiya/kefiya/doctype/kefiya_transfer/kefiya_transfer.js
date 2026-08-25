@@ -9,6 +9,19 @@
 frappe.ui.form.on("Kefiya Transfer", {
 	onload: function (frm) {
 		kefiya.interactive.progressbar(frm);
+		// An IBAN printed in one block is not checkable against a letter from
+		// the bank; the eye slides off twenty-two characters. In fours it is.
+		// Display only -- what is stored stays unbroken, because a space
+		// inside an IBAN is a rejected order.
+		const iban_column = frm.fields_dict.items
+			&& frm.fields_dict.items.grid
+			&& frm.fields_dict.items.grid.get_docfield("recipient_iban");
+		if (iban_column) {
+			iban_column.formatter = function (value) {
+				return frappe.utils.escape_html(kefiya.iban_pretty(value));
+			};
+		}
+
 		// Only the company's own accounts are offered, and never the one the
 		// money is drawn from: a transfer from an account to itself is not a
 		// transfer, and the bank only says so after a TAN was spent on it.
@@ -25,6 +38,7 @@ frappe.ui.form.on("Kefiya Transfer", {
 
 	kefiya_login: function (frm) {
 		kefiya_apply_capabilities(frm);
+		kefiya_describe_paying_account(frm);
 	},
 
 	instant_payment: function (frm) {
@@ -40,6 +54,7 @@ frappe.ui.form.on("Kefiya Transfer", {
 		// below are offered at all. Applied asynchronously: the answer comes
 		// from the server, and the form must not wait for it to render.
 		kefiya_apply_capabilities(frm);
+		kefiya_describe_paying_account(frm);
 
 		// Sending is deliberately separate from submitting: approving a
 		// transfer must never move money as a side effect.
@@ -136,6 +151,40 @@ frappe.ui.form.on("Kefiya Transfer Item", {
 		}
 	},
 });
+
+/**
+ * Say which account the money leaves, in full, under the field that names it.
+ *
+ * The name of an access is not enough to tell two accounts of one bank apart,
+ * and it says nothing at all about whose money it is. A colleague preparing a
+ * transfer saw "Brilu KG Mietkonto" above "axessio Hausverwaltung GmbH" and
+ * asked whether that could be right. It could not -- and the form had shown
+ * both without a word about the contradiction.
+ *
+ * The company is now taken from the account and cannot diverge. This puts the
+ * evidence for it on the screen: the IBAN in fours, and the company it
+ * belongs to.
+ */
+function kefiya_describe_paying_account(frm) {
+	if (!frm.doc.kefiya_login) {
+		frm.set_df_property("kefiya_login", "description",
+			__("The account the money is paid from."));
+		return;
+	}
+	frappe.db.get_value("Kefiya Login", frm.doc.kefiya_login,
+		["account_iban", "bank_account", "company"]).then(function (r) {
+		const info = (r && r.message) || {};
+		const parts = [];
+		if (info.account_iban) parts.push(kefiya.iban_pretty(info.account_iban));
+		if (info.company) parts.push(info.company);
+		frm.set_df_property("kefiya_login", "description",
+			parts.length
+				? __("The account the money is paid from.") + " · "
+					+ parts.join(" · ")
+				: __("The account the money is paid from."));
+		frm.refresh_field("kefiya_login");
+	});
+}
 
 /** ISO 7064 mod-97 check, mirroring the server-side validation. */
 function kefiya_iban_is_valid(iban) {
@@ -252,7 +301,7 @@ function kefiya_confirm_and_send(frm) {
 	const rows = (frm.doc.items || []).map((row) =>
 		"<tr><td>" + frappe.utils.escape_html(row.recipient_name || "")
 		+ "</td><td style='font-family:monospace'>"
-		+ frappe.utils.escape_html(row.recipient_iban || "")
+		+ frappe.utils.escape_html(kefiya.iban_pretty(row.recipient_iban))
 		+ "</td><td style='text-align:right'>"
 		+ format_currency(row.amount) + "</td></tr>"
 	).join("");

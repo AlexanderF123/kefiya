@@ -13,6 +13,8 @@
 // Adding something here means it loads for every user on every page. That is
 // a cost; the bar is that it must be needed by more than one page.
 
+// An IBAN in groups of four, wherever one is shown to a person.
+import "./controllers/iban_display";
 import "./controllers/bank_refresh";
 // Opened from the outgoing-payments page, and from anywhere else that wants
 // to show one transfer without navigating away from what the reader is doing.

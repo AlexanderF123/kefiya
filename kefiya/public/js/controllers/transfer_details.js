@@ -164,8 +164,8 @@ kefiya.transfer_details_html = function (row, files) {
 		return "<div class='kef-slip'>"
 			+ box(__("Recipient"), esc(it.recipient_name || "—"))
 			+ "<div class='kef-two'>"
-			+ box(__("IBAN"),
-				"<span class='kef-mono'>" + esc(it.recipient_iban || "") + "</span>")
+			+ box(__("IBAN"), "<span class='kef-mono'>"
+				+ esc(kefiya.iban_pretty(it.recipient_iban)) + "</span>")
 			+ box(__("Amount"), "<b>" + money(it.amount) + "</b>", "kef-r")
 			+ "</div>"
 			+ box(__("Reference"), esc(it.purpose || ""))

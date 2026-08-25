@@ -217,11 +217,6 @@ kefiya.payment_outbox = function (root) {
 
 	function dmy(d) { return d ? frappe.datetime.str_to_user(d) : ""; }
 
-	function ibanPretty(v) {
-		return (v || "").replace(/\s+/g, "").toUpperCase()
-			.replace(/(.{4})/g, "$1 ").trim();
-	}
-
 	function errText(r) {
 		const fromServer = kefiya.server_message && kefiya.server_message(r);
 		if (fromServer) return fromServer;
@@ -354,7 +349,7 @@ kefiya.payment_outbox = function (root) {
 				: (esc((items[0] && items[0].purpose) || "")
 					+ (items[0] && items[0].recipient_iban
 						? "<br><span class='zk-iban'>"
-							+ esc(ibanPretty(items[0].recipient_iban))
+							+ esc(kefiya.iban_pretty(items[0].recipient_iban))
 							+ "</span>"
 						: ""));
 			let due;
