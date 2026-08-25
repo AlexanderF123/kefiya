@@ -13,6 +13,7 @@ The kind was right on every one of them the whole time. Nothing asked.
 """
 
 import inspect
+import os
 import unittest
 
 from kefiya.utils import account_kind
@@ -74,3 +75,58 @@ class TestTheAnswerIsOfferedOnce(unittest.TestCase):
         dropdown on an instance that never classified its accounts."""
         source = inspect.getsource(account_kind.transfer_sources)
         self.assertIn('has_field("account_kind")', source)
+
+
+class TestTheAccountSaysWhatItCanCarry(unittest.TestCase):
+    """A balance on another page is a balance nobody looks up.
+
+    It is stated where the account is chosen, because that is the moment it
+    decides anything -- an order entered against an account that cannot carry
+    it comes back from the bank days later.
+    """
+
+    @staticmethod
+    def _source(*parts):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), *parts)
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_overdraft_line_is_part_of_the_answer(self):
+        """The half people forget: 664.028,54 on an account with a line of
+        250.000,00 means 914.028,54 can leave it."""
+        body = self._source("utils", "account_kind.py").split(
+            "def account_standing(")[1].split("\ndef ")[0]
+        self.assertIn("custom_credit_line", body)
+        self.assertIn('standing["available"] = float(balance)', body)
+
+    def test_an_unfetched_account_has_no_balance_rather_than_zero(self):
+        body = self._source("utils", "account_kind.py").split(
+            "def account_standing(")[1].split("\ndef ")[0]
+        self.assertIn("if balance is not None:", body,
+                      "A confident zero on an account nobody fetched is worse "
+                      "than saying nothing.")
+
+    def test_the_age_of_the_figures_travels_with_them(self):
+        """These come from a fetch; their age is the difference between a fact
+        and a guess."""
+        body = self._source("utils", "account_kind.py").split(
+            "def account_standing(")[1].split("\ndef ")[0]
+        self.assertIn('"as_of"', body)
+        for parts in (("public", "js", "controllers", "transfer_form.js"),
+                      ("kefiya", "doctype", "kefiya_transfer",
+                       "kefiya_transfer.js")):
+            self.assertIn("as at {0}", self._source(*parts), parts[-1])
+
+    def test_the_fields_are_optional(self):
+        """They are Custom Fields on one instance; an app that requires them
+        fails on every other."""
+        body = self._source("utils", "account_kind.py").split(
+            "def account_standing(")[1].split("\ndef ")[0]
+        self.assertIn("meta.has_field(f)", body)
+
+    def test_the_outbox_shows_it_where_the_account_is_picked(self):
+        form = self._source("public", "js", "controllers", "transfer_form.js")
+        self.assertIn("kefiya.account_standing_html", form)
+        self.assertIn("dialog.fields_dict.payer.df.onchange = showStanding",
+                      form)

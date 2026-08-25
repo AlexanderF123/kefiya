@@ -224,6 +224,47 @@ function kefiya_describe_paying_account(frm) {
 					+ parts.join(" · ")
 				: __("The account the money is paid from."));
 		frm.refresh_field("kefiya_login");
+
+		if (info.bank_account) {
+			kefiya_show_account_standing(frm, info.bank_account);
+		}
+	});
+}
+
+/**
+ * What is on the account and what the bank lets it go below.
+ *
+ * The overdraft line is as much a part of the answer as the balance and is the
+ * half people forget: 664.028,54 EUR on an account with a line of 250.000,00
+ * means 914.028,54 can leave it. Both are stated, and so is the sum.
+ *
+ * With the date, because these figures come from a fetch and their age is the
+ * difference between a fact and a guess.
+ */
+function kefiya_show_account_standing(frm, bank_account) {
+	frappe.db.get_value("Bank Account", bank_account,
+		["custom_account_balance", "custom_credit_line", "account_currency",
+			"last_integration_date"]).then(function (r) {
+		const a = (r && r.message) || {};
+		const balance = a.custom_account_balance;
+		if (balance === null || balance === undefined) {
+			frm.dashboard.clear_headline();
+			return;
+		}
+		const line = a.custom_credit_line || 0;
+		const money = function (v) {
+			return format_currency(v || 0, a.account_currency || undefined);
+		};
+		let text = __("Balance {0}", [money(balance)]);
+		if (line) {
+			text += " · " + __("overdraft {0}", [money(line)])
+				+ " · " + __("available {0}", [money(balance + line)]);
+		}
+		if (a.last_integration_date) {
+			text += " · " + __("as at {0}",
+				[frappe.datetime.str_to_user(a.last_integration_date)]);
+		}
+		frm.dashboard.add_comment(text, balance < 0 ? "orange" : "blue", true);
 	});
 }
 

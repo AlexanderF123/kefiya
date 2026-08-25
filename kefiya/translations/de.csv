@@ -198,3 +198,8 @@ The account the money is paid from.,"Das Konto, von dem das Geld abgeht."
 "The paying account {0} does not name a company, so there is nothing to put on the order as the ordering party. Set the company on the Bank Account first.","Das abgehende Konto {0} nennt keine Gesellschaft, also steht nichts als Auftraggeber auf dem Auftrag. Bitte zuerst die Gesellschaft am Bankkonto setzen."
 Optional first: it narrows the accounts below to that company. Choosing an account sets it.,Zuerst wählbar: schränkt die Konten darunter auf diese Gesellschaft ein. Ein gewähltes Konto setzt sie.
 "{0} belongs to {1}, not to {2} — the paying account was cleared.","{0} gehört zu {1}, nicht zu {2} — das abgehende Konto wurde geleert."
+Balance {0},Saldo {0}
+overdraft {0},Dispo {0}
+available {0},verfügbar {0}
+as at {0},Stand {0}
+No balance has been fetched for this account yet.,Für dieses Konto wurde noch kein Saldo abgerufen.

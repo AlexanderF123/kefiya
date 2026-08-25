@@ -72,6 +72,9 @@ kefiya.transfer_form = function (options) {
 	const payerLabels = payers.map(function (p) {
 		return p.bank_account + (p.company ? " — " + p.company : "");
 	});
+	const payerAt = function (label) {
+		return payers[payerLabels.indexOf(label)] || null;
+	};
 	const item = (existing && (existing.items || [])[0]) || {};
 
 	const fields = [
@@ -86,6 +89,7 @@ kefiya.transfer_form = function (options) {
 					+ " order. Delete it and enter a new one instead.")
 				: "",
 		},
+		{ fieldtype: "HTML", fieldname: "standing" },
 		{ fieldtype: "Section Break", label: __("Recipient") },
 		{
 			fieldtype: "Data", fieldname: "recipient_name", reqd: 1,
@@ -165,6 +169,16 @@ kefiya.transfer_form = function (options) {
 	};
 	dialog.fields_dict.execution_mode.df.onchange = showHint;
 
+	// What is on the account, and what the bank lets it go below. Shown where
+	// the account is chosen, because that is the moment it decides anything --
+	// a balance on another page is a balance nobody looks up.
+	const showStanding = function () {
+		const p = payerAt(dialog.get_value("payer"));
+		dialog.fields_dict.standing.$wrapper.html(
+			kefiya.account_standing_html(p));
+	};
+	dialog.fields_dict.payer.df.onchange = showStanding;
+
 	// Suggestions without a requirement: an Autocomplete would refuse a name
 	// it does not know, which is exactly the case this document exists for.
 	kefiya.known_payees().then(function (names) {
@@ -176,7 +190,43 @@ kefiya.transfer_form = function (options) {
 
 	dialog.show();
 	showHint();
+	showStanding();
 	return dialog;
+};
+
+// The account's standing, in one line: what is there, what may be gone below,
+// and the sum of the two -- which is the number the person entering an order
+// is actually asking about.
+//
+// The date is part of it. These figures are written by a fetch, so their age
+// is the difference between a fact and a guess. An account nobody has fetched
+// says so rather than showing a confident zero.
+kefiya.account_standing_html = function (payer) {
+	if (!payer) return "";
+	const esc = frappe.utils.escape_html;
+	const money = function (v) {
+		return format_currency(v || 0, payer.currency || undefined);
+	};
+
+	if (payer.balance === null || payer.balance === undefined) {
+		return "<div class='text-muted small'>"
+			+ __("No balance has been fetched for this account yet.")
+			+ "</div>";
+	}
+
+	const parts = [__("Balance {0}", [money(payer.balance)])];
+	if (payer.credit_line) {
+		parts.push(__("overdraft {0}", [money(payer.credit_line)]));
+		parts.push("<b>" + __("available {0}", [money(payer.available)])
+			+ "</b>");
+	}
+	let line = "<div class='small'>" + parts.join(" · ") + "</div>";
+	if (payer.as_of) {
+		line += "<div class='text-muted small'>"
+			+ __("as at {0}", [esc(frappe.datetime.str_to_user(payer.as_of))])
+			+ "</div>";
+	}
+	return line;
 };
 
 kefiya.known_payees = function () {

@@ -156,7 +156,8 @@ def transfer_sources():
         "Kefiya Login",
         filters={"bank_account": ["is", "set"],
                  "account_kind": ["in", list(TRANSFER_SOURCE_KINDS)]},
-        fields=["name", "bank_account", "company", "account_kind"],
+        fields=["name", "bank_account", "company", "account_kind",
+                "account_iban"],
         limit_page_length=0)
 
     # A disabled Bank Account is still a Bank Account; it is just not one an
@@ -165,6 +166,52 @@ def transfer_sources():
         "Bank Account", filters={"disabled": 1}, fields=["name"],
         limit_page_length=0)}
 
-    return [{"login": r["name"], "bank_account": r["bank_account"],
-             "company": r.get("company"), "kind": r.get("account_kind")}
+    return [dict({"login": r["name"], "bank_account": r["bank_account"],
+                  "company": r.get("company"), "kind": r.get("account_kind"),
+                  "iban": r.get("account_iban")},
+                 **account_standing(r["bank_account"]))
             for r in rows if r["bank_account"] not in disabled]
+
+
+def account_standing(bank_account):
+    """What is on the account and what the bank lets it go below.
+
+    Asked at the moment somebody picks an account to pay from, because that is
+    when it decides anything. A balance that has to be looked up on another
+    page is a balance nobody looks up, and an order entered against an account
+    that cannot carry it comes back from the bank days later.
+
+    The overdraft line matters as much as the balance and is easy to forget:
+    664.028,54 EUR on the account with a line of 250.000,00 EUR means 914.028,54
+    can leave it, and a balance of 7.278,16 with no line at all means 7.278,16.
+    Both are stated, and so is the sum, because the sum is the number the
+    person entering the order is actually asking about.
+
+    The date is stated too. These fields are written by a fetch, so their age
+    is the difference between a fact and a guess -- and an account nobody has
+    fetched has no balance at all rather than a balance of zero.
+
+    :return: {"balance", "credit_line", "available", "as_of", "currency"} with
+        balance None where nothing was ever fetched
+    """
+    meta = frappe.get_meta("Bank Account")
+    wanted = [f for f in ("custom_account_balance", "custom_credit_line",
+                          "account_currency", "last_integration_date")
+              if meta.has_field(f)]
+    if not wanted:
+        return {}
+
+    row = frappe.db.get_value(
+        "Bank Account", bank_account, wanted, as_dict=True) or {}
+
+    balance = row.get("custom_account_balance")
+    line = row.get("custom_credit_line")
+    standing = {
+        "balance": balance,
+        "credit_line": line,
+        "currency": row.get("account_currency"),
+        "as_of": row.get("last_integration_date"),
+    }
+    if balance is not None:
+        standing["available"] = float(balance) + float(line or 0)
+    return standing
