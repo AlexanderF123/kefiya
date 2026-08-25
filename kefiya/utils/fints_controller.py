@@ -19,6 +19,10 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
+from kefiya.utils import tan_challenge
+from kefiya.utils.fints_dialog_state import (
+    dialog_is_usable, discard_unusable_dialog,
+)
 from .import_bank_transaction import (
     ImportBankTransaction,
     resolve_incremental_from_date,
@@ -252,37 +256,43 @@ class FinTSController:
         # to unlock.
         if self.kefiya_login.stored_tan_blob \
                 and not self.fints_connection._standing_dialog:
-            # A challenge lives only as long as the bank keeps the dialog behind
-            # it. Nothing expired it on our side, so an unanswered challenge
-            # stayed parked forever -- and replaying it does not fail quietly:
-            # the bank answers without a TAN status, fints raises, and the raise
-            # ends every attempt to use this access. One challenge nobody
-            # released in July made an account unable to send anything in
-            # August.
+            # A challenge lives only as long as the bank keeps the dialog
+            # behind it. Nothing expired it on our side, so an unanswered
+            # challenge stayed parked forever -- and replaying it does not
+            # fail quietly: the bank answers without a TAN status, fints
+            # raises, and the raise ends every attempt to use this access. One
+            # challenge nobody released in July made an account unable to send
+            # anything in August.
             if self.__parked_challenge_is_stale():
                 self.__discard_parked_challenge()
             else:
                 try:
-                    with self.fints_connection.resume_dialog(self.kefiya_login.stored_dialog_blob):
-                        tan_request = NeedRetryResponse.from_data(self.kefiya_login.stored_tan_blob)
-
-                        # this decoupled setting is missing everywhere, so decoupled requests (like pushTAN 2.0) cannot be handled without this
-                        tan_request.decoupled = self.kefiya_login.stored_tan_state_decoupled
-                        self.fints_connection.init_tan_response = self.fints_connection.send_tan(tan_request, tan)
-
-                        # on failure update status and skip
-                        if self.is_tan_required_and_requested(self.fints_connection.init_tan_response):
-                            raise TanInteractionRequired()
-
-                        # on success clear stored tan state
-                        self.__persist_fints_state()
+                    self._resume_and_answer_the_parked_tan(tan)
                 except TanInteractionRequired:
-                    # The legitimate "ask the user" path, not a failure.
+                    # The legitimate "ask the user" path, not a failure -- but
+                    # the dialog behind it is gone all the same. The exception
+                    # leaves resume_dialog()'s block, its __exit__ ends the
+                    # dialog, and the client goes on holding a reference to it.
+                    # Dropping that reference is what lets the next attempt
+                    # open a fresh dialog instead of sending on a dead one.
+                    discard_unusable_dialog(self.fints_connection)
                     raise
                 except Exception:
-                    # The bank does not accept this challenge any more. Keeping
-                    # it would brick the access; throwing it away costs one
-                    # fresh TAN.
+                    # Two things are wrong here at once, and each needs its own
+                    # cleanup.
+                    #
+                    # resume_dialog() clears the client's reference to the
+                    # dialog when its block ends -- but it has no try/finally,
+                    # so an exception inside skips that line and leaves an
+                    # ENDED dialog registered. Inside a fetch session that
+                    # client is shared by every login of the bank access, so
+                    # each of them in turn joins the wreck: "Cannot send on
+                    # dialog that is not open", for one account after another.
+                    discard_unusable_dialog(self.fints_connection)
+
+                    # And the bank does not accept this challenge any more.
+                    # Keeping it would brick the access; throwing it away costs
+                    # one fresh TAN, which the ordinary login now asks for.
                     self.__discard_parked_challenge()
 
         # After successful login/tan verification fetch available accounts if not already present
@@ -297,6 +307,28 @@ class FinTSController:
         self.interactive.show_progress_realtime(
            _("Connection established"), 100, reload=False
         )
+
+    def _resume_and_answer_the_parked_tan(self, tan):
+        """Resume the parked dialog and answer the challenge waiting in it."""
+        blob = self.kefiya_login.stored_dialog_blob
+        with self.fints_connection.resume_dialog(blob):
+            tan_request = NeedRetryResponse.from_data(
+                self.kefiya_login.stored_tan_blob)
+
+            # this decoupled setting is missing everywhere, so decoupled
+            # requests (like pushTAN 2.0) cannot be handled without this
+            tan_request.decoupled = \
+                self.kefiya_login.stored_tan_state_decoupled
+            self.fints_connection.init_tan_response = \
+                self.fints_connection.send_tan(tan_request, tan)
+
+            # on failure update status and skip
+            if self.is_tan_required_and_requested(
+                    self.fints_connection.init_tan_response):
+                raise TanInteractionRequired()
+
+            # on success clear stored tan state
+            self.__persist_fints_state()
 
     def __init_fints_connection(self):
         """Private: Initialise new fints connection.
@@ -380,6 +412,17 @@ class FinTSController:
         """
         conn = self.fints_connection
         session = _active_session()
+
+        # A dialog that was ended but never unregistered cannot be sent on, and
+        # joining it is how one login's parked TAN broke every later login of
+        # the same access. Dropped here so the normal open path runs.
+        if conn._standing_dialog and not dialog_is_usable(conn):
+            if discard_unusable_dialog(conn) and session is not None:
+                # The shared client is only as good as its dialog was: take it
+                # out so the next login builds a clean one rather than
+                # inheriting whatever put this one in this state.
+                session.get("connections", {}).pop(
+                    _access_key(self.kefiya_login), None)
 
         if conn._standing_dialog:
             # Joining a dialog somebody else opened. Inside a session that is
@@ -718,10 +761,22 @@ class FinTSController:
                     reference_name=self.kefiya_login.name,
                 )
 
+        # What the bank actually asks. comdirect sends a photoTAN -- a coloured
+        # mosaic the phone app reads -- and a Sparkasse sends chipTAN-QR the
+        # same way. Without it the prompt asks for a TAN and shows nothing to
+        # scan, which is not a question anybody can answer.
+        challenge = tan_challenge.challenge_of(response)
+
         if response.decoupled if decoupled is None else decoupled:
-            self.interactive.request_mfa_confirmation(possible_tan_modes=possible_tan_modes, possible_tan_mediums=possible_tan_mediums)
+            self.interactive.request_mfa_confirmation(
+                possible_tan_modes=possible_tan_modes,
+                possible_tan_mediums=possible_tan_mediums,
+                challenge=challenge)
         else:
-            self.interactive.request_tan(possible_tan_modes=possible_tan_modes, possible_tan_mediums=possible_tan_mediums)
+            self.interactive.request_tan(
+                possible_tan_modes=possible_tan_modes,
+                possible_tan_mediums=possible_tan_mediums,
+                challenge=challenge)
 
     def __fetch_fints_accounts(self) -> bool:
         """Fetch FinTS Accounts.

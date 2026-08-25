@@ -470,6 +470,40 @@ frappe.provide("kefiya");
         };
     }
 
+    // What the bank asks, where it does not ask in words. comdirect sends a
+    // photoTAN -- a coloured mosaic the phone app reads before it shows the
+    // digits -- and a Sparkasse sends chipTAN-QR the same way. Without the
+    // picture the box asks for a TAN and shows nothing to scan.
+    //
+    // Sized in millimetres, not pixels: a photoTAN app reads the mosaic off
+    // the screen, and on a high-resolution display a picture given in pixels
+    // comes out too small to focus on. 40 mm is what the banks' own web
+    // interfaces use.
+    function tanChallengeField(data) {
+        var c = data.challenge;
+        if (!c || (!c.image && !c.text)) return null;
+
+        var html = '<div class="kefiya-tan-challenge" '
+            + 'style="text-align:center;margin-bottom:10px">';
+        if (c.image && c.image.data) {
+            html += '<img alt="' + __("Bank challenge") + '" '
+                + 'style="width:40mm;height:40mm;image-rendering:pixelated;'
+                + 'border:1px solid var(--border-color);border-radius:4px;'
+                + 'background:#fff;padding:4px" src="data:'
+                + frappe.utils.escape_html(c.image.mime || "image/png")
+                + ";base64," + frappe.utils.escape_html(c.image.data) + '">';
+            html += '<div class="text-muted small" style="margin-top:6px">'
+                + __("Scan this with your banking app, then enter the TAN it"
+                    + " shows.") + "</div>";
+        }
+        if (c.text) {
+            html += '<div class="small" style="margin-top:6px;text-align:left">'
+                + frappe.utils.escape_html(c.text) + "</div>";
+        }
+        return { fieldtype: "HTML", fieldname: "kefiya_tan_challenge",
+                 options: html + "</div>" };
+    }
+
     function tanPrompt(data, done) {
         var fields = [];
         if (data.possible_tan_modes) {
@@ -510,6 +544,10 @@ frappe.provide("kefiya");
         // the wrong one.
         var context = tanContextField(data);
         if (context) fields.unshift(context);
+        // Above the account line: the picture is the question, and the
+        // question belongs at the top.
+        var challenge = tanChallengeField(data);
+        if (challenge) fields.unshift(challenge);
 
         frappe.prompt(fields, function (values) {
             // Explicit feedback, because the run mutes the standard error box.

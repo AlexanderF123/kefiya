@@ -79,6 +79,27 @@ kefiya.capabilities = {
 		return payment_count > 1 ? "transfer_collective" : "transfer";
 	},
 
+	/**
+	 * Why an option is not offered, in words that name the account's answer.
+	 *
+	 * A greyed-out box with no reason is only marginally better than a hidden
+	 * one. This says who refused and what -- the bank, this business
+	 * transaction, on this account -- so the reader knows it is neither a
+	 * missing right nor a broken form.
+	 *
+	 * @param {string} capability
+	 * @param {number} count payments in the order; several make it collective,
+	 *   which is a different business transaction the bank rules on separately
+	 */
+	refusal_reason: function (capability, count) {
+		const what = this.label(capability);
+		return count > 1
+			? __("The bank does not allow \"{0}\" on this account. Several"
+				+ " payments go out as one collective order, which the bank"
+				+ " rules on separately from a single one.", [what])
+			: __("The bank does not allow \"{0}\" on this account.", [what]);
+	},
+
 	label: function (capability) {
 		const labels = {
 			transfer: __("Transfer"),

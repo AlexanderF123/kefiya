@@ -126,6 +126,12 @@ def _sources():
 
     python = ""
     for path in (("utils", "document_service.py"),
+                 # The outgoing-payments page. Its reasons an order is not
+                 # going out used to be German literals inside a Server
+                 # Script stored on one site -- typed without umlauts, and
+                 # nothing in a stored script notices. They are source
+                 # strings now, so this test reads them.
+                 ("utils", "outbox.py"),
                  ("kefiya", "doctype", "kefiya_document_service",
                   "kefiya_document_service.py")):
         with open(_app_path(*path), encoding="utf-8") as handle:

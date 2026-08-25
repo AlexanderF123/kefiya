@@ -107,13 +107,24 @@ class KefiyaTransfer(Document):
             self.execution_date = now_datetime().date()
 
         if getdate(self.execution_date) > now_datetime().date():
-            if cint(self.instant_payment):
-                # A real-time transfer is executed within seconds. A date on it
-                # is a contradiction, and no bank offers the combination.
+            # An instant payment and a date are only a contradiction when the
+            # BANK holds the date. Then the order goes out now, carrying a
+            # future execution date, and no bank offers HKIPZ that way.
+            #
+            # Held here, they are not a contradiction at all: the order waits
+            # in the outbox and is sent ON the day, and at that moment it is an
+            # ordinary immediate transfer that may perfectly well go out as an
+            # instant one. That is the combination this refusal used to catch
+            # along with the impossible one, which is why a dated transfer
+            # could never be an instant payment even where it plainly could.
+            if cint(self.instant_payment) and not cint(self.manage_due_date):
                 frappe.throw(_(
-                    "An instant payment is executed immediately and cannot"
-                    " carry a future execution date."
-                ))
+                    "An instant payment is executed within seconds, so the"
+                    " bank cannot hold it until {0}. Either let the date be"
+                    " kept here -- the order is then sent as an instant"
+                    " payment on the day -- or hand the date to the bank as an"
+                    " ordinary transfer."
+                ).format(frappe.format(self.execution_date, "Date")))
         elif not cint(self.manage_due_date):
             # Nothing to hand over: a bank cannot file an order for today or
             # for a day gone by. Silently correcting this is better than an
@@ -121,9 +132,115 @@ class KefiyaTransfer(Document):
             # same either way.
             self.manage_due_date = 1
 
-        if not self.company and self.kefiya_login:
-            self.company = frappe.db.get_value(
-                "Kefiya Login", self.kefiya_login, "company")
+        self.company = self.company_of_the_paying_account()
+        self.drop_instant_where_the_bank_refuses_it()
+        self.check_the_payees()
+
+    def check_the_payees(self):
+        """Record what our own history says about every recipient.
+
+        Written onto the order rather than shown and forgotten, because of who
+        reads it and when. The person entering the order has the invoice in
+        front of them; the person sending it does not. By the time the second
+        one looks, the check has to be a recorded fact and not a question that
+        gets asked again.
+
+        The bank's own Verification of Payee still happens where it must -- at
+        the bank, on submission. This is the other question, the one that can
+        be asked at entry: have we paid this IBAN before, and did it belong to
+        this name?
+
+        Never blocks. A first payment to a new payee is an ordinary thing, and
+        an order that cannot be saved until the software is satisfied is an
+        order that gets entered somewhere else.
+        """
+        from kefiya.utils import payee_check
+
+        for row in self.items:
+            if not row.recipient_iban:
+                continue
+            try:
+                answer = payee_check.check(row.recipient_name,
+                                           row.recipient_iban)
+            except Exception:
+                # A check that fails must not stop an order. It leaves no
+                # verdict, which reads as "not checked" rather than "fine".
+                frappe.log_error(
+                    title="Kefiya: payee check failed",
+                    message=frappe.get_traceback())
+                continue
+
+            row.payee_check = answer["verdict"]
+            row.payee_check_detail = _payee_detail(answer)
+
+    def drop_instant_where_the_bank_refuses_it(self):
+        """Turn the instant flag off where the account cannot do it at all.
+
+        It is on by default now, which is what makes this necessary: an account
+        whose bank does not offer HKIPZ would otherwise carry a flag that gets
+        the order refused at send time, on every order, for as long as nobody
+        notices what the default did.
+
+        Only an EXPLICIT refusal counts. An account nobody has fetched knows
+        nothing about itself, and treating that silence as a refusal would take
+        instant payments away from every account before its first fetch.
+        """
+        if not cint(self.instant_payment) or not self.kefiya_login:
+            return
+
+        from kefiya.utils import account_capabilities as capabilities
+
+        bank_account = frappe.db.get_value(
+            "Kefiya Login", self.kefiya_login, "bank_account")
+        wanted = capabilities.required_capability(
+            payment_count=len(self.items) or 1, instant=True)
+        if not capabilities.refuses(bank_account, wanted):
+            return
+
+        self.instant_payment = 0
+        frappe.msgprint(
+            capabilities.refusal_message(bank_account, wanted),
+            title=_("Sent as an ordinary transfer"), indicator="orange")
+
+    def company_of_the_paying_account(self):
+        """Whose money this is. Never a choice -- a fact about the account.
+
+        This used to be filled only when the field was still empty, so a
+        company already sitting there survived. A Company link picks up the
+        user's session default, so it is rarely empty: an order drawn on the
+        Brilu-Stiftung's account went out carrying "axessio Hausverwaltung
+        GmbH", and it was a colleague who noticed, not the software.
+
+        That is not a label. build_pain001_for() takes the ordering party's
+        NAME from this field and the ordering party's IBAN from the account --
+        so a mismatch sends an order that names one company and debits
+        another. Banks reject that, and the ones that do not are worse.
+
+        The Bank Account is the authority: it is the thing that holds the
+        money. The login's own company is the fallback for an account record
+        that names none.
+        """
+        if not self.kefiya_login:
+            return self.company
+
+        login = frappe.db.get_value(
+            "Kefiya Login", self.kefiya_login, ["company", "bank_account"],
+            as_dict=True) or {}
+
+        company = None
+        if login.get("bank_account"):
+            company = frappe.db.get_value(
+                "Bank Account", login["bank_account"], "company")
+        company = company or login.get("company")
+
+        if not company:
+            frappe.throw(_(
+                "The paying account {0} does not name a company, so there is"
+                " nothing to put on the order as the ordering party. Set the"
+                " company on the Bank Account first."
+            ).format(self.kefiya_login))
+
+        return company
 
     def before_submit(self):
         # Submitting approves the transfer; it does not send it. Sending is a
@@ -172,6 +289,24 @@ class KefiyaTransfer(Document):
         Returns (xml, control_sum, count).
         """
         return build_pain001_for([self])
+
+
+def _payee_detail(answer):
+    """The verdict in the words the reader needs, with the evidence in it."""
+    from kefiya.utils import payee_check
+
+    if answer["verdict"] == payee_check.VERDICT_KNOWN:
+        return _("Paid before under this name.")
+    if answer["verdict"] == payee_check.VERDICT_NAME_DIFFERS:
+        return _("This IBAN was paid before, but under: {0}").format(
+            ", ".join(answer["known_as"]) or _("another name"))
+    if answer["verdict"] == payee_check.VERDICT_OTHER_IBAN:
+        return _(
+            "We have paid this payee before, always to a different IBAN: {0}."
+            " Check the invoice against an earlier one before releasing this."
+        ).format(", ".join(answer["other_ibans"]))
+    return _("First payment to this IBAN, and this payee is not in our"
+             " history. Worth a second pair of eyes.")
 
 
 def build_pain001_for(docs):

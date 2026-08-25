@@ -172,7 +172,6 @@ Not deleted,Nicht gelöscht
 One account at a time,Nur ein Konto auf einmal
 Orders from several accounts are selected. A collective order always leaves from exactly one account — please send them one account at a time.,Es sind Aufträge von mehreren Konten markiert. Ein Sammelauftrag geht immer von genau einem Konto ab — bitte je Konto einzeln senden.
 {0} orders over {1} go from {2} to the bank.,{0} Aufträge über {1} gehen von {2} an die Bank.
-"{0} selected orders are not being sent — they are drafts, held back or already sent.","{0} markierte Aufträge gehen nicht mit — sie sind Entwürfe, zurückgestellt oder schon abgesendet."
 The bank will usually ask for a release (TAN or a confirmation in its app). Nothing is debited until then.,Die Bank verlangt in aller Regel eine Freigabe (TAN oder Bestätigung in ihrer App). Bis dahin ist nichts abgebucht.
 Sending to the bank …,Sende an die Bank …
 Not sent,Nicht abgesendet
@@ -191,3 +190,58 @@ Not sent — no signature,Nicht abgesendet — keine Signatur
 Please check the online banking before sending again: if the transfer is there after all, cancel this order instead of repeating it.","Die Bank hat keine TAN verlangt, verlangt für „{1}“ auf diesem Konto aber {0} Signatur(en). Ein Auftrag ohne die nötige Signatur wird nicht ausgeführt — er wurde deshalb NICHT als abgesendet vermerkt.
 
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
+Bank challenge,Aufforderung der Bank
+"Scan this with your banking app, then enter the TAN it shows.","Mit der Banking-App scannen, dann die angezeigte TAN eintragen."
+The account the money is paid from.,"Das Konto, von dem das Geld abgeht."
+"Comes from the paying account. Whose money is sent is decided by the account, not chosen here.","Kommt vom abgehenden Konto. Wessen Geld gesendet wird, entscheidet das Konto — nicht die Auswahl hier."
+"The paying account {0} does not name a company, so there is nothing to put on the order as the ordering party. Set the company on the Bank Account first.","Das abgehende Konto {0} nennt keine Gesellschaft, also steht nichts als Auftraggeber auf dem Auftrag. Bitte zuerst die Gesellschaft am Bankkonto setzen."
+Optional first: it narrows the accounts below to that company. Choosing an account sets it.,Zuerst wählbar: schränkt die Konten darunter auf diese Gesellschaft ein. Ein gewähltes Konto setzt sie.
+"{0} belongs to {1}, not to {2} — the paying account was cleared.","{0} gehört zu {1}, nicht zu {2} — das abgehende Konto wurde geleert."
+Balance {0},Saldo {0}
+overdraft {0},Dispo {0}
+available {0},verfügbar {0}
+as at {0},Stand {0}
+No balance has been fetched for this account yet.,Für dieses Konto wurde noch kein Saldo abgerufen.
+"The bank does not allow ""{0}"" on this account.",Die Bank erlaubt „{0}“ auf diesem Konto nicht.
+"The bank does not allow ""{0}"" on this account. Several payments go out as one collective order, which the bank rules on separately from a single one.","Die Bank erlaubt „{0}“ auf diesem Konto nicht. Mehrere Zahlungen gehen als ein Sammelauftrag raus, über den die Bank getrennt von einer einzelnen entscheidet."
+Not offered on this account,Auf diesem Konto nicht angeboten
+"An instant payment is executed within seconds, so the bank cannot hold it until {0}. Either let the date be kept here -- the order is then sent as an instant payment on the day -- or hand the date to the bank as an ordinary transfer.","Eine Echtzeitüberweisung wird binnen Sekunden ausgeführt, die Bank kann sie also nicht bis zum {0} halten. Entweder den Termin hier halten — dann geht der Auftrag am Tag als Echtzeitüberweisung raus — oder den Termin als gewöhnliche Überweisung an die Bank geben."
+Sent as an ordinary transfer,Geht als gewöhnliche Überweisung
+"The bank cannot hold an instant payment until a future date, so it was switched off. Tick ""keep the date here"" to send it as an instant payment on the day.",Die Bank kann eine Echtzeitüberweisung nicht bis zu einem künftigen Termin halten — sie wurde deshalb abgeschaltet. Mit „Termin bei uns halten“ geht sie am Tag als Echtzeitüberweisung raus.
+"The bank cannot hold an instant payment until a future date. Choose ""held here"" to send it as an instant payment on the day.",Die Bank kann eine Echtzeitüberweisung nicht bis zu einem künftigen Termin halten. Mit „bis dahin hier gehalten“ geht sie am Tag als Echtzeitüberweisung raus.
+Payee check,Empfängerprüfung
+Payee check detail,"Empfängerprüfung, Einzelheiten"
+"Checked against our own payment history when the order is entered, so it is a recorded fact by the time somebody sends it.",Wird beim Erfassen gegen unsere eigene Zahlungshistorie geprüft — beim Absenden steht das Ergebnis damit fest.
+Payee known,Empfänger bekannt
+"Known payee, new IBAN","Bekannter Empfänger, neue IBAN"
+IBAN known under another name,IBAN unter anderem Namen bekannt
+New payee,Neuer Empfänger
+This IBAN was paid before under this name.,An diese IBAN wurde unter diesem Namen bereits gezahlt.
+"This IBAN was paid before, but to somebody else.",An diese IBAN wurde bereits gezahlt — an jemand anderen.
+"We have paid this payee before, always to a different IBAN. Check the invoice against an earlier one before releasing this.","Diesen Empfänger haben wir schon bezahlt, bisher immer an eine andere IBAN. Bitte die Rechnung mit einer früheren vergleichen, bevor Sie freigeben."
+First payment to this IBAN. Worth a second pair of eyes.,Erste Zahlung an diese IBAN. Ein zweiter Blick lohnt sich.
+So far: {0},Bisher: {0}
+{0} of these recipients need a look,{0} Empfänger brauchen einen Blick
+Paid before under this name.,Vorher unter diesem Namen bezahlt.
+"This IBAN was paid before, but under: {0}","An diese IBAN wurde bereits gezahlt, aber unter: {0}"
+another name,einem anderen Namen
+"We have paid this payee before, always to a different IBAN: {0}. Check the invoice against an earlier one before releasing this.","Diesen Empfänger haben wir schon bezahlt, bisher immer an eine andere IBAN: {0}. Bitte die Rechnung mit einer früheren vergleichen, bevor Sie freigeben."
+"First payment to this IBAN, and this payee is not in our history. Worth a second pair of eyes.","Erste Zahlung an diese IBAN, und dieser Empfänger steht nicht in unserer Historie. Ein zweiter Blick lohnt sich."
+Already sent,Schon abgesendet
+Approve and send,Freigeben und senden
+Connected documents,Verbundene Dokumente
+"Named in the reference of this order. Amounts and receipts are changed there, not here.","Im Verwendungszweck dieses Auftrags genannt. Beträge und Belege werden dort geändert, nicht hier."
+No receipt,Kein Beleg
+Not approved yet,Noch nicht freigegeben
+Not due until {0},Fällig erst am {0}
+Nothing was approved.,Es wurde nichts freigegeben.
+Open the order to see the receipts,"Auftrag öffnen, um die Belege zu sehen"
+Payee verification still open,Empfängerprüfung offen
+This file type cannot be shown here — open it with the link above.,Dieser Dateityp lässt sich hier nicht anzeigen — bitte über den Link darüber öffnen.
+With the bank until its date,Liegt bei der Bank bis zum Termin
+{0} of them are still drafts and are approved as they are sent. Approving locks their amounts and recipients.,Davon sind {0} noch Entwürfe; sie werden mit dem Senden freigegeben. Die Freigabe schreibt Beträge und Empfänger fest.
+{0} orders are being sent; the rest were not approved.,{0} Aufträge gehen raus; der Rest wurde nicht freigegeben.
+"{0} selected orders are not being sent — they are held back, already sent, or not due yet.","{0} ausgewählte Aufträge gehen nicht raus — sie sind zurückgestellt, schon abgesendet oder noch nicht fällig."
+Approving and sending …,Freigeben und senden …
+We have paid this payee at these IBANs:,An diesen IBANs haben wir diesen Empfänger schon bezahlt:
+not found in this system,in diesem System nicht gefunden

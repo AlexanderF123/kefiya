@@ -12,7 +12,9 @@
   "column_break_amount",
   "amount",
   "purpose",
-  "end_to_end_id"
+  "end_to_end_id",
+  "payee_check",
+  "payee_check_detail"
  ],
  "fields": [
   {
@@ -69,6 +71,20 @@
    "fieldtype": "Data",
    "label": "End-To-End ID",
    "length": 35,
+   "read_only": 1
+  },
+  {
+   "description": "Checked against our own payment history when the order is entered, so it is a recorded fact by the time somebody sends it.",
+   "fieldname": "payee_check",
+   "fieldtype": "Select",
+   "label": "Payee check",
+   "options": "\nknown\nother_iban\nname_differs\nnew",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payee_check_detail",
+   "fieldtype": "Small Text",
+   "label": "Payee check detail",
    "read_only": 1
   }
  ],

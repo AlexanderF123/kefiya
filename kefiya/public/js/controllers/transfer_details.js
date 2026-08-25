@@ -74,12 +74,27 @@ kefiya.transfer_details = function (row, options) {
 //: of the recipient and go looking for documents that are not ours.
 kefiya.DOCNAME_IN_TEXT = /\b[A-Z]{2,8}(?:-[A-Z0-9]{2,6})*-\d{3,}\b/g;
 
+//: The documents this order names, as {name, doctype}.
+//:
+//: The server answers this on the outbox rows and resolves the doctype on the
+//: way, because it is the only side that can. Read from the row where it is
+//: there; parsed here where it is not, so a caller that hands over a bare
+//: document still gets the names.
 kefiya.transfer_referenced_documents = function (row) {
+	if (row && Array.isArray(row.referenced)) {
+		return row.referenced.map(function (entry) {
+			return typeof entry === "string"
+				? { name: entry, doctype: null } : entry;
+		});
+	}
+
 	const found = [];
 	((row && row.items) || []).forEach(function (item) {
 		const hits = String(item.purpose || "").match(kefiya.DOCNAME_IN_TEXT);
 		(hits || []).forEach(function (hit) {
-			if (hit !== row.name && found.indexOf(hit) < 0) found.push(hit);
+			if (hit !== row.name && !found.some(function (f) {
+				return f.name === hit;
+			})) found.push({ name: hit, doctype: null });
 		});
 	});
 	return found;
@@ -96,8 +111,8 @@ kefiya.transfer_referenced_documents = function (row) {
 kefiya.transfer_attachments = function (row) {
 	const names = [typeof row === "string" ? row : row.name];
 	if (typeof row !== "string") {
-		kefiya.transfer_referenced_documents(row).forEach(function (n) {
-			names.push(n);
+		kefiya.transfer_referenced_documents(row).forEach(function (entry) {
+			names.push(entry.name);
 		});
 	}
 
@@ -117,6 +132,33 @@ kefiya.transfer_attachments = function (row) {
 		// it -- the order itself is what the reader came for.
 		return null;
 	});
+};
+
+//: What a receipt looks like, when it can be shown at all.
+//:
+//: Two kinds carry almost every receipt here: a PDF out of the travel expense
+//: sheet, and a photograph of one. Both are shown. Anything else gets its name
+//: and a link, which is what it had before -- guessing at a viewer for a file
+//: type nobody sends is how a dialog ends up broken for the one person who
+//: does send it.
+kefiya.receipt_preview = function (file) {
+	const url = String((file && file.file_url) || "");
+	if (!url) return "";
+	const esc = frappe.utils.escape_html;
+	const name = String(file.file_name || file.name || "").toLowerCase();
+	const isImage = /\.(png|jpe?g|gif|webp|bmp|avif)$/.test(name);
+	const isPdf = /\.pdf$/.test(name);
+
+	if (isImage) {
+		return "<img src='" + esc(url) + "' alt='"
+			+ esc(file.file_name || "") + "' loading='lazy'>";
+	}
+	if (isPdf) {
+		return "<embed src='" + esc(url) + "#toolbar=0' type='application/pdf'>";
+	}
+	return "<div class='kef-noprev'>"
+		+ __("This file type cannot be shown here — open it with the link"
+			+ " above.") + "</div>";
 };
 
 kefiya.transfer_details_html = function (row, files) {
@@ -164,8 +206,8 @@ kefiya.transfer_details_html = function (row, files) {
 		return "<div class='kef-slip'>"
 			+ box(__("Recipient"), esc(it.recipient_name || "—"))
 			+ "<div class='kef-two'>"
-			+ box(__("IBAN"),
-				"<span class='kef-mono'>" + esc(it.recipient_iban || "") + "</span>")
+			+ box(__("IBAN"), "<span class='kef-mono'>"
+				+ esc(kefiya.iban_pretty(it.recipient_iban)) + "</span>")
 			+ box(__("Amount"), "<b>" + money(it.amount) + "</b>", "kef-r")
 			+ "</div>"
 			+ box(__("Reference"), esc(it.purpose || ""))
@@ -180,14 +222,18 @@ kefiya.transfer_details_html = function (row, files) {
 	} else if (files === undefined) {
 		receipts = "<div class='text-muted'>" + __("Loading …") + "</div>";
 	} else if (!files.length) {
-		const named = kefiya.transfer_referenced_documents(row);
+		const named = kefiya.transfer_referenced_documents(row)
+			.map(function (entry) { return entry.name; });
 		receipts = "<div class='text-muted'>"
 			+ (named.length
 				? __("No receipt is attached, neither here nor on {0}.",
 					[named.join(", ")])
 				: __("No receipt is attached to this order.")) + "</div>";
 	} else {
-		receipts = "<table class='kef-td'>" + files.map(function (fl) {
+		// Shown, not listed. A filename is not a receipt -- checking that the
+		// invoice in front of you is the one being paid means looking at it,
+		// and a link that opens a new tab is a step people skip.
+		receipts = files.map(function (fl) {
 			const size = fl.file_size
 				? " <span class='text-muted small'>("
 					+ Math.round(fl.file_size / 1024) + " KB)</span>" : "";
@@ -195,14 +241,49 @@ kefiya.transfer_details_html = function (row, files) {
 			// on the document that produced it, and saying so is what makes
 			// the connection checkable rather than magic.
 			const from = fl.attached_to_name && fl.attached_to_name !== row.name
-				? "<div class='text-muted small'>" + __("from {0} {1}",
+				? " <span class='text-muted small'>" + __("from {0} {1}",
 					[esc(fl.attached_to_doctype || ""),
-						esc(fl.attached_to_name)]) + "</div>"
+						esc(fl.attached_to_name)]) + "</span>"
 				: "";
-			return "<tr><td><a href='" + esc(fl.file_url) + "' target='_blank'>"
-				+ esc(fl.file_name || fl.name) + "</a>" + size + from
-				+ "</td></tr>";
-		}).join("") + "</table>";
+			return "<div class='kef-doc'>"
+				+ "<div class='kef-doc-h'><a href='" + esc(fl.file_url)
+				+ "' target='_blank'>" + esc(fl.file_name || fl.name)
+				+ "</a>" + size + from + "</div>"
+				+ kefiya.receipt_preview(fl) + "</div>";
+		}).join("");
+	}
+
+	// The documents this order names, whether or not anything hangs on them.
+	// This is the half that answers "change the connected data": the travel
+	// expense, the invoice, the trip -- they are where the amounts come from,
+	// and an order that only shows its own fields makes them unreachable.
+	const named = kefiya.transfer_referenced_documents(row);
+	let connected = "";
+	if (named.length) {
+		connected = "<div class='kef-h'>" + __("Connected documents")
+			+ "</div><div class='kef-slip'>"
+			+ named.map(function (entry) {
+				const n = entry.name;
+				// A name is not an address. Where the doctype is known -- the
+				// server resolves it from the receipt that hangs on the
+				// document -- this links straight to the form. Where it is
+				// not, it says the name and stops: a link to /app/search is a
+				// link to "could not find what you were looking for", and
+				// that page teaches the reader nothing they did not know.
+				if (!entry.doctype) {
+					return "<div>" + esc(n)
+						+ " <span class='text-muted small'>"
+						+ __("not found in this system") + "</span></div>";
+				}
+				return "<div><a href='/app/"
+					+ esc(frappe.router.slug(entry.doctype)) + "/"
+					+ encodeURIComponent(n) + "'>" + esc(n) + "</a>"
+					+ " <span class='text-muted small'>"
+					+ esc(__(entry.doctype)) + "</span></div>";
+			}).join("")
+			+ "<div class='text-muted small' style='margin-top:6px'>"
+			+ __("Named in the reference of this order. Amounts and receipts"
+				+ " are changed there, not here.") + "</div></div>";
 	}
 
 	// --- why it cannot be changed -------------------------------------------
@@ -249,6 +330,7 @@ kefiya.transfer_details_html = function (row, files) {
 		+ locked
 
 		+ "<div class='kef-h'>" + __("Receipts") + "</div>" + receipts
+		+ connected
 		+ "<div class='kef-order'>" + __("Order") + " "
 		+ "<a href='/app/kefiya-transfer/" + encodeURIComponent(row.name)
 		+ "'>" + esc(row.name) + "</a></div>"
@@ -273,9 +355,14 @@ kefiya.transfer_details_html = function (row, files) {
 		+ ".kef-total{text-align:right;padding:2px 4px 6px}"
 		+ ".kef-note{background:var(--fg-hover-color);border-radius:6px;"
 		+ "padding:8px 10px;font-size:12px;color:var(--text-muted)}"
-		+ ".kef-td{width:100%;border-collapse:collapse}"
-		+ ".kef-td td{padding:5px 4px;"
+		+ ".kef-doc{border:1px solid var(--border-color);border-radius:6px;"
+		+ "margin-bottom:8px;overflow:hidden;background:var(--card-bg)}"
+		+ ".kef-doc-h{padding:6px 8px;font-size:12px;"
 		+ "border-bottom:1px solid var(--border-color)}"
+		+ ".kef-doc img{display:block;max-width:100%;height:auto}"
+		+ ".kef-doc embed{display:block;width:100%;height:420px;border:0}"
+		+ ".kef-doc .kef-noprev{padding:8px;font-size:11px;"
+		+ "color:var(--text-muted)}"
 		+ ".kef-order{margin-top:14px;font-size:11px;color:var(--text-muted)}"
 		+ "</style>";
 };

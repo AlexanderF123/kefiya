@@ -1136,7 +1136,8 @@ def approve_transfers(transfer_names):
 
 
 @frappe.whitelist()
-def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
+def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
+                         approve_drafts=0):
     """Send several approved transfers as one collective order (HKCCM).
 
     This is what makes the outbox worth having: orders are entered one by one
@@ -1147,8 +1148,18 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
     is held back for a reason -- so each of those aborts the whole send instead
     of quietly dropping or including a document.
 
+    Drafts may be approved on the way out, and where that happens is the whole
+    point: AFTER every refusal above has had its say, not before. Approving is
+    irreversible -- it locks the amounts and the recipients, and undoing it
+    means cancelling the order and entering it again. Doing it in the browser
+    first, as the outgoing-payments page did, meant that a batch refused here
+    for mixing execution dates left its drafts approved for nothing.
+
     :param transfer_names: JSON list (or list) of Kefiya Transfer names
-    :return: {"status": ..., "sent": [names]}
+    :param approve_drafts: submit the still-unapproved orders in the selection
+        once the batch as a whole has been accepted
+    :return: {"status", "sent": [names], "approved": [names],
+        "refused": [{"name", "reason"}]}
     """
     from frappe.utils import cint
 
@@ -1162,12 +1173,18 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
     if not transfer_names:
         return {"status": "error", "message": _("No transfers selected.")}
 
+    approve_drafts = cint(approve_drafts)
     docs = []
+    drafts = []
     for name in transfer_names:
         frappe.has_permission(
             "Kefiya Transfer", ptype="submit", doc=name, throw=True)
         doc = frappe.get_doc("Kefiya Transfer", name)
-        if doc.docstatus != 1:
+        if doc.docstatus == 0 and approve_drafts:
+            # Kept in the batch and checked like every other order. What it is
+            # NOT yet is approved -- that waits until the checks are through.
+            drafts.append(doc)
+        elif doc.docstatus != 1:
             return {"status": "error", "message": _(
                 "{0} is not approved yet."
             ).format(name)}
@@ -1227,6 +1244,36 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
     if over:
         return over
 
+    # Every refusal is behind us. Only now is it safe to approve, because from
+    # here the order either goes to the bank or fails at the bank -- and an
+    # order that failed at the bank is meant to stay approved and be sent
+    # again, which is exactly not true of one this endpoint turned away.
+    approved, refused = [], []
+    if drafts:
+        for doc in drafts:
+            point = "kefiya_send_approve"
+            frappe.db.savepoint(point)
+            try:
+                doc.submit()
+                approved.append(doc.name)
+            except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+                frappe.db.rollback(save_point=point)
+                refused.append({"name": doc.name,
+                                "reason": _short_reason(exc)})
+        if refused:
+            # The batch is smaller than the one that was confirmed. Dropping
+            # the refused ones is right -- they carry no end-to-end identifier
+            # and cannot be part of the message -- but it must be said, and
+            # the total the limit was measured against only ever shrinks.
+            gone = {r["name"] for r in refused}
+            docs = [doc for doc in docs if doc.name not in gone]
+            transfer_names = [n for n in transfer_names if n not in gone]
+        if not docs:
+            return {"status": "error", "approved": approved,
+                    "refused": refused,
+                    "message": _("Nothing could be approved, so nothing was"
+                                 " sent.")}
+
     # Lock per document, not per account. The single-document endpoint locks
     # the same keys, so a document cannot be sent through both paths at once --
     # which would pay it twice.
@@ -1253,9 +1300,10 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             continue
         for done in claimed:
             frappe.cache().delete_value(done)
-        return {"status": "error", "message": _(
-            "A send is already in progress for: {0}"
-        ).format(key.split(":", 1)[1])}
+        return {"status": "error", "approved": approved, "refused": refused,
+                "message": _(
+                    "A send is already in progress for: {0}"
+                ).format(key.split(":", 1)[1])}
 
     from kefiya.utils.fints_controller import FinTSController
     interactive = {"docname": user_scope, "enabled": True}
@@ -1275,7 +1323,8 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
         if scheduled and _is_unsupported_schedule(exc):
             for doc in docs:
                 doc.db_set("manage_due_date", 1)
-            return {"status": "error",
+            return {"status": "error", "approved": approved,
+                    "refused": refused,
                     "message": _unsupported_schedule_message(docs[0])}
         raise
 
@@ -1294,6 +1343,11 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0):
             doc.db_set("vop_pending", 1)
 
     result["sent"] = transfer_names
+    # What the send approved on its way out, so the page can name an order
+    # that was locked but never left -- silence there is how a draft goes
+    # missing between two states.
+    result["approved"] = approved
+    result["refused"] = refused
     return result
 
 

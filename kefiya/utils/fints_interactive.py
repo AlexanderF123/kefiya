@@ -78,19 +78,22 @@ class FinTSInteractive:
         """
         self.request_tan_prompt(possible_tan_modes, possible_tan_mediums)
 
-    def request_tan(self, possible_tan_modes=None, possible_tan_mediums=None):
+    def request_tan(self, possible_tan_modes=None, possible_tan_mediums=None, challenge=None):
         """Request a TAN from user
 
         :return: None
         """
-        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums, request_tan=True)
+        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums,
+                                request_tan=True, challenge=challenge)
 
-    def request_mfa_confirmation(self, possible_tan_modes=None, possible_tan_mediums=None):
+    def request_mfa_confirmation(self, possible_tan_modes=None, possible_tan_mediums=None, challenge=None):
         """Request a solved MFA challenge from the user
 
         :return: None
         """
-        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums, request_mfa_confirmation=True)
+        self.request_tan_prompt(possible_tan_modes, possible_tan_mediums,
+                                request_mfa_confirmation=True,
+                                challenge=challenge)
 
     def account_context(self):
         """Which bank and which account this prompt is about.
@@ -157,7 +160,7 @@ class FinTSInteractive:
         self._account_context_cache = context
         return context
 
-    def request_tan_prompt(self, possible_tan_modes, possible_tan_mediums=None, *, request_tan=False, request_mfa_confirmation=False):
+    def request_tan_prompt(self, possible_tan_modes, possible_tan_mediums=None, *, request_tan=False, request_mfa_confirmation=False, challenge=None):
         """Request tan mechanism from user.
 
         :param possible_tan_modes: List of tan mechanisms
@@ -175,6 +178,12 @@ class FinTSInteractive:
             # form, the cockpit refresh and the outgoing-payments block -- and
             # each of them showed a bare "Verification required" before.
             params.update(self.account_context())
+
+            # The challenge itself, where the bank sent one. A photoTAN image
+            # travels as base64 in this payload: a few kilobytes, and the only
+            # way the picture reaches the screen that has to show it.
+            if challenge:
+                params["challenge"] = challenge
 
             if request_tan:
                 params["tan_required"] = True

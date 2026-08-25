@@ -156,7 +156,8 @@ def transfer_sources():
         "Kefiya Login",
         filters={"bank_account": ["is", "set"],
                  "account_kind": ["in", list(TRANSFER_SOURCE_KINDS)]},
-        fields=["name", "bank_account", "company", "account_kind"],
+        fields=["name", "bank_account", "company", "account_kind",
+                "account_iban"],
         limit_page_length=0)
 
     # A disabled Bank Account is still a Bank Account; it is just not one an
@@ -165,6 +166,113 @@ def transfer_sources():
         "Bank Account", filters={"disabled": 1}, fields=["name"],
         limit_page_length=0)}
 
-    return [{"login": r["name"], "bank_account": r["bank_account"],
-             "company": r.get("company"), "kind": r.get("account_kind")}
-            for r in rows if r["bank_account"] not in disabled]
+    refused = _accounts_that_cannot_pay()
+
+    return [dict({"login": r["name"], "bank_account": r["bank_account"],
+                  "company": r.get("company"), "kind": r.get("account_kind"),
+                  "iban": r.get("account_iban")},
+                 **account_standing(r["bank_account"]))
+            for r in rows
+            if r["bank_account"] not in disabled
+            and r["bank_account"] not in refused]
+
+
+#: Bank Account.account_type values that name a facility rather than an
+#: account. They are German because that is what somebody typed into the field
+#: on this instance; the kind above is the reliable answer and this is the
+#: belt to its braces.
+NOT_AN_ACCOUNT_TYPE = ("Darlehen", "Aval", "Collar", "Call")
+
+
+def _accounts_that_cannot_pay():
+    """Bank Accounts no transfer may start from, whatever their kind says.
+
+    Two answers, and both were already being asked -- by the page, not by the
+    app. The page is being taken apart, so they move here, where the one
+    helper that answers "which accounts may pay" can apply them.
+
+        the bank's own word   HIUPD said "transfer" is not allowed here
+        the account type      somebody wrote "Darlehen" or "Aval" on it
+
+    The page asked a third: whether a Property Loan names the account. That
+    one is NOT carried over, and deliberately.
+
+    It reads a field this app does not own, and the meaning of that field is
+    not settled -- "the loan's own account" and "the account the loan is
+    serviced from" are both plausible readings, and only the first makes the
+    exclusion correct. Under the second reading, a company that pays its
+    mortgage from its main giro account loses that giro account from every
+    payer list, and the transfer form says "no account available" with no way
+    to find out why. The rule cannot fire on anything BUT a giro or savings
+    account, because account_kind has already removed the loans -- so its only
+    possible effect is the false positive.
+
+    And it earns nothing: on this instance every account it would remove is
+    already removed by the bank's own refusal or by the account type. A rule
+    whose upside is zero and whose downside is a payer list that cannot pay is
+    not a belt, it is a hazard.
+
+    get_all rather than get_list on purpose: what is wanted is WHICH accounts
+    to take out. Nothing here is shown, so a reader without the right to see
+    every Bank Account gets a stricter list, never a wider one.
+    """
+    refused = set()
+
+    for row in frappe.get_all(
+            "Kefiya Account Capability", parent_doctype="Bank Account",
+            filters={"parenttype": "Bank Account", "capability": "transfer",
+                     "allowed": 0},
+            fields=["parent"], limit_page_length=0):
+        refused.add(row["parent"])
+
+    for row in frappe.get_all(
+            "Bank Account",
+            filters={"account_type": ["in", list(NOT_AN_ACCOUNT_TYPE)]},
+            fields=["name"], limit_page_length=0):
+        refused.add(row["name"])
+
+    return refused
+
+
+def account_standing(bank_account):
+    """What is on the account and what the bank lets it go below.
+
+    Asked at the moment somebody picks an account to pay from, because that is
+    when it decides anything. A balance that has to be looked up on another
+    page is a balance nobody looks up, and an order entered against an account
+    that cannot carry it comes back from the bank days later.
+
+    The overdraft line matters as much as the balance and is easy to forget:
+    664.028,54 EUR on the account with a line of 250.000,00 EUR means 914.028,54
+    can leave it, and a balance of 7.278,16 with no line at all means 7.278,16.
+    Both are stated, and so is the sum, because the sum is the number the
+    person entering the order is actually asking about.
+
+    The date is stated too. These fields are written by a fetch, so their age
+    is the difference between a fact and a guess -- and an account nobody has
+    fetched has no balance at all rather than a balance of zero.
+
+    :return: {"balance", "credit_line", "available", "as_of", "currency"} with
+        balance None where nothing was ever fetched
+    """
+    meta = frappe.get_meta("Bank Account")
+    wanted = [f for f in ("custom_account_balance", "custom_credit_line",
+                          "account_currency", "last_integration_date")
+              if meta.has_field(f)]
+    if not wanted:
+        return {}
+
+    row = frappe.db.get_value(
+        "Bank Account", bank_account, wanted, as_dict=True) or {}
+
+    balance = row.get("custom_account_balance")
+    line = row.get("custom_credit_line")
+    standing = {
+        "balance": balance,
+        "credit_line": line,
+        "currency": row.get("account_currency"),
+        "as_of": row.get("last_integration_date"),
+    }
+    if balance is not None:
+        standing["available"] = float(balance) + float(line or 0)
+    return standing

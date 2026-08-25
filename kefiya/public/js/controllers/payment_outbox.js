@@ -51,6 +51,14 @@ kefiya.OUTBOX_COLUMNS = [
 		sort: function (r) { return Number(r.total_amount || 0); },
 	},
 	{
+		// The original receipt, counted where the payment is looked at. It is
+		// counted across the documents the purpose names, not only the ones
+		// hanging on the order itself -- the travel expense PDF lives on the
+		// Business Trip and never moves.
+		key: "receipt", label: __("Receipts"), right: true,
+		sort: function (r) { return Number(r.receipts || 0); },
+	},
+	{
 		key: "note", label: __("Remark"),
 		sort: function (r) { return (r.blocked || "").toLowerCase(); },
 	},
@@ -83,6 +91,20 @@ kefiya.outbox_state = function (r) {
 	}
 	return { key: "approved", label: __("Approved for sending"), rank: 3,
 		fg: "#14532d", bg: "#EDF3EE" };
+};
+
+//: A draft that would go out today if somebody approved it.
+//:
+//: The server's answer, not a second opinion. It was written here first --
+//: docstatus, on_hold and a date comparison -- which made three copies of
+//: "is this order due yet": one in outbox.py, one in client.py, one here. The
+//: browser copy decided which drafts the send button offered to approve and
+//: the server copy decided whether to refuse the send, so the day they
+//: disagreed the user would confirm a batch, watch it be approved, and then
+//: be told it could not go. sendable_if_approved is the same function that
+//: writes `blocked`, asked with the approval assumed.
+kefiya.outbox_only_lacks_approval = function (r) {
+	return !!(r && r.sendable_if_approved);
 };
 
 kefiya.outbox_recipient = function (r) {
@@ -185,6 +207,8 @@ kefiya.outbox_style = function (root) {
 		"#zk tr.zk-row:focus{outline:2px solid var(--primary);",
 		"outline-offset:-2px}",
 		"#zk .zk-sub{color:var(--text-muted);font-size:11px}",
+		"#zk .zk-nodoc{color:var(--text-muted);opacity:.6}",
+		"#zk .zk-doc{white-space:nowrap;font-size:12px}",
 		"#zk .zk-iban{font-family:ui-monospace,Menlo,monospace;font-size:11px;",
 		"color:var(--text-muted)}",
 		"#zk .zk-badge{display:inline-block;padding:2px 7px;border-radius:9px;",
@@ -217,11 +241,6 @@ kefiya.payment_outbox = function (root) {
 
 	function dmy(d) { return d ? frappe.datetime.str_to_user(d) : ""; }
 
-	function ibanPretty(v) {
-		return (v || "").replace(/\s+/g, "").toUpperCase()
-			.replace(/(.{4})/g, "$1 ").trim();
-	}
-
 	function errText(r) {
 		const fromServer = kefiya.server_message && kefiya.server_message(r);
 		if (fromServer) return fromServer;
@@ -241,7 +260,11 @@ kefiya.payment_outbox = function (root) {
 	function load() {
 		root.innerHTML = "<div class='zk-load'>" + __("Loading …") + "</div>";
 		return frappe.call({
-			method: "zk_outbox_data",
+			// In the app, not a Server Script stored on one site. That script
+			// wrote its reasons as German literals typed without umlauts, and
+			// nothing in a stored script notices; here every one of them is a
+			// source string with a translation a test reads.
+			method: "kefiya.utils.outbox.outbox_data",
 			args: { q: view.query, show_sent: view.showSent ? 1 : 0 },
 		}).then(function (r) {
 			const m = (r && r.message) || {};
@@ -301,7 +324,17 @@ kefiya.payment_outbox = function (root) {
 			if (what === "release") {
 				return r.docstatus === 1 && !!r.on_hold;
 			}
-			if (what === "send") return !!r.sendable;
+			// Sending takes a draft as well: the send button approves what it
+			// is about to send. Two buttons for one intention was a step
+			// people took by rote, and a step taken by rote is not an
+			// approval -- it is a click. "Approve for sending" stays for the
+			// case where somebody really only wants to approve.
+			if (what === "send") {
+				return !!r.sendable || kefiya.outbox_only_lacks_approval(r);
+			}
+			if (what === "approve_to_send") {
+				return !r.sendable && kefiya.outbox_only_lacks_approval(r);
+			}
 			return false;
 		});
 	}
@@ -322,6 +355,19 @@ kefiya.payment_outbox = function (root) {
 			+ __("show sent") + "</label>";
 		h += "<button data-act='reload'>" + __("Refresh") + "</button></div>";
 		return h;
+	}
+
+	// Whether there is a receipt, at a glance. An order without one is the one
+	// worth stopping at, so the absence is stated rather than left as an empty
+	// cell that could equally mean "not loaded".
+	function receiptCell(r) {
+		const count = Number(r.receipts || 0);
+		if (!count) {
+			return "<span class='zk-nodoc' title=\"" + esc(__("No receipt"))
+				+ "\">—</span>";
+		}
+		return "<span class='zk-doc' title=\"" + esc(__("Open the order to"
+			+ " see the receipts")) + "\">\u{1F4CE} " + count + "</span>";
 	}
 
 	function table() {
@@ -354,7 +400,7 @@ kefiya.payment_outbox = function (root) {
 				: (esc((items[0] && items[0].purpose) || "")
 					+ (items[0] && items[0].recipient_iban
 						? "<br><span class='zk-iban'>"
-							+ esc(ibanPretty(items[0].recipient_iban))
+							+ esc(kefiya.iban_pretty(items[0].recipient_iban))
 							+ "</span>"
 						: ""));
 			let due;
@@ -384,6 +430,7 @@ kefiya.payment_outbox = function (root) {
 					+ "</div></td>"
 				+ "<td>" + due + "</td>"
 				+ "<td class='r'>" + money(r.total_amount) + "</td>"
+				+ "<td class='r'>" + receiptCell(r) + "</td>"
 				+ "<td class='zk-sub'>" + esc(r.blocked || "")
 					+ (r.instant_payment
 						? "<div>" + __("Instant payment") + "</div>" : "")
@@ -425,8 +472,14 @@ kefiya.payment_outbox = function (root) {
 			h += button("hold", __("Hold back"), applicable("hold").length);
 			h += button("approve", __("Approve for sending"),
 				applicable("approve").length);
-			h += button("send", __("Send"), applicable("send").length,
-				"zk-send");
+			// The button says what it will do. With a draft in the selection
+			// that is two things, and a button that only says "Send" would
+			// approve one without ever mentioning it.
+			h += button("send",
+				applicable("approve_to_send").length
+					? __("Approve and send")
+					: __("Send"),
+				applicable("send").length, "zk-send");
 		} else {
 			h += "<div class='zk-sub'>"
 				+ __("Sending needs the right to approve.") + "</div>";
@@ -701,8 +754,18 @@ kefiya.payment_outbox = function (root) {
 			+ "margin-top:8px'>" + list + "</table>";
 		if (skipped > 0) {
 			message += "<div class='text-muted small' style='margin-top:8px'>"
-				+ __("{0} selected orders are not being sent — they are"
-					+ " drafts, held back or already sent.", [skipped])
+				+ __("{0} selected orders are not being sent — they are held"
+					+ " back, already sent, or not due yet.", [skipped])
+				+ "</div>";
+		}
+		// Sending approves. Said out loud, because approving locks amounts and
+		// recipients and that is not something to discover afterwards.
+		const toApprove = applicable("approve_to_send");
+		if (toApprove.length) {
+			message += "<div class='text-muted small' style='margin-top:8px'>"
+				+ __("{0} of them are still drafts and are approved as they"
+					+ " are sent. Approving locks their amounts and"
+					+ " recipients.", [toApprove.length])
 				+ "</div>";
 		}
 		message += "<div class='text-muted small' style='margin-top:8px'>"
@@ -711,38 +774,57 @@ kefiya.payment_outbox = function (root) {
 			+ "</div>";
 
 		frappe.confirm(message, function () {
-			const names = rows.map(function (r) { return r.name; });
-			view.busy = true;
-			frappe.call({
-				method: "kefiya.utils.client.send_transfer_outbox",
-				args: { transfer_names: JSON.stringify(names),
-					user_scope: rows[0].kefiya_login, confirmed: 1 },
-				freeze: true,
-				freeze_message: __("Sending to the bank …"),
-			}).then(function (r) {
-				view.busy = false;
-				const m = (r && r.message) || {};
-				if (m.status === "error") {
-					frappe.msgprint({ title: __("Not sent"), indicator: "red",
-						message: esc(m.message || "") });
-				} else if (m.status === "tan_required") {
-					frappe.show_alert({
-						message: __("The bank asks for a release."),
-						indicator: "orange" }, 8);
-				} else {
-					view.selected = {};
-					frappe.show_alert({
-						message: __("Handed to the bank: {0} orders",
-							[(m.sent || []).length || names.length]),
-						indicator: "green" }, 8);
-				}
-				load();
-			}).catch(function (r) {
-				view.busy = false;
+			// One call, and the approval happens inside it -- AFTER the server
+			// has accepted the batch. Approving here first, as this page did,
+			// meant a batch refused for mixing execution dates left its drafts
+			// locked for nothing, undoable only by cancelling and re-entering
+			// them. The endpoint knows every refusal; the browser knows none.
+			handToBank(rows.map(function (r) { return r.name; }),
+				rows[0].kefiya_login, toApprove.length);
+		});
+	}
+
+	function handToBank(names, login, approving) {
+		view.busy = true;
+		frappe.call({
+			method: "kefiya.utils.client.send_transfer_outbox",
+			args: { transfer_names: JSON.stringify(names),
+				user_scope: login, confirmed: 1,
+				approve_drafts: approving ? 1 : 0 },
+			freeze: true,
+			freeze_message: approving
+				? __("Approving and sending …") : __("Sending to the bank …"),
+		}).then(function (r) {
+			view.busy = false;
+			const m = (r && r.message) || {};
+			// An order the approval turned away is named, whatever else
+			// happened. A batch that reports only its successes is how half a
+			// selection goes missing without anybody noticing.
+			if ((m.refused || []).length) {
+				reportBatch([], m.refused,
+					__("Approved: {0}", [(m.approved || []).length]),
+					__("Not approved"));
+			}
+			if (m.status === "error") {
 				frappe.msgprint({ title: __("Not sent"), indicator: "red",
-					message: esc(errText(r)) });
-				load();
-			});
+					message: esc(m.message || "") });
+			} else if (m.status === "tan_required") {
+				frappe.show_alert({
+					message: __("The bank asks for a release."),
+					indicator: "orange" }, 8);
+			} else {
+				view.selected = {};
+				frappe.show_alert({
+					message: __("Handed to the bank: {0} orders",
+						[(m.sent || []).length || names.length]),
+					indicator: "green" }, 8);
+			}
+			load();
+		}).catch(function (r) {
+			view.busy = false;
+			frappe.msgprint({ title: __("Not sent"), indicator: "red",
+				message: esc(errText(r)) });
+			load();
 		});
 	}
 

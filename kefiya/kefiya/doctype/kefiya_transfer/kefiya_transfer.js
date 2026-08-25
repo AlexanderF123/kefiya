@@ -4,11 +4,33 @@
 {% include "kefiya/public/js/controllers/fints_progress_log.js" %}
 {% include "kefiya/public/js/controllers/fints_interactive.js" %}
 {% include "kefiya/public/js/controllers/fints_transfer_flow.js" %}
-{% include "kefiya/public/js/controllers/account_capabilities.js" %}
 
 frappe.ui.form.on("Kefiya Transfer", {
 	onload: function (frm) {
 		kefiya.interactive.progressbar(frm);
+		// An IBAN printed in one block is not checkable against a letter from
+		// the bank; the eye slides off twenty-two characters. In fours it is.
+		// Display only -- what is stored stays unbroken, because a space
+		// inside an IBAN is a rejected order.
+		const iban_column = frm.fields_dict.items
+			&& frm.fields_dict.items.grid
+			&& frm.fields_dict.items.grid.get_docfield("recipient_iban");
+		if (iban_column) {
+			iban_column.formatter = function (value) {
+				return frappe.utils.escape_html(kefiya.iban_pretty(value));
+			};
+		}
+
+		// The company comes first on the form and narrows what follows: with
+		// one chosen, only its own accounts are offered. Without one, all of
+		// them are -- picking the account is the other way round, and it sets
+		// the company itself.
+		frm.set_query("kefiya_login", function () {
+			return frm.doc.company
+				? { filters: { company: frm.doc.company } }
+				: {};
+		});
+
 		// Only the company's own accounts are offered, and never the one the
 		// money is drawn from: a transfer from an account to itself is not a
 		// transfer, and the bank only says so after a TAN was spent on it.
@@ -25,6 +47,31 @@ frappe.ui.form.on("Kefiya Transfer", {
 
 	kefiya_login: function (frm) {
 		kefiya_apply_capabilities(frm);
+		kefiya_describe_paying_account(frm);
+	},
+
+	// The two fields point at each other, and the account is the stronger of
+	// the two: it holds the money. So changing the company only ever removes
+	// an account that no longer belongs to it -- it never rewrites one.
+	//
+	// Said out loud rather than done quietly: an account disappearing from a
+	// money form without a word is how somebody sends the next order from
+	// whatever happened to be selected afterwards.
+	company: function (frm) {
+		if (!frm.doc.company || !frm.doc.kefiya_login) return;
+		frappe.db.get_value("Kefiya Login", frm.doc.kefiya_login, "company")
+			.then(function (r) {
+				const owner = (r && r.message && r.message.company) || null;
+				if (!owner || owner === frm.doc.company) return;
+				const dropped = frm.doc.kefiya_login;
+				frm.set_value("kefiya_login", null);
+				frappe.show_alert({
+					message: __("{0} belongs to {1}, not to {2} — the paying"
+						+ " account was cleared.",
+						[dropped, owner, frm.doc.company]),
+					indicator: "orange",
+				}, 8);
+			});
 	},
 
 	instant_payment: function (frm) {
@@ -33,6 +80,11 @@ frappe.ui.form.on("Kefiya Transfer", {
 
 	manage_due_date: function (frm) {
 		kefiya_apply_capabilities(frm);
+		kefiya_reconcile_instant_with_the_date(frm);
+	},
+
+	execution_date: function (frm) {
+		kefiya_reconcile_instant_with_the_date(frm);
 	},
 
 	refresh: function (frm) {
@@ -40,6 +92,7 @@ frappe.ui.form.on("Kefiya Transfer", {
 		// below are offered at all. Applied asynchronously: the answer comes
 		// from the server, and the form must not wait for it to render.
 		kefiya_apply_capabilities(frm);
+		kefiya_describe_paying_account(frm);
 
 		// Sending is deliberately separate from submitting: approving a
 		// transfer must never move money as a side effect.
@@ -137,6 +190,117 @@ frappe.ui.form.on("Kefiya Transfer Item", {
 	},
 });
 
+/**
+ * Say which account the money leaves, in full, under the field that names it.
+ *
+ * The name of an access is not enough to tell two accounts of one bank apart,
+ * and it says nothing at all about whose money it is. A colleague preparing a
+ * transfer saw "Brilu KG Mietkonto" above "axessio Hausverwaltung GmbH" and
+ * asked whether that could be right. It could not -- and the form had shown
+ * both without a word about the contradiction.
+ *
+ * The company is now taken from the account and cannot diverge. This puts the
+ * evidence for it on the screen: the IBAN in fours, and the company it
+ * belongs to.
+ */
+function kefiya_describe_paying_account(frm) {
+	if (!frm.doc.kefiya_login) {
+		frm.set_df_property("kefiya_login", "description",
+			__("The account the money is paid from."));
+		return;
+	}
+	frappe.db.get_value("Kefiya Login", frm.doc.kefiya_login,
+		["account_iban", "bank_account", "company"]).then(function (r) {
+		const info = (r && r.message) || {};
+		const parts = [];
+		if (info.account_iban) parts.push(kefiya.iban_pretty(info.account_iban));
+		if (info.company) {
+			parts.push(info.company);
+			// The account decides whose money this is. Picking one is the
+			// answer to the company question, not a second question.
+			if (frm.doc.docstatus === 0 && frm.doc.company !== info.company) {
+				frm.set_value("company", info.company);
+			}
+		}
+		frm.set_df_property("kefiya_login", "description",
+			parts.length
+				? __("The account the money is paid from.") + " · "
+					+ parts.join(" · ")
+				: __("The account the money is paid from."));
+		frm.refresh_field("kefiya_login");
+
+		if (info.bank_account) {
+			kefiya_show_account_standing(frm, info.bank_account);
+		}
+	});
+}
+
+/**
+ * What is on the account and what the bank lets it go below.
+ *
+ * The overdraft line is as much a part of the answer as the balance and is the
+ * half people forget: 664.028,54 EUR on an account with a line of 250.000,00
+ * means 914.028,54 can leave it. Both are stated, and so is the sum.
+ *
+ * With the date, because these figures come from a fetch and their age is the
+ * difference between a fact and a guess.
+ */
+function kefiya_show_account_standing(frm, bank_account) {
+	frappe.db.get_value("Bank Account", bank_account,
+		["custom_account_balance", "custom_credit_line", "account_currency",
+			"last_integration_date"]).then(function (r) {
+		const a = (r && r.message) || {};
+		const balance = a.custom_account_balance;
+		if (balance === null || balance === undefined) {
+			frm.dashboard.clear_headline();
+			return;
+		}
+		const line = a.custom_credit_line || 0;
+		const money = function (v) {
+			return format_currency(v || 0, a.account_currency || undefined);
+		};
+		let text = __("Balance {0}", [money(balance)]);
+		if (line) {
+			text += " · " + __("overdraft {0}", [money(line)])
+				+ " · " + __("available {0}", [money(balance + line)]);
+		}
+		if (a.last_integration_date) {
+			text += " · " + __("as at {0}",
+				[frappe.datetime.str_to_user(a.last_integration_date)]);
+		}
+		frm.dashboard.add_comment(text, balance < 0 ? "orange" : "blue", true);
+	});
+}
+
+/**
+ * Instant payment and a date only clash when the BANK holds the date.
+ *
+ * Then the order goes out now carrying a future execution date, and no bank
+ * offers an instant payment that way. Held here it is no clash at all: the
+ * order waits in the outbox and is sent ON the day, as an ordinary immediate
+ * transfer that may well be an instant one.
+ *
+ * Instant is on by default, so this is the case that would otherwise greet the
+ * user with a validation error at save. It is turned off here instead, at the
+ * moment the incompatible choice is made, and with the reason -- rather than
+ * quietly, which would leave somebody wondering later why the payment took a
+ * day.
+ */
+function kefiya_reconcile_instant_with_the_date(frm) {
+	if (frm.doc.docstatus !== 0 || !frm.doc.instant_payment) return;
+	if (!frm.doc.execution_date || frm.doc.manage_due_date) return;
+	if (frappe.datetime.get_diff(frm.doc.execution_date,
+		frappe.datetime.get_today()) <= 0) return;
+
+	frm.set_value("instant_payment", 0);
+	frappe.show_alert({
+		message: __("The bank cannot hold an instant payment until a future"
+			+ " date, so it was switched off. Tick \"keep the date here\" to"
+			+ " send it as an instant payment on the day."),
+		indicator: "orange",
+	}, 10);
+}
+
 /** ISO 7064 mod-97 check, mirroring the server-side validation. */
 function kefiya_iban_is_valid(iban) {
 	if (!iban || iban.length < 15 || iban.length > 34) {
@@ -194,9 +358,16 @@ function kefiya_apply_capabilities(frm) {
 		// bank does not offer it here, the tick box is not just useless, it
 		// is a trap: it changes what is sent and the order fails at the bank.
 		const instant = kefiya.capabilities.required(count, false, true);
-		const instant_ok = kefiya.capabilities.allows(info, instant);
-		frm.toggle_display("instant_payment", instant_ok);
-		if (!instant_ok && frm.doc.instant_payment && frm.doc.docstatus === 0) {
+		const refused = kefiya.capabilities.refuses(info, instant);
+		// Shown and disabled, not hidden. A box that vanishes teaches nobody
+		// anything -- the reader is left wondering whether the option exists
+		// at all, whether they lost a right, or whether the form is broken.
+		// Standing there greyed out with its reason, it answers all three.
+		frm.set_df_property("instant_payment", "read_only", refused ? 1 : 0);
+		frm.set_df_property("instant_payment", "description", refused
+			? kefiya.capabilities.refusal_reason(instant, count)
+			: kefiya.execution_hint("instant"));
+		if (refused && frm.doc.instant_payment && frm.doc.docstatus === 0) {
 			frm.set_value("instant_payment", 0);
 		}
 
@@ -205,15 +376,19 @@ function kefiya_apply_capabilities(frm) {
 		// needs nothing from the bank -- so the field stays and only the
 		// choice to hand the date over goes.
 		const dated = kefiya.capabilities.required(count, true, false);
-		const dated_ok = kefiya.capabilities.allows(info, dated);
-		if (!dated_ok && frm.doc.docstatus === 0) {
-			frm.set_df_property(
-				"manage_due_date", "description",
-				__("The bank does not accept dated orders on this account, so the date is managed here.")
-			);
+		const dated_refused = kefiya.capabilities.refuses(info, dated);
+		frm.set_df_property("manage_due_date", "description", dated_refused
+			? kefiya.capabilities.refusal_reason(dated, count) + " "
+				+ kefiya.execution_hint("here")
+			: kefiya.execution_hint("bank") + " / "
+				+ kefiya.execution_hint("here"));
+		if (dated_refused && frm.doc.docstatus === 0) {
+			frm.set_df_property("manage_due_date", "read_only", 1);
 			if (!frm.doc.manage_due_date) {
 				frm.set_value("manage_due_date", 1);
 			}
+		} else {
+			frm.set_df_property("manage_due_date", "read_only", 0);
 		}
 
 		// And the order itself. Saying so here rather than at the bank is the
@@ -249,13 +424,32 @@ function kefiya_render_summary(frm) {
 
 function kefiya_confirm_and_send(frm) {
 	const count = (frm.doc.items || []).length;
-	const rows = (frm.doc.items || []).map((row) =>
-		"<tr><td>" + frappe.utils.escape_html(row.recipient_name || "")
-		+ "</td><td style='font-family:monospace'>"
-		+ frappe.utils.escape_html(row.recipient_iban || "")
-		+ "</td><td style='text-align:right'>"
-		+ format_currency(row.amount) + "</td></tr>"
-	).join("");
+	// The payee check travels into this box, because this is where the person
+	// who did NOT see the invoice decides. It was recorded when the order was
+	// entered; here it is read.
+	const rows = (frm.doc.items || []).map((row) => {
+		const info = kefiya.payee_verdict(row.payee_check);
+		const note = info
+			? "<div style='font-size:11px;color:"
+				+ (kefiya.payee_needs_a_look(row.payee_check)
+					? "var(--red-600,#c0392b)" : "var(--text-muted)")
+				+ "'>" + frappe.utils.escape_html(info.short)
+				+ (row.payee_check_detail
+					? " — " + frappe.utils.escape_html(row.payee_check_detail)
+					: "") + "</div>"
+			: "";
+		return "<tr><td>" + frappe.utils.escape_html(row.recipient_name || "")
+			+ note
+			+ "</td><td style='font-family:monospace'>"
+			+ frappe.utils.escape_html(kefiya.iban_pretty(row.recipient_iban))
+			+ "</td><td style='text-align:right'>"
+			+ format_currency(row.amount) + "</td></tr>";
+	}).join("");
+
+	// A recipient our own history argues with is named again, above the list,
+	// where it cannot be scrolled past.
+	const flagged = (frm.doc.items || []).filter(
+		(row) => kefiya.payee_needs_a_look(row.payee_check));
 
 	const d = new frappe.ui.Dialog({
 		title: count > 1 ? __("Send collective order") : __("Send transfer"),
@@ -264,7 +458,19 @@ function kefiya_confirm_and_send(frm) {
 			{
 				fieldtype: "HTML",
 				options:
-					"<div class='alert alert-warning'>"
+					(flagged.length
+						? "<div class='alert alert-danger'><b>"
+							+ __("{0} of these recipients need a look",
+								[flagged.length])
+							+ "</b><div style='margin-top:4px'>"
+							+ flagged.map((row) =>
+								frappe.utils.escape_html(
+									row.recipient_name || "")
+								+ ": " + frappe.utils.escape_html(
+									row.payee_check_detail || "")).join("<br>")
+							+ "</div></div>"
+						: "")
+					+ "<div class='alert alert-warning'>"
 					+ __("You are about to move {0} from {1}. Check every recipient — a transfer cannot be undone here.", [
 						"<b>" + format_currency(frm.doc.total_amount) + "</b>",
 						frappe.utils.escape_html(frm.doc.kefiya_login || ""),
