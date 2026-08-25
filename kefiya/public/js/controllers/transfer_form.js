@@ -120,6 +120,7 @@ kefiya.transfer_form = function (options) {
 			label: __("IBAN"), default: item.recipient_iban || "",
 			description: __("Checked against its checksum before it is stored."),
 		},
+		{ fieldtype: "HTML", fieldname: "payee_verdict" },
 		{ fieldtype: "Section Break" },
 		{
 			fieldtype: "Currency", fieldname: "amount", reqd: 1,
@@ -267,6 +268,24 @@ kefiya.transfer_form = function (options) {
 		});
 	};
 
+	// Asked as soon as both halves of the recipient are there. Not on submit:
+	// the answer is meant to change what gets typed, and after the save it is
+	// only a reproach.
+	const checkPayee = function () {
+		const iban = kefiya.iban_plain(dialog.get_value("recipient_iban"));
+		const who = dialog.get_value("recipient_name");
+		if (!iban || iban.length < 15) {
+			dialog.fields_dict.payee_verdict.$wrapper.html("");
+			return;
+		}
+		kefiya.payee_check(who, iban).then(function (answer) {
+			dialog.payee_answer = answer;
+			dialog.fields_dict.payee_verdict.$wrapper.html(
+				kefiya.payee_check_html(answer));
+		});
+	};
+	dialog.fields_dict.recipient_iban.df.onchange = checkPayee;
+
 	// Suggestions without a requirement: an Autocomplete would refuse a name
 	// it does not know, which is exactly the case this document exists for.
 	kefiya.known_payees().then(function (names) {
@@ -275,6 +294,7 @@ kefiya.transfer_form = function (options) {
 			input.autocomplete({ source: names, minLength: 2 });
 		}
 	});
+	dialog.fields_dict.recipient_name.df.onchange = checkPayee;
 
 	dialog.show();
 	showHint();

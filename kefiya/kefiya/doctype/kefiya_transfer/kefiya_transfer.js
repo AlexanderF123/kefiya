@@ -424,13 +424,32 @@ function kefiya_render_summary(frm) {
 
 function kefiya_confirm_and_send(frm) {
 	const count = (frm.doc.items || []).length;
-	const rows = (frm.doc.items || []).map((row) =>
-		"<tr><td>" + frappe.utils.escape_html(row.recipient_name || "")
-		+ "</td><td style='font-family:monospace'>"
-		+ frappe.utils.escape_html(kefiya.iban_pretty(row.recipient_iban))
-		+ "</td><td style='text-align:right'>"
-		+ format_currency(row.amount) + "</td></tr>"
-	).join("");
+	// The payee check travels into this box, because this is where the person
+	// who did NOT see the invoice decides. It was recorded when the order was
+	// entered; here it is read.
+	const rows = (frm.doc.items || []).map((row) => {
+		const info = kefiya.payee_verdict(row.payee_check);
+		const note = info
+			? "<div style='font-size:11px;color:"
+				+ (kefiya.payee_needs_a_look(row.payee_check)
+					? "var(--red-600,#c0392b)" : "var(--text-muted)")
+				+ "'>" + frappe.utils.escape_html(info.short)
+				+ (row.payee_check_detail
+					? " — " + frappe.utils.escape_html(row.payee_check_detail)
+					: "") + "</div>"
+			: "";
+		return "<tr><td>" + frappe.utils.escape_html(row.recipient_name || "")
+			+ note
+			+ "</td><td style='font-family:monospace'>"
+			+ frappe.utils.escape_html(kefiya.iban_pretty(row.recipient_iban))
+			+ "</td><td style='text-align:right'>"
+			+ format_currency(row.amount) + "</td></tr>";
+	}).join("");
+
+	// A recipient our own history argues with is named again, above the list,
+	// where it cannot be scrolled past.
+	const flagged = (frm.doc.items || []).filter(
+		(row) => kefiya.payee_needs_a_look(row.payee_check));
 
 	const d = new frappe.ui.Dialog({
 		title: count > 1 ? __("Send collective order") : __("Send transfer"),
@@ -439,7 +458,19 @@ function kefiya_confirm_and_send(frm) {
 			{
 				fieldtype: "HTML",
 				options:
-					"<div class='alert alert-warning'>"
+					(flagged.length
+						? "<div class='alert alert-danger'><b>"
+							+ __("{0} of these recipients need a look",
+								[flagged.length])
+							+ "</b><div style='margin-top:4px'>"
+							+ flagged.map((row) =>
+								frappe.utils.escape_html(
+									row.recipient_name || "")
+								+ ": " + frappe.utils.escape_html(
+									row.payee_check_detail || "")).join("<br>")
+							+ "</div></div>"
+						: "")
+					+ "<div class='alert alert-warning'>"
 					+ __("You are about to move {0} from {1}. Check every recipient — a transfer cannot be undone here.", [
 						"<b>" + format_currency(frm.doc.total_amount) + "</b>",
 						frappe.utils.escape_html(frm.doc.kefiya_login || ""),

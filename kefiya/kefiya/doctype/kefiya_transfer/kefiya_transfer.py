@@ -134,6 +134,44 @@ class KefiyaTransfer(Document):
 
         self.company = self.company_of_the_paying_account()
         self.drop_instant_where_the_bank_refuses_it()
+        self.check_the_payees()
+
+    def check_the_payees(self):
+        """Record what our own history says about every recipient.
+
+        Written onto the order rather than shown and forgotten, because of who
+        reads it and when. The person entering the order has the invoice in
+        front of them; the person sending it does not. By the time the second
+        one looks, the check has to be a recorded fact and not a question that
+        gets asked again.
+
+        The bank's own Verification of Payee still happens where it must -- at
+        the bank, on submission. This is the other question, the one that can
+        be asked at entry: have we paid this IBAN before, and did it belong to
+        this name?
+
+        Never blocks. A first payment to a new payee is an ordinary thing, and
+        an order that cannot be saved until the software is satisfied is an
+        order that gets entered somewhere else.
+        """
+        from kefiya.utils import payee_check
+
+        for row in self.items:
+            if not row.recipient_iban:
+                continue
+            try:
+                answer = payee_check.check(row.recipient_name,
+                                           row.recipient_iban)
+            except Exception:
+                # A check that fails must not stop an order. It leaves no
+                # verdict, which reads as "not checked" rather than "fine".
+                frappe.log_error(
+                    title="Kefiya: payee check failed",
+                    message=frappe.get_traceback())
+                continue
+
+            row.payee_check = answer["verdict"]
+            row.payee_check_detail = _payee_detail(answer)
 
     def drop_instant_where_the_bank_refuses_it(self):
         """Turn the instant flag off where the account cannot do it at all.
@@ -251,6 +289,24 @@ class KefiyaTransfer(Document):
         Returns (xml, control_sum, count).
         """
         return build_pain001_for([self])
+
+
+def _payee_detail(answer):
+    """The verdict in the words the reader needs, with the evidence in it."""
+    from kefiya.utils import payee_check
+
+    if answer["verdict"] == payee_check.VERDICT_KNOWN:
+        return _("Paid before under this name.")
+    if answer["verdict"] == payee_check.VERDICT_NAME_DIFFERS:
+        return _("This IBAN was paid before, but under: {0}").format(
+            ", ".join(answer["known_as"]) or _("another name"))
+    if answer["verdict"] == payee_check.VERDICT_OTHER_IBAN:
+        return _(
+            "We have paid this payee before, always to a different IBAN: {0}."
+            " Check the invoice against an earlier one before releasing this."
+        ).format(", ".join(answer["other_ibans"]))
+    return _("First payment to this IBAN, and this payee is not in our"
+             " history. Worth a second pair of eyes.")
 
 
 def build_pain001_for(docs):

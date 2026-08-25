@@ -18,6 +18,10 @@ import "./controllers/iban_display";
 // What the bank allows on an account. Both transfer forms ask it now, so
 // it belongs to every page rather than to one doctype.
 import "./controllers/account_capabilities";
+// What our own payment history says about a recipient. Asked at entry,
+// because the person who sends the order is not the one who saw the
+// invoice.
+import "./controllers/payee_check";
 import "./controllers/bank_refresh";
 // Opened from the outgoing-payments page, and from anywhere else that wants
 // to show one transfer without navigating away from what the reader is doing.

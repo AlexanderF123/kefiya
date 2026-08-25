@@ -210,3 +210,21 @@ Not offered on this account,Auf diesem Konto nicht angeboten
 Sent as an ordinary transfer,Geht als gewöhnliche Überweisung
 "The bank cannot hold an instant payment until a future date, so it was switched off. Tick ""keep the date here"" to send it as an instant payment on the day.",Die Bank kann eine Echtzeitüberweisung nicht bis zu einem künftigen Termin halten — sie wurde deshalb abgeschaltet. Mit „Termin bei uns halten“ geht sie am Tag als Echtzeitüberweisung raus.
 "The bank cannot hold an instant payment until a future date. Choose ""held here"" to send it as an instant payment on the day.",Die Bank kann eine Echtzeitüberweisung nicht bis zu einem künftigen Termin halten. Mit „bis dahin hier gehalten“ geht sie am Tag als Echtzeitüberweisung raus.
+Payee check,Empfängerprüfung
+Payee check detail,"Empfängerprüfung, Einzelheiten"
+"Checked against our own payment history when the order is entered, so it is a recorded fact by the time somebody sends it.",Wird beim Erfassen gegen unsere eigene Zahlungshistorie geprüft — beim Absenden steht das Ergebnis damit fest.
+Payee known,Empfänger bekannt
+"Known payee, new IBAN","Bekannter Empfänger, neue IBAN"
+IBAN known under another name,IBAN unter anderem Namen bekannt
+New payee,Neuer Empfänger
+This IBAN was paid before under this name.,An diese IBAN wurde unter diesem Namen bereits gezahlt.
+"This IBAN was paid before, but to somebody else.",An diese IBAN wurde bereits gezahlt — an jemand anderen.
+"We have paid this payee before, always to a different IBAN. Check the invoice against an earlier one before releasing this.","Diesen Empfänger haben wir schon bezahlt, bisher immer an eine andere IBAN. Bitte die Rechnung mit einer früheren vergleichen, bevor Sie freigeben."
+First payment to this IBAN. Worth a second pair of eyes.,Erste Zahlung an diese IBAN. Ein zweiter Blick lohnt sich.
+So far: {0},Bisher: {0}
+{0} of these recipients need a look,{0} Empfänger brauchen einen Blick
+Paid before under this name.,Vorher unter diesem Namen bezahlt.
+"This IBAN was paid before, but under: {0}","An diese IBAN wurde bereits gezahlt, aber unter: {0}"
+another name,einem anderen Namen
+"We have paid this payee before, always to a different IBAN: {0}. Check the invoice against an earlier one before releasing this.","Diesen Empfänger haben wir schon bezahlt, bisher immer an eine andere IBAN: {0}. Bitte die Rechnung mit einer früheren vergleichen, bevor Sie freigeben."
+"First payment to this IBAN, and this payee is not in our history. Worth a second pair of eyes.","Erste Zahlung an diese IBAN, und dieser Empfänger steht nicht in unserer Historie. Ein zweiter Blick lohnt sich."
