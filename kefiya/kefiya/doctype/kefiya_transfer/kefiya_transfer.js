@@ -80,6 +80,11 @@ frappe.ui.form.on("Kefiya Transfer", {
 
 	manage_due_date: function (frm) {
 		kefiya_apply_capabilities(frm);
+		kefiya_reconcile_instant_with_the_date(frm);
+	},
+
+	execution_date: function (frm) {
+		kefiya_reconcile_instant_with_the_date(frm);
 	},
 
 	refresh: function (frm) {
@@ -265,6 +270,35 @@ function kefiya_show_account_standing(frm, bank_account) {
 		}
 		frm.dashboard.add_comment(text, balance < 0 ? "orange" : "blue", true);
 	});
+}
+
+/**
+ * Instant payment and a date only clash when the BANK holds the date.
+ *
+ * Then the order goes out now carrying a future execution date, and no bank
+ * offers an instant payment that way. Held here it is no clash at all: the
+ * order waits in the outbox and is sent ON the day, as an ordinary immediate
+ * transfer that may well be an instant one.
+ *
+ * Instant is on by default, so this is the case that would otherwise greet the
+ * user with a validation error at save. It is turned off here instead, at the
+ * moment the incompatible choice is made, and with the reason -- rather than
+ * quietly, which would leave somebody wondering later why the payment took a
+ * day.
+ */
+function kefiya_reconcile_instant_with_the_date(frm) {
+	if (frm.doc.docstatus !== 0 || !frm.doc.instant_payment) return;
+	if (!frm.doc.execution_date || frm.doc.manage_due_date) return;
+	if (frappe.datetime.get_diff(frm.doc.execution_date,
+		frappe.datetime.get_today()) <= 0) return;
+
+	frm.set_value("instant_payment", 0);
+	frappe.show_alert({
+		message: __("The bank cannot hold an instant payment until a future"
+			+ " date, so it was switched off. Tick \"keep the date here\" to"
+			+ " send it as an instant payment on the day."),
+		indicator: "orange",
+	}, 10);
 }
 
 /** ISO 7064 mod-97 check, mirroring the server-side validation. */

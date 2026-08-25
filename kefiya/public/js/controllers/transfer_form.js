@@ -154,7 +154,11 @@ kefiya.transfer_form = function (options) {
 		{
 			fieldtype: "Check", fieldname: "instant_payment",
 			label: __("Instant payment"),
-			default: existing && existing.instant_payment ? 1 : 0,
+			// On unless this order already says otherwise. Money that arrives
+			// in seconds is what people expect of a transfer now; the reasons
+			// not to are the exceptions, and each of them turns it off with a
+			// reason of its own.
+			default: existing ? (existing.instant_payment ? 1 : 0) : 1,
 			description: kefiya.execution_hint("instant"),
 		},
 		{ fieldtype: "Section Break" },
@@ -181,6 +185,26 @@ kefiya.transfer_form = function (options) {
 		}) || kefiya.EXECUTION_MODES[0];
 		// A mode the bank refuses says so here, where the choice was made,
 		// rather than at the bank after a TAN has been spent on it.
+		// A bank-held date and an instant payment cannot go together: the
+		// order would go out now carrying a future date, and no bank offers
+		// that. Held here they go together perfectly -- the order is sent ON
+		// the day, and that moment is an ordinary immediate transfer.
+		const bank_holds_it = mode.value === "bank";
+		dialog.set_df_property("instant_payment", "read_only",
+			bank_holds_it || dialog.instant_refused ? 1 : 0);
+		if (bank_holds_it && dialog.get_value("instant_payment")) {
+			dialog.set_value("instant_payment", 0);
+		}
+		if (bank_holds_it) {
+			dialog.set_df_property("instant_payment", "description",
+				__("The bank cannot hold an instant payment until a future"
+					+ " date. Choose \"held here\" to send it as an instant"
+					+ " payment on the day."));
+		} else if (!dialog.instant_refused) {
+			dialog.set_df_property("instant_payment", "description",
+				kefiya.execution_hint("instant"));
+		}
+
 		const refused = dialog.refused_modes && dialog.refused_modes[label];
 		dialog.fields_dict.hint.$wrapper.html(
 			"<div class='text-muted small'>"

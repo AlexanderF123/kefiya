@@ -107,13 +107,24 @@ class KefiyaTransfer(Document):
             self.execution_date = now_datetime().date()
 
         if getdate(self.execution_date) > now_datetime().date():
-            if cint(self.instant_payment):
-                # A real-time transfer is executed within seconds. A date on it
-                # is a contradiction, and no bank offers the combination.
+            # An instant payment and a date are only a contradiction when the
+            # BANK holds the date. Then the order goes out now, carrying a
+            # future execution date, and no bank offers HKIPZ that way.
+            #
+            # Held here, they are not a contradiction at all: the order waits
+            # in the outbox and is sent ON the day, and at that moment it is an
+            # ordinary immediate transfer that may perfectly well go out as an
+            # instant one. That is the combination this refusal used to catch
+            # along with the impossible one, which is why a dated transfer
+            # could never be an instant payment even where it plainly could.
+            if cint(self.instant_payment) and not cint(self.manage_due_date):
                 frappe.throw(_(
-                    "An instant payment is executed immediately and cannot"
-                    " carry a future execution date."
-                ))
+                    "An instant payment is executed within seconds, so the"
+                    " bank cannot hold it until {0}. Either let the date be"
+                    " kept here -- the order is then sent as an instant"
+                    " payment on the day -- or hand the date to the bank as an"
+                    " ordinary transfer."
+                ).format(frappe.format(self.execution_date, "Date")))
         elif not cint(self.manage_due_date):
             # Nothing to hand over: a bank cannot file an order for today or
             # for a day gone by. Silently correcting this is better than an
@@ -122,6 +133,36 @@ class KefiyaTransfer(Document):
             self.manage_due_date = 1
 
         self.company = self.company_of_the_paying_account()
+        self.drop_instant_where_the_bank_refuses_it()
+
+    def drop_instant_where_the_bank_refuses_it(self):
+        """Turn the instant flag off where the account cannot do it at all.
+
+        It is on by default now, which is what makes this necessary: an account
+        whose bank does not offer HKIPZ would otherwise carry a flag that gets
+        the order refused at send time, on every order, for as long as nobody
+        notices what the default did.
+
+        Only an EXPLICIT refusal counts. An account nobody has fetched knows
+        nothing about itself, and treating that silence as a refusal would take
+        instant payments away from every account before its first fetch.
+        """
+        if not cint(self.instant_payment) or not self.kefiya_login:
+            return
+
+        from kefiya.utils import account_capabilities as capabilities
+
+        bank_account = frappe.db.get_value(
+            "Kefiya Login", self.kefiya_login, "bank_account")
+        wanted = capabilities.required_capability(
+            payment_count=len(self.items) or 1, instant=True)
+        if not capabilities.refuses(bank_account, wanted):
+            return
+
+        self.instant_payment = 0
+        frappe.msgprint(
+            capabilities.refusal_message(bank_account, wanted),
+            title=_("Sent as an ordinary transfer"), indicator="orange")
 
     def company_of_the_paying_account(self):
         """Whose money this is. Never a choice -- a fact about the account.

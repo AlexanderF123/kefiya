@@ -73,7 +73,7 @@
    "label": "Manage the due date ourselves"
   },
   {
-   "default": "0",
+   "default": "1",
    "description": "Real-time credit transfer (HKIPZ). Bank and account must support it, otherwise the order is rejected.",
    "fieldname": "instant_payment",
    "fieldtype": "Check",
