@@ -267,6 +267,24 @@ def account_standing(bank_account):
 
     balance = row.get("custom_account_balance")
     line = row.get("custom_credit_line")
+
+    # A zero that nobody fetched is not a balance, it is an empty field.
+    #
+    # This module already said "an account nobody has fetched has no balance
+    # at all rather than a balance of zero", and then let a stored 0.00
+    # through as a fact -- because it only checked for None. On this instance
+    # that is 788 of 839 accounts: the field defaults to 0, and
+    # last_integration_date has never been written by anything. So the entry
+    # form told the person picking an account that it held 0.00 EUR, in the
+    # same confident line it uses for the account that really holds
+    # 664,028.54. A wrong number about money reads exactly like a right one.
+    #
+    # Deliberately narrow: a real zero that a fetch did record keeps its date
+    # and stays a real zero. It is only the untouched pair -- no date AND
+    # exactly zero -- that is treated as "nothing is known".
+    if not row.get("last_integration_date") and not balance:
+        balance = None
+
     standing = {
         "balance": balance,
         "credit_line": line,

@@ -1,0 +1,254 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2026, Phamos GmbH and contributors
+# For license information, please see license.txt
+
+"""Undoing an import that put the same booking on several accounts.
+
+What happened, on 21.05.2026: a run created 211,340 Bank Transactions, and
+29,700 of those bookings exist two, three, four or five times over, on
+different accounts. An employee found it the way such things are always found
+-- she saw a supplier paid three times, once from an account that could not
+have paid him.
+
+The shape of it is not "every row landed on one account". It is a cluster:
+
+    Sofienstr. Baukonto Sparkasse   37,418 drafts, 29,693 of them copies
+    Sofienstr. Mietkonto Sparkasse  19,804 drafts, every one a copy
+    Brilu KG Mietkonto Sparkasse     9,291 drafts, every one a copy
+    axessio Hausverwaltung x2       10,959 drafts, every one a copy
+    ... and four smaller ones
+
+while the largest accounts -- Volksbank Ch & A Finkeissen with 54,647, SKL
+Sparkasse with 31,604, Privatkonto with 18,995 -- have no duplicates at all.
+So a blanket deletion of the run would throw away some 130,000 rows that are
+probably right, and that is why this module exists instead.
+
+WHICH COPY IS THE WRONG ONE
+
+The rows carry nothing that answers it. Three copies of one payment are
+identical to the character -- same date, same amount, same reference "9310",
+same purpose line -- and differ only in the account they were filed under and
+in a generated id. The source files are gone: no import record, no
+attachment. So the answer has to come from somewhere else, and there is
+exactly one trustworthy source in the database.
+
+The 6,067 SUBMITTED Bank Transactions. Those came from live FinTS fetches,
+one account at a time, and nobody has ever doubted them. They say which
+accounts really do business with which payees.
+
+Two things follow, and the first is not a judgement call at all:
+
+    The Baukonto has never had a single submitted transaction. Not one. An
+    account no fetch has ever returned a booking for did not make 29,693
+    payments that also appear elsewhere. Its copies go, and every booking
+    survives on the account that does have a history.
+
+    For what is left -- mostly Brilu KG Mietkonto against Sofienstrasse
+    Mietkonto -- the payee decides: whichever of the two accounts has
+    submitted transactions with that counterparty keeps the copy. Vrban:
+    74 real payments from Brilu, 2 from Sofienstrasse. Brilu keeps them.
+
+That second rule is an inference and this module says so wherever it reports.
+Where the evidence is silent it falls back to the account with the larger
+submitted history, which is weaker still, and it counts those separately so
+the reader can see how much of the result rests on what.
+
+WHAT IT WILL NOT DO
+
+    It never deletes the last copy of a booking.
+    It never touches a submitted or cancelled document.
+    It never touches a row that has been reconciled or allocated.
+    It only looks at the window it is given, and it plans before it acts.
+"""
+
+import frappe
+from frappe import _
+from frappe.utils import cint
+
+from kefiya.utils.duplicate_rule import (
+    BY_ACCOUNT, BY_PAYEE, UNDECIDED, fingerprint, pick_home,
+)
+
+#: How many documents are deleted between commits. Small enough that an
+#: interruption leaves a finished prefix rather than a rolled-back hour.
+BATCH = 200
+
+
+def _payee_key(value):
+    """A counterparty name reduced for comparison.
+
+    The same rule payee_check uses, borrowed rather than rewritten: two
+    spellings of one supplier must not look like two suppliers here while
+    they look like one everywhere else in the app.
+    """
+    from kefiya.utils.payee_check import normalise_name
+
+    return normalise_name(value)
+
+
+def real_history():
+    """What the submitted transactions say about accounts and payees.
+
+    The only ground truth available. These came from live fetches, one
+    account at a time.
+
+    :return: ({(payee key, account): count}, {account: count})
+    """
+    by_payee = {}
+    by_account = {}
+    for row in frappe.get_all(
+            "Bank Transaction", filters={"docstatus": 1},
+            fields=["bank_account", "bank_party_name"],
+            limit_page_length=0):
+        account = row.get("bank_account")
+        if not account:
+            continue
+        by_account[account] = by_account.get(account, 0) + 1
+        key = _payee_key(row.get("bank_party_name"))
+        if key:
+            by_payee[(key, account)] = by_payee.get((key, account), 0) + 1
+    return by_payee, by_account
+
+
+def _untouched(row):
+    """A draft nobody has worked on yet.
+
+    Reconciliation is the point at which a booking stops being an import
+    artefact and starts being somebody's work. This module does not delete
+    anybody's work.
+    """
+    return (row.get("docstatus") == 0
+            and not row.get("allocated_amount")
+            and (row.get("status") or "Pending") in ("Pending", "Unreconciled"))
+
+
+def plan(created_from, created_to, only_account=None):
+    """What would be deleted, and why. Reads only.
+
+    :param created_from: start of the import run, e.g. "2026-05-21"
+    :param created_to: end, exclusive
+    :return: {"delete": [names], "kept", "groups", "reasons", "skipped"}
+    """
+    filters = {"creation": [">=", created_from], "docstatus": 0}
+    rows = frappe.get_all(
+        "Bank Transaction", filters=filters,
+        fields=["name", "bank_account", "date", "withdrawal", "deposit",
+                "description", "bank_party_name", "docstatus",
+                "allocated_amount", "status", "creation"],
+        limit_page_length=0)
+    rows = [r for r in rows if str(r["creation"]) < str(created_to)]
+
+    groups = {}
+    skipped = 0
+    for row in rows:
+        if not _untouched(row):
+            skipped += 1
+            continue
+        if only_account and row["bank_account"] != only_account:
+            continue
+        groups.setdefault(fingerprint(row), []).append(row)
+
+    by_payee, by_account = real_history()
+
+    doomed = []
+    reasons = {BY_PAYEE: 0, BY_ACCOUNT: 0, UNDECIDED: 0}
+    kept = 0
+    multiple = 0
+    for copies in groups.values():
+        accounts = {r["bank_account"] for r in copies}
+        if len(accounts) < 2:
+            continue
+        multiple += 1
+
+        keeper, why = pick_home(
+            copies, _payee_key((copies[0] or {}).get("bank_party_name")),
+            by_payee, by_account)
+        reasons[why] += 1
+        if keeper is None:
+            # Undecided: nothing is deleted, so nothing can be lost.
+            continue
+
+        kept += 1
+        for row in copies:
+            if row["name"] != keeper["name"]:
+                doomed.append(row["name"])
+
+    return {"delete": doomed, "kept": kept, "groups": multiple,
+            "reasons": reasons, "skipped": skipped, "read": len(rows)}
+
+
+@frappe.whitelist()
+def plan_duplicates(created_from, created_to, only_account=None):
+    """The plan, as JSON, without deleting anything."""
+    _may_repair()
+    answer = plan(created_from, created_to, only_account)
+    # The names are the bulk of it and the caller does not need 14,000 of
+    # them to decide; the counts are what a person reads.
+    answer["delete_count"] = len(answer["delete"])
+    answer["delete"] = answer["delete"][:20]
+    return answer
+
+
+@frappe.whitelist()
+def delete_duplicates(created_from, created_to, confirm=None,
+                      only_account=None, limit=None):
+    """Delete the surplus copies the plan names.
+
+    ``confirm`` has to carry the exact number the plan reported. Not a
+    checkbox: a count that no longer matches means the data moved under the
+    plan, and deleting thousands of documents against a stale plan is the one
+    mistake this whole module exists to avoid.
+
+    Reversible: every deleted row is kept as a Deleted Document with its
+    full JSON, because the source files of this run no longer exist and a
+    rule that turns out to be wrong has to be undoable.
+
+    :param limit: stop after this many, so a first run can be small
+    :return: {"deleted", "failed": [{"name", "reason"}], "remaining"}
+    """
+    _may_repair()
+
+    answer = plan(created_from, created_to, only_account)
+    doomed = answer["delete"]
+    if cint(confirm) != len(doomed):
+        frappe.throw(_(
+            "The plan names {0} documents, the confirmation says {1}."
+            " Nothing was deleted -- run the plan again and confirm the"
+            " number it reports."
+        ).format(len(doomed), cint(confirm)))
+
+    if limit:
+        doomed = doomed[:cint(limit)]
+
+    frappe.logger("kefiya").info(
+        "Kefiya repair: deleting %s duplicate bank transactions from the"
+        " %s run, requested by %s", len(doomed), created_from,
+        frappe.session.user)
+
+    deleted = 0
+    failed = []
+    for index, name in enumerate(doomed, 1):
+        try:
+            # Not delete_permanently. Frappe keeps a Deleted Document with
+            # the full JSON of every row it removes, and that archive is the
+            # only way back here: the source files of this run are gone, so a
+            # permanent delete would make a wrong rule unrecoverable. 38,000
+            # archive rows are a cheap price for being able to undo.
+            frappe.delete_doc("Bank Transaction", name,
+                              ignore_permissions=False)
+            deleted += 1
+        except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+            failed.append({"name": name, "reason": str(exc)[:200]})
+        if index % BATCH == 0:
+            frappe.db.commit()  # noqa: DAR101 -- a finished prefix, not a lock
+    frappe.db.commit()
+
+    return {"deleted": deleted, "failed": failed,
+            "remaining": len(answer["delete"]) - deleted,
+            "reasons": answer["reasons"]}
+
+
+def _may_repair():
+    """Deleting thousands of documents is not an ordinary write."""
+    frappe.only_for("System Manager")
+    frappe.has_permission("Bank Transaction", ptype="delete", throw=True)
