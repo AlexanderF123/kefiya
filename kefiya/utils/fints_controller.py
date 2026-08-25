@@ -13,7 +13,7 @@ from dateutil.relativedelta import relativedelta
 from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse, NeedRetryResponse
 
 from frappe import _
-from frappe.utils import now_datetime, cint
+from frappe.utils import now_datetime, cint, time_diff_in_hours
 from frappe.utils.file_manager import (
     save_file,
     get_file,
@@ -31,6 +31,13 @@ from .auto_reconcile import run_after_import
 from .assign_payment_controller import AssignmentController
 from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
 from kefiya.utils.fints_masking import mask_iban
+
+#: How long a parked TAN challenge is still worth replaying. Banks keep a
+#: challenge for minutes; a day covers even a decoupled release that someone
+#: confirms much later. Beyond that the replay can only fail -- and a failing
+#: replay used to end every attempt to use the access.
+PARKED_CHALLENGE_MAX_AGE_HOURS = 24
+
 
 class InitFailedException(Exception):
     pass
@@ -249,16 +256,44 @@ class FinTSController:
         # to unlock.
         if self.kefiya_login.stored_tan_blob \
                 and not self.fints_connection._standing_dialog:
-            # resume_dialog() clears the client's reference to the dialog when
-            # its block ends -- but it has no try/finally, so an exception in
-            # the block (an unanswered TAN raises one, which is the ordinary
-            # case here) skips that line and leaves an ENDED dialog registered.
-            # Everything afterwards then sends on a dialog that is not open.
-            try:
-                self._resume_and_answer_the_parked_tan(tan)
-            except Exception:
-                discard_unusable_dialog(self.fints_connection)
-                raise
+            # A challenge lives only as long as the bank keeps the dialog
+            # behind it. Nothing expired it on our side, so an unanswered
+            # challenge stayed parked forever -- and replaying it does not
+            # fail quietly: the bank answers without a TAN status, fints
+            # raises, and the raise ends every attempt to use this access. One
+            # challenge nobody released in July made an account unable to send
+            # anything in August.
+            if self.__parked_challenge_is_stale():
+                self.__discard_parked_challenge()
+            else:
+                try:
+                    self._resume_and_answer_the_parked_tan(tan)
+                except TanInteractionRequired:
+                    # The legitimate "ask the user" path, not a failure -- but
+                    # the dialog behind it is gone all the same. The exception
+                    # leaves resume_dialog()'s block, its __exit__ ends the
+                    # dialog, and the client goes on holding a reference to it.
+                    # Dropping that reference is what lets the next attempt
+                    # open a fresh dialog instead of sending on a dead one.
+                    discard_unusable_dialog(self.fints_connection)
+                    raise
+                except Exception:
+                    # Two things are wrong here at once, and each needs its own
+                    # cleanup.
+                    #
+                    # resume_dialog() clears the client's reference to the
+                    # dialog when its block ends -- but it has no try/finally,
+                    # so an exception inside skips that line and leaves an
+                    # ENDED dialog registered. Inside a fetch session that
+                    # client is shared by every login of the bank access, so
+                    # each of them in turn joins the wreck: "Cannot send on
+                    # dialog that is not open", for one account after another.
+                    discard_unusable_dialog(self.fints_connection)
+
+                    # And the bank does not accept this challenge any more.
+                    # Keeping it would brick the access; throwing it away costs
+                    # one fresh TAN, which the ordinary login now asks for.
+                    self.__discard_parked_challenge()
 
         # After successful login/tan verification fetch available accounts if not already present
         if self.__fetch_fints_accounts() is False:
@@ -486,6 +521,33 @@ class FinTSController:
             return True
 
         return False
+
+    def __parked_challenge_is_stale(self):
+        """Is the parked TAN challenge too old to still be worth replaying?
+
+        Banks keep a challenge for minutes. A day is generous even for a
+        decoupled release that someone confirms after a long lunch -- and every
+        hour beyond that is an hour in which the replay can only fail.
+        """
+        parked_since = self.kefiya_login.tan_state_updated
+        if not parked_since:
+            # No timestamp means the state predates the field. Old by definition.
+            return True
+
+        return time_diff_in_hours(now_datetime(), parked_since) > PARKED_CHALLENGE_MAX_AGE_HOURS
+
+    def __discard_parked_challenge(self):
+        """Forget a challenge that can no longer be released.
+
+        Cleared directly rather than through __persist_fints_state, because the
+        client state at this moment may be the one the failed replay left
+        behind -- and that is not a state worth keeping, let alone sharing with
+        the sibling logins of the same bank.
+        """
+        self.kefiya_login.stored_tan_blob = None
+        self.kefiya_login.stored_tan_state_decoupled = None
+        self.kefiya_login.stored_dialog_blob = None
+        self.kefiya_login.save()
 
     def __persist_fints_state(self, tan_state=None, clear:bool=False):
         """Persist the current client/dialog state to the database.

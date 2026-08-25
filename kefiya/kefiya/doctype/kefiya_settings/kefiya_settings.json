@@ -20,7 +20,8 @@
   "enable_tan_authentication",
   "auto_reconcile_section",
   "auto_reconcile_after_import",
-  "auto_create_advance_payments"
+  "auto_create_advance_payments",
+  "auto_reconcile_own_transfers"
  ],
  "fields": [
   {
@@ -126,6 +127,14 @@
    "fieldname": "auto_create_advance_payments",
    "fieldtype": "Check",
    "label": "Auto Create Advance Payments"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.auto_reconcile_after_import",
+   "description": "Book outgoing payments that we ordered ourselves. A withdrawal carrying the End-To-End ID of one of our transfers is booked against the voucher that transfer paid. Creates financial documents -- validate on a test site first.",
+   "fieldname": "auto_reconcile_own_transfers",
+   "fieldtype": "Check",
+   "label": "Auto Book Our Own Transfers"
   }
  ],
  "index_web_pages_for_search": 1,

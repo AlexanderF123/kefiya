@@ -102,13 +102,43 @@ class TestTheWreckIsNeitherMadeNorJoined(unittest.TestCase):
     """Two repairs, because either alone leaves the other half of the problem:
     stop creating the dead reference, and stop trusting one that exists."""
 
-    def test_the_resume_block_cleans_up_after_itself(self):
+    @staticmethod
+    def _resume_block():
+        """The block that answers a parked challenge, whole.
+
+        Read to its end rather than by character count: it carries two repairs
+        now -- this one and the stale-challenge expiry from develop -- and a
+        fixed window silently stopped covering the second half the moment they
+        met.
+        """
         source = _source()
-        self.assertIn("self._resume_and_answer_the_parked_tan(tan)", source)
-        body = source.split("stored_tan_blob \\")[1][:900]
+        return source.split("stored_tan_blob \\")[1].split(
+            "\n        # After successful login")[0]
+
+    def test_the_resume_block_cleans_up_after_itself(self):
+        body = self._resume_block()
+        self.assertIn("self._resume_and_answer_the_parked_tan(tan)", body)
         self.assertIn("except Exception:", body)
         self.assertIn("discard_unusable_dialog(self.fints_connection)", body)
-        self.assertIn("raise", body)
+
+    def test_the_ask_the_user_path_drops_the_dialog_too(self):
+        """TanInteractionRequired is the legitimate path, and it still leaves
+        an ended dialog behind: the exception leaves resume_dialog()'s block,
+        __exit__ ends the dialog, and the client keeps the reference."""
+        body = self._resume_block()
+        asked = body.split("except TanInteractionRequired:")[1].split(
+            "except Exception:")[0]
+        self.assertIn("discard_unusable_dialog(self.fints_connection)", asked)
+        self.assertIn("raise", asked)
+
+    def test_a_challenge_the_bank_refuses_is_thrown_away_as_well(self):
+        """The other repair, and it is not the same one: a dead dialog is a
+        reference to drop, a challenge the bank no longer knows is stored
+        state that would brick the access on every later attempt."""
+        body = self._resume_block()
+        failed = body.split("except Exception:")[1]
+        self.assertIn("discard_unusable_dialog(self.fints_connection)", failed)
+        self.assertIn("self.__discard_parked_challenge()", failed)
 
     def test_joining_checks_that_it_can_be_sent_on(self):
         body = _source().split("def client_session(self):")[1][:2600]
