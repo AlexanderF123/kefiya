@@ -309,6 +309,46 @@ def _payee_detail(answer):
              " history. Worth a second pair of eyes.")
 
 
+def requested_execution_date(doc):
+    """The day the BANK is asked to execute -- which is not doc.execution_date.
+
+    Two orders carry a date and they mean opposite things:
+
+        manage_due_date = 0   the bank holds the order until that day. The
+                              date belongs in the message; it IS the order.
+        manage_due_date = 1   WE hold it. It sits in the outbox and is offered
+                              for sending on the day, and the moment it is
+                              sent it is an ordinary immediate transfer. The
+                              date is our bookkeeping and has no business in
+                              the message.
+
+    The old line sent doc.execution_date either way, falling back to today
+    only when there was none. So an order entered for the 16th and sent on the
+    25th went to the bank with ReqdExctnDt = 16.08.2026 -- nine days in the
+    past. That is not a transfer the bank can execute, and it did not: no TAN
+    was asked for, nothing was debited, and the app wrote "Sent".
+
+    A past date is refused rather than quietly moved forward, but only where
+    it is the order itself. Silently turning "execute on the 16th" into
+    "execute today" is a different payment than the one somebody approved.
+    """
+    from frappe.utils import cint
+
+    today = now_datetime().date()
+    if cint(getattr(doc, "manage_due_date", 0)) or not doc.execution_date:
+        return today
+
+    wanted = getdate(doc.execution_date)
+    if wanted < today:
+        frappe.throw(_(
+            "{0} is dated {1}, which has passed, and the bank is meant to"
+            " hold it until then. A bank cannot execute an order in the past."
+            " Change the date, or set it to be held here and sent on the day."
+        ).format(doc.name, frappe.utils.formatdate(doc.execution_date)),
+            title=_("Execution date has passed"))
+    return wanted
+
+
 def build_pain001_for(docs):
     """Render one or more Kefiya Transfers as a single pain.001 message.
 
@@ -383,8 +423,7 @@ def build_pain001_for(docs):
             "IBAN": normalize_iban(row.recipient_iban),
             "amount": amount_cents,
             "description": (row.purpose or doc.name)[:140],
-            "execution_date": getdate(
-                doc.execution_date or now_datetime().date()),
+            "execution_date": requested_execution_date(doc),
             "endtoend_id": (row.end_to_end_id
                             or "{0}-{1}".format(doc.name, row.idx))[:35],
         }
