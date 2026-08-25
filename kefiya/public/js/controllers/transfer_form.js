@@ -45,6 +45,23 @@ kefiya.EXECUTION_MODES = [
 	},
 ];
 
+//: Instant payment is not one of the three modes -- it is a property of an
+//: order that goes out now -- but it is explained in the same place, so the
+//: two forms cannot describe it differently.
+kefiya.EXECUTION_MODES.instant_hint = __("Arrives within seconds. The bank"
+	+ " must offer it for this account, and it is usually capped.");
+
+//: The one wording for an execution option, wherever it is offered. The
+//: document form and the outbox dialog ask the same question in different
+//: widgets; describing it in two places is how they drift apart.
+kefiya.execution_hint = function (mode) {
+	if (mode === "instant") return kefiya.EXECUTION_MODES.instant_hint;
+	const found = kefiya.EXECUTION_MODES.find(function (m) {
+		return m.value === mode;
+	});
+	return found ? found.hint : "";
+};
+
 kefiya.execution_mode_of = function (row) {
 	if (!row || !row.execution_date) return "asap";
 	return row.manage_due_date ? "here" : "bank";
@@ -138,8 +155,7 @@ kefiya.transfer_form = function (options) {
 			fieldtype: "Check", fieldname: "instant_payment",
 			label: __("Instant payment"),
 			default: existing && existing.instant_payment ? 1 : 0,
-			description: __("Arrives within seconds. The bank must offer it for"
-				+ " this account, and it is usually capped."),
+			description: kefiya.execution_hint("instant"),
 		},
 		{ fieldtype: "Section Break" },
 		{ fieldtype: "HTML", fieldname: "hint" },
@@ -163,9 +179,17 @@ kefiya.transfer_form = function (options) {
 		const mode = kefiya.EXECUTION_MODES.find(function (m) {
 			return m.label === label;
 		}) || kefiya.EXECUTION_MODES[0];
+		// A mode the bank refuses says so here, where the choice was made,
+		// rather than at the bank after a TAN has been spent on it.
+		const refused = dialog.refused_modes && dialog.refused_modes[label];
 		dialog.fields_dict.hint.$wrapper.html(
 			"<div class='text-muted small'>"
-			+ frappe.utils.escape_html(mode.hint) + "</div>");
+			+ frappe.utils.escape_html(mode.hint) + "</div>"
+			+ (refused
+				? "<div class='small' style='color:var(--red-500,#c0392b);"
+					+ "margin-top:4px'>"
+					+ frappe.utils.escape_html(refused) + "</div>"
+				: ""));
 	};
 	dialog.fields_dict.execution_mode.df.onchange = showHint;
 
@@ -176,8 +200,48 @@ kefiya.transfer_form = function (options) {
 		const p = payerAt(dialog.get_value("payer"));
 		dialog.fields_dict.standing.$wrapper.html(
 			kefiya.account_standing_html(p));
+		applyCapabilities(p);
 	};
 	dialog.fields_dict.payer.df.onchange = showStanding;
+
+	// What the bank allows on the chosen account, asked here too.
+	//
+	// The document form has asked this all along; this dialog did not, so it
+	// offered a dated order to an account whose bank takes none and an instant
+	// payment to one that does not do them -- and the refusal arrived from the
+	// bank, after a TAN had been spent on it.
+	//
+	// Refused options are marked, not removed. A vanished option teaches
+	// nobody anything; one that says why is an answer.
+	const applyCapabilities = function (payer) {
+		dialog.refused_modes = {};
+		if (!payer || !payer.login || !kefiya.capabilities) return;
+
+		kefiya.capabilities.load(payer.login).then(function (info) {
+			kefiya.EXECUTION_MODES.forEach(function (m) {
+				// Only the bank-held date needs anything from the bank. "As
+				// soon as possible" is an ordinary transfer, and holding the
+				// date here is our own doing -- neither can be refused.
+				if (m.value !== "bank") return;
+				const wanted = kefiya.capabilities.required(1, true, false);
+				dialog.refused_modes[m.label] =
+					kefiya.capabilities.refuses(info, wanted)
+						? kefiya.capabilities.refusal_reason(wanted, 1) : null;
+			});
+			showHint();
+
+			const instant = kefiya.capabilities.required(1, false, true);
+			const instant_refused = kefiya.capabilities.refuses(info, instant);
+			dialog.instant_refused = instant_refused
+				? kefiya.capabilities.refusal_reason(instant, 1) : null;
+			dialog.set_df_property("instant_payment", "read_only",
+				instant_refused ? 1 : 0);
+			dialog.set_df_property("instant_payment", "description",
+				instant_refused ? dialog.instant_refused
+					: kefiya.execution_hint("instant"));
+			if (instant_refused) dialog.set_value("instant_payment", 0);
+		});
+	};
 
 	// Suggestions without a requirement: an Autocomplete would refuse a name
 	// it does not know, which is exactly the case this document exists for.
@@ -244,6 +308,24 @@ kefiya.transfer_form_submit = function (dialog, values, payers, existing, onSave
 	const mode = kefiya.EXECUTION_MODES.find(function (m) {
 		return m.label === values.execution_mode;
 	}) || kefiya.EXECUTION_MODES[0];
+
+	// The bank's own answer, checked before the order is written rather than
+	// after a TAN was spent on it.
+	const refusal = dialog.refused_modes && dialog.refused_modes[mode.label];
+	if (refusal) {
+		frappe.msgprint({
+			title: __("Not offered on this account"),
+			indicator: "orange", message: refusal,
+		});
+		return;
+	}
+	if (values.instant_payment && dialog.instant_refused) {
+		frappe.msgprint({
+			title: __("Not offered on this account"),
+			indicator: "orange", message: dialog.instant_refused,
+		});
+		return;
+	}
 
 	if (mode.value !== "asap" && !values.execution_date) {
 		frappe.msgprint({

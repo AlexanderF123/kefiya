@@ -203,3 +203,6 @@ overdraft {0},Dispo {0}
 available {0},verfügbar {0}
 as at {0},Stand {0}
 No balance has been fetched for this account yet.,Für dieses Konto wurde noch kein Saldo abgerufen.
+"The bank does not allow ""{0}"" on this account.",Die Bank erlaubt „{0}“ auf diesem Konto nicht.
+"The bank does not allow ""{0}"" on this account. Several payments go out as one collective order, which the bank rules on separately from a single one.","Die Bank erlaubt „{0}“ auf diesem Konto nicht. Mehrere Zahlungen gehen als ein Sammelauftrag raus, über den die Bank getrennt von einer einzelnen entscheidet."
+Not offered on this account,Auf diesem Konto nicht angeboten

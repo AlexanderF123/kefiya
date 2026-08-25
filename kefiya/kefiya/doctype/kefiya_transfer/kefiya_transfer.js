@@ -4,7 +4,6 @@
 {% include "kefiya/public/js/controllers/fints_progress_log.js" %}
 {% include "kefiya/public/js/controllers/fints_interactive.js" %}
 {% include "kefiya/public/js/controllers/fints_transfer_flow.js" %}
-{% include "kefiya/public/js/controllers/account_capabilities.js" %}
 
 frappe.ui.form.on("Kefiya Transfer", {
 	onload: function (frm) {
@@ -325,9 +324,16 @@ function kefiya_apply_capabilities(frm) {
 		// bank does not offer it here, the tick box is not just useless, it
 		// is a trap: it changes what is sent and the order fails at the bank.
 		const instant = kefiya.capabilities.required(count, false, true);
-		const instant_ok = kefiya.capabilities.allows(info, instant);
-		frm.toggle_display("instant_payment", instant_ok);
-		if (!instant_ok && frm.doc.instant_payment && frm.doc.docstatus === 0) {
+		const refused = kefiya.capabilities.refuses(info, instant);
+		// Shown and disabled, not hidden. A box that vanishes teaches nobody
+		// anything -- the reader is left wondering whether the option exists
+		// at all, whether they lost a right, or whether the form is broken.
+		// Standing there greyed out with its reason, it answers all three.
+		frm.set_df_property("instant_payment", "read_only", refused ? 1 : 0);
+		frm.set_df_property("instant_payment", "description", refused
+			? kefiya.capabilities.refusal_reason(instant, count)
+			: kefiya.execution_hint("instant"));
+		if (refused && frm.doc.instant_payment && frm.doc.docstatus === 0) {
 			frm.set_value("instant_payment", 0);
 		}
 
@@ -336,15 +342,19 @@ function kefiya_apply_capabilities(frm) {
 		// needs nothing from the bank -- so the field stays and only the
 		// choice to hand the date over goes.
 		const dated = kefiya.capabilities.required(count, true, false);
-		const dated_ok = kefiya.capabilities.allows(info, dated);
-		if (!dated_ok && frm.doc.docstatus === 0) {
-			frm.set_df_property(
-				"manage_due_date", "description",
-				__("The bank does not accept dated orders on this account, so the date is managed here.")
-			);
+		const dated_refused = kefiya.capabilities.refuses(info, dated);
+		frm.set_df_property("manage_due_date", "description", dated_refused
+			? kefiya.capabilities.refusal_reason(dated, count) + " "
+				+ kefiya.execution_hint("here")
+			: kefiya.execution_hint("bank") + " / "
+				+ kefiya.execution_hint("here"));
+		if (dated_refused && frm.doc.docstatus === 0) {
+			frm.set_df_property("manage_due_date", "read_only", 1);
 			if (!frm.doc.manage_due_date) {
 				frm.set_value("manage_due_date", 1);
 			}
+		} else {
+			frm.set_df_property("manage_due_date", "read_only", 0);
 		}
 
 		// And the order itself. Saying so here rather than at the bank is the
