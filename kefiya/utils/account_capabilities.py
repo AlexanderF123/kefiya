@@ -464,13 +464,27 @@ def stored_rows(bank_account):
     # because this function sits in the send path: every transfer would have
     # died on it, and the traceback would have named a report query rather
     # than the gate that asked.
+    # required_signatures belongs in this list, and its absence was not a
+    # cosmetic omission.
+    #
+    # required_signatures() reads it to decide whether a dialog that ended
+    # WITHOUT a TAN can have moved money. The field was never selected, so the
+    # row came back with it unset, cint(None) made that a 0, and 0 reads as
+    # "no signature required" -- which is the one reading that turns a missing
+    # TAN into a successful payment. The guard built to stop exactly that has
+    # therefore never fired once, on any account, and two transfers were
+    # marked "Sent" that the bank never executed.
+    #
+    # 49 stored transfer capabilities on this instance demand a signature.
     try:
         return frappe.get_all(
             CHILD_DOCTYPE,
             parent_doctype="Bank Account",
             filters={"parenttype": "Bank Account", "parent": bank_account,
                      "parentfield": FIELD_TABLE},
-            fields=["capability", "transaction", "allowed"])
+            fields=["capability", "transaction", "allowed",
+                    "required_signatures"],
+            limit_page_length=0)
     except Exception:
         frappe.log_error(
             title="Kefiya: reading the account capabilities failed",

@@ -95,8 +95,6 @@ On {0} — the bank holds the order,Am {0} — die Bank hält den Auftrag
 Paying account,Abgehendes Konto
 Execution,Ausführung
 Instant payment,Echtzeitüberweisung
-Yes — sent as a SEPA instant payment,Ja — geht als SEPA-Echtzeitüberweisung
-No — ordinary SEPA transfer,Nein — gewöhnliche SEPA-Überweisung
 "Kept here, released on the day",Wird hier gehalten und am Tag freigegeben
 Left with the bank,Liegt bei der Bank
 Payee verification,Empfängerprüfung
@@ -245,3 +243,10 @@ With the bank until its date,Liegt bei der Bank bis zum Termin
 Approving and sending …,Freigeben und senden …
 We have paid this payee at these IBANs:,An diesen IBANs haben wir diesen Empfänger schon bezahlt:
 not found in this system,in diesem System nicht gefunden
+BIC,BIC
+Transfer type,Art der Überweisung
+Instant payment — arrives within seconds,Echtzeitüberweisung — kommt binnen Sekunden an
+SEPA transfer — one banking day,SEPA-Überweisung — ein Bankarbeitstag
+{0} receipts,{0} Belege
+Execution date has passed,Ausführungstermin liegt in der Vergangenheit
+"{0} is dated {1}, which has passed, and the bank is meant to hold it until then. A bank cannot execute an order in the past. Change the date, or set it to be held here and sent on the day.",{0} ist auf den {1} datiert — der ist vorbei — und die Bank soll den Auftrag bis dahin halten. Eine Bank kann keinen Auftrag in der Vergangenheit ausführen. Bitte das Datum ändern oder den Auftrag hier halten lassen und am Termin senden.

@@ -59,7 +59,12 @@ LEFT_TO_THE_FRAMEWORK = {
 #: get it wrong. Only a source string specific to what it means gets it right,
 #: which is why this app says "Order state".
 CLAIMED_ELSEWHERE = {"Accounts", "Note", "Failed", "Credentials", "Status",
-                     "State"}
+                     "State",
+                     # "Account" is ERPNext's ledger account and "Type" is on
+                     # half the forms in the product. Both were nearly used as
+                     # labels in the send confirmation -- "Paying account" and
+                     # "Transfer type" say the same thing and belong to us.
+                     "Account", "Type"}
 
 
 #: The screens whose JavaScript is covered here as well. The document service
