@@ -170,7 +170,20 @@ def plan(created_from, created_to, only_account=None):
 
         kept += 1
         for row in copies:
-            if row["name"] != keeper["name"]:
+            # By ACCOUNT, not by document. Where the booking sits twice on the
+            # SAME account, both rows stay -- and that is not laziness, it is
+            # the only defensible answer.
+            #
+            # 3,079 bookings in this run are doubled within one account, and
+            # nothing distinguishes the two rows. "Basislastschrift Jack n
+            # Jill Lounge, 3.77, 16.02.2026" appears twice on an account that
+            # has no cross-account duplicates at all. That is either an
+            # importer writing a line twice or a card charged twice in one
+            # day, and no field here tells them apart. Keeping one row per
+            # document would have deleted 18 of them as a side effect of a
+            # decision that was never about them -- losing a real payment,
+            # which is the one thing this module promises not to do.
+            if row["bank_account"] != keeper["bank_account"]:
                 doomed.append(row["name"])
 
     return {"delete": doomed, "kept": kept, "groups": multiple,

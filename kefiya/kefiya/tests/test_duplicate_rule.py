@@ -172,8 +172,18 @@ class TestTheDeletionCannotRunAway(unittest.TestCase):
 
     def test_the_last_copy_is_never_deleted(self):
         body = _repair_source().split("def plan(")[1].split("\ndef ")[0]
-        self.assertIn('if row["name"] != keeper["name"]', body)
         self.assertIn("if keeper is None:", body)
+
+    def test_a_booking_doubled_within_one_account_is_left_alone(self):
+        """3,079 bookings in the real run sit twice on the SAME account, and
+        nothing distinguishes the two rows -- an importer writing a line
+        twice and a card charged twice in one day look identical. Deleting
+        by document would have taken 18 of them as a side effect of a
+        decision that was never about them."""
+        body = _repair_source().split("def plan(")[1].split("\ndef ")[0]
+        self.assertIn('if row["bank_account"] != keeper["bank_account"]',
+                      body)
+        self.assertNotIn('if row["name"] != keeper["name"]', body)
 
     def test_an_undecided_group_loses_nothing(self):
         body = _repair_source().split("def plan(")[1].split("\ndef ")[0]
