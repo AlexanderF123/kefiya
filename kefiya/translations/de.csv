@@ -301,3 +301,7 @@ no list of documents in the response,in der Antwort steht keine Dokumentenliste
 run budget reached,Obergrenze des Laufs erreicht
 Fetch the {0} unfinished accesses again,Die {0} nicht abgeschlossenen Zugänge erneut abrufen
 None of these accesses is still configured.,Keiner dieser Zugänge ist noch eingerichtet.
+Due today — goes to the bank now,Heute fällig — geht jetzt an die Bank
+Due since {0} — goes to the bank today,"Fällig seit {0} — geht heute an die Bank"
+Today — the bank executes it today,Heute — die Bank führt ihn heute aus
+"Dated {0}, which has passed — the bank cannot execute this","Auf den {0} datiert, der vorbei ist — die Bank kann das nicht ausführen"
