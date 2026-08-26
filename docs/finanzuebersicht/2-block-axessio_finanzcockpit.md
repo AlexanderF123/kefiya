@@ -1,3 +1,12 @@
+# Custom HTML Block `axessio_finanzcockpit`
+
+Ein Patch zum Einsetzen im Browser, kein lauffähiges Modul — die
+Abschnitte sind Bruchstücke aus der Mitte einer Funktion. Deshalb
+Markdown: eine Datei mit der Endung `.py` wird beim Release-Check
+von Frappe Cloud kompiliert und ein eingerückter Ausschnitt ist
+dort ein Syntaxfehler.
+
+```javascript
 // ============================================================================
 // PATCH 4 von 5  —  Custom HTML Block  axessio_finanzcockpit, Feld "script"
 // ----------------------------------------------------------------------------
@@ -159,3 +168,4 @@ function tbl(list,isLoan,sec){
         +`<div class='fcc-sub'>Kein Konto in diesem Abschnitt passt zum Filter.</div>`;
     return '';
   }
+```
