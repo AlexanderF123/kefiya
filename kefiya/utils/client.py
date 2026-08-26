@@ -159,7 +159,58 @@ def get_fetch_groups():
 
 
 @frappe.whitelist()
-def fetch_group(logins, user_scope=None):
+def start_fetch_group(logins, user_scope=None):
+    """Hand one bank access to a worker and return before it has finished.
+
+    fetch_group talks to the bank for as long as the access has accounts --
+    thirty of them on this instance, minutes of it. Called straight from the
+    browser that is one HTTP request held open for the whole run, which is a
+    gateway timeout waiting to happen and a progress bar that cannot move.
+
+    So the browser starts it and listens instead. The worker publishes one
+    event per account as it lands, and a closing one for the group; the run
+    panel fills in exactly as it did when it drove the accounts itself.
+
+    The TAN prompt survives the move: frappe.enqueue carries the enqueueing
+    user into the job, and the prompt is published to that user, so it reaches
+    the same browser.
+
+    :param logins: list of Kefiya Login names, or its JSON form
+    :return: {"run": id, "logins": [...]} -- the id every event carries
+    """
+    if isinstance(logins, str):
+        logins = frappe.parse_json(logins)
+    if not isinstance(logins, (list, tuple)):
+        frappe.throw(_("fetch_group expects a list of logins."))
+
+    ordered = list(dict.fromkeys(str(name) for name in logins if name))
+    if not ordered:
+        return {"run": None, "logins": []}
+
+    # Same gate as the fetch itself, applied before anything is queued: a
+    # caller without write rights must be refused here rather than in a worker
+    # whose failure they would never see.
+    for name in ordered:
+        frappe.has_permission("Kefiya Login", ptype="write", doc=name,
+                              throw=True)
+
+    run = frappe.generate_hash(length=12)
+    frappe.enqueue(
+        "kefiya.utils.client.fetch_group",
+        queue="long",
+        # An access with thirty accounts and a bank in no hurry. The default
+        # 300s killed the run somewhere in the middle, leaving the accounts
+        # behind it looking like failures.
+        timeout=3600,
+        logins=ordered,
+        user_scope=user_scope,
+        run=run,
+    )
+    return {"run": run, "logins": ordered}
+
+
+@frappe.whitelist()
+def fetch_group(logins, user_scope=None, run=None):
     """Fetch every login of ONE bank access through a single FinTS dialog.
 
     The counterpart to get_fetch_groups(): that one says which logins may be
@@ -175,7 +226,13 @@ def fetch_group(logins, user_scope=None):
     Not a replacement for running the groups side by side: this makes each
     chain shorter, the caller still runs the chains in parallel.
 
+    The access holds one dialog, so a release the bank parks mid-run stops the
+    group rather than being overwritten by the next account: see _park_rest.
+
     :param logins: list of Kefiya Login names, or its JSON form
+    :param run: id of a run started by start_fetch_group. Set means somebody is
+        listening; the per-account events are published as they land. Absent
+        means a synchronous caller wants the return value and nothing else.
     :return: {"results": {login: summary}, "failed": {login: message}}
     """
     if isinstance(logins, str):
@@ -189,13 +246,26 @@ def fetch_group(logins, user_scope=None):
 
     results = {}
     failed = {}
+    held = None
 
     with _fetch_session():
         for name in ordered:
+            # The bank is waiting for a release on an earlier account of this
+            # same access, and the access holds ONE dialog: fetching on would
+            # open a second and overwrite the parked challenge, so the release
+            # the user gives would belong to a dialog that no longer exists.
+            if held:
+                results[name] = _not_attempted(held)
+                _say(run, name, results[name])
+                continue
             try:
                 results[name] = fetch_all(name, user_scope)
+                if results[name].get("tan_required"):
+                    held = name
+                _say(run, name, results[name])
             except Exception as exc:
                 failed[name] = str(exc)
+                _say(run, name, None, str(exc))
                 # Discard this login's partial work before moving on. Without
                 # it the next successful login commits the failed one's leftovers
                 # too -- an empty draft Kefiya Import and half-written login
@@ -217,7 +287,51 @@ def fetch_group(logins, user_scope=None):
                 except Exception:
                     pass
 
+    if run:
+        frappe.publish_realtime(
+            "kefiya_fetch_group_done",
+            {"run": run, "held": held, "count": len(ordered)},
+            user=frappe.session.user)
+
     return {"results": results, "failed": failed}
+
+
+def _not_attempted(held):
+    """The summary for an account the group never got to.
+
+    Shaped like a real one so the panel needs no special case, and marked
+    tan_required so the retry link picks it up with the account it is waiting
+    on: those two belong to the same second attempt.
+    """
+    return {
+        "transactions": {"status": "tan_required"},
+        "tan_required": True,
+        "not_attempted": True,
+        "message": _(
+            "Not attempted -- {0} is waiting for a release, and this bank"
+            " access holds one dialog at a time."
+        ).format(held),
+        "errors": [],
+    }
+
+
+def _say(run, login, summary, error=None):
+    """Publish what just happened to one account of a running group.
+
+    Never raises: a realtime hiccup must not take down a fetch that has already
+    talked to the bank. The panel would miss a line; the bookings are safe
+    either way, and the run's closing event carries the count to compare
+    against.
+    """
+    if not run:
+        return
+    try:
+        frappe.publish_realtime(
+            "kefiya_fetch_progress",
+            {"run": run, "login": login, "summary": summary, "error": error},
+            user=frappe.session.user)
+    except Exception:
+        pass
 
 
 def _claim_send_lock(lock_key, seconds=600):
