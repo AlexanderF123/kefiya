@@ -74,6 +74,67 @@ class TestTheSignatureNumberIsActuallyRead(unittest.TestCase):
         self.assertIn("not needed", body)
 
 
+class TestTheBankIsAskedBeforeAnythingIsConcluded(unittest.TestCase):
+    """A refusal explains the missing TAN: an order the bank turned down is
+    not an order it wants signed."""
+
+    @staticmethod
+    def _send():
+        body = _source("utils", "fints_controller.py")
+        return body.split("def submit_sepa_transfer(")[1].split(
+            "\n    def _refuse_unsigned(")[0]
+
+    def test_the_response_is_read_at_all(self):
+        self.assertIn("fints_response.verdict_of(response)", self._send())
+
+    def test_a_refusal_stops_the_send_with_the_banks_words(self):
+        body = self._send()
+        self.assertIn("fints_response.refused(verdict)", body)
+        refusal = body.split("fints_response.refused(verdict)")[1]
+        self.assertIn("frappe.throw", refusal)
+        self.assertIn("fints_response.as_text(verdict)", refusal)
+
+    def test_it_is_asked_before_the_unsigned_guard(self):
+        """Otherwise a refused order is reported as a missing signature,
+        which sends the reader to the wrong bank department."""
+        body = self._send()
+        self.assertLess(body.index("fints_response.refused(verdict)"),
+                        body.index("self._refuse_unsigned("))
+
+    def test_the_signature_refusal_carries_what_the_bank_said(self):
+        body = _source("utils", "fints_controller.py").split(
+            "def _refuse_unsigned(")[1].split("\n    def ")[0]
+        self.assertIn("fints_response.as_text(verdict)", body)
+
+    def test_the_silent_success_is_logged_with_it_too(self):
+        body = self._send()
+        log = body.split("completed without TAN challenge")[1]
+        self.assertIn("fints_response.as_text(verdict)", log)
+
+
+class TestNoEmptySecondDialog(unittest.TestCase):
+    """frappe.throw renders its own dialog. A second box underneath saying
+    "Unknown error." is worse than no second box -- the reader is left
+    wondering which of the two is the real answer."""
+
+    def test_the_page_says_nothing_when_it_knows_nothing(self):
+        body = _source("public", "js", "controllers", "payment_outbox.js")
+        rule = body.split("function reportFailure(")[1].split("\n\t}")[0]
+        self.assertIn("if (!text) return;", rule)
+
+    def test_the_dialogs_all_go_through_it(self):
+        body = _source("public", "js", "controllers", "payment_outbox.js")
+        for title in ('__("Not sent")', '__("Not approved")',
+                      '__("Not changed")'):
+            self.assertIn("reportFailure(" + title, body, title)
+
+    def test_the_inline_load_error_still_says_something(self):
+        """That one is not a second dialog -- it replaces the page, so a bare
+        heading with no reason under it would be worse."""
+        body = _source("public", "js", "controllers", "payment_outbox.js")
+        self.assertIn('errText(r) || __("Unknown error.")', body)
+
+
 class TestOnlyTheBanksOwnDateGoesIntoTheMessage(unittest.TestCase):
     """The date means opposite things depending on who holds the order."""
 

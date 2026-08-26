@@ -337,7 +337,22 @@ kefiya.payment_outbox = function (root) {
 		const fromServer = kefiya.server_message && kefiya.server_message(r);
 		if (fromServer) return fromServer;
 		const m = (r && r.message) || "";
-		return typeof m === "string" && m ? m : __("Unknown error.");
+		return typeof m === "string" && m ? m : "";
+	}
+
+	// A second box saying "Unknown error." under the bank's own explanation is
+	// worse than no second box.
+	//
+	// That is what a person saw: frappe.throw on the server renders its own
+	// dialog -- "the bank asked for no TAN, but requires 1 signature ..." --
+	// and then this catch added a box that knew nothing, because the thrown
+	// message does not come back through _server_messages on the rejected
+	// value. The reader is left wondering which of the two is the real answer.
+	// So: say something only when there IS something to say.
+	function reportFailure(title, r) {
+		const text = errText(r);
+		if (!text) return;
+		frappe.msgprint({ title: title, indicator: "red", message: esc(text) });
 	}
 
 	function remember() {
@@ -376,7 +391,7 @@ kefiya.payment_outbox = function (root) {
 		}).catch(function (r) {
 			root.innerHTML = "<div class='zk-err'>"
 				+ __("The outgoing payments could not be loaded.")
-				+ "<br>" + esc(errText(r)) + "</div>";
+				+ "<br>" + esc(errText(r) || __("Unknown error.")) + "</div>";
 		});
 	}
 
@@ -738,8 +753,7 @@ kefiya.payment_outbox = function (root) {
 					load();
 				}).catch(function (r) {
 					view.busy = false;
-					frappe.msgprint({ title: __("Not approved"),
-						indicator: "red", message: esc(errText(r)) });
+					reportFailure(__("Not approved"), r);
 					load();
 				});
 			});
@@ -764,8 +778,7 @@ kefiya.payment_outbox = function (root) {
 			load();
 		}).catch(function (r) {
 			view.busy = false;
-			frappe.msgprint({ title: __("Not changed"), indicator: "red",
-				message: esc(errText(r)) });
+			reportFailure(__("Not changed"), r);
 			load();
 		});
 	}
@@ -912,8 +925,7 @@ kefiya.payment_outbox = function (root) {
 			load();
 		}).catch(function (r) {
 			view.busy = false;
-			frappe.msgprint({ title: __("Not sent"), indicator: "red",
-				message: esc(errText(r)) });
+			reportFailure(__("Not sent"), r);
 			load();
 		});
 	}
