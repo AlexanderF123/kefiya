@@ -308,6 +308,12 @@ frappe.provide("kefiya");
             // translated; the stored value must not.
             add(__("Account Kind"), __(x.account_kind), "none");
         }
+        // Only present when the books and the bank disagree about what this
+        // account is. Marked as an error rather than a note: an account that
+        // is not money counted as money overstates what can be paid out.
+        if (x.ledger_complaint) {
+            add(__("Ledger"), x.ledger_complaint, "err");
+        }
 
         report(__("Balance"), "balance", function () {
             var b = x.balance;
@@ -642,7 +648,7 @@ frappe.provide("kefiya");
                     }
                     run.tot += (t.new_count || 0);
                     record(ln, state, buildLines(x));
-                    res();
+                    res(state);
                 },
                 error: function (r) {
                     var t = errText(r) || __("Error");
@@ -650,7 +656,7 @@ frappe.provide("kefiya");
                         [{ label: __("Fetch"), text: __("failed"),
                            kind: "err" }],
                         t.slice(0, 600));
-                    res();
+                    res("err");
                 }
             });
         });
@@ -762,14 +768,35 @@ frappe.provide("kefiya");
 
                 var chains = groups.map(function (grp) {
                     var chain = Promise.resolve();
+                    // The login this bank is waiting on. A release that the
+                    // bank asks for in the banking app is parked on the
+                    // access, and the access holds ONE dialog: starting the
+                    // next account of the same bank opens a new one and
+                    // overwrites the parked challenge, so the release the
+                    // user then gives belongs to a dialog that no longer
+                    // exists -- "die App hat schon keine Daten mehr". Every
+                    // further account asks again, and each ask invalidates
+                    // the one before it. So the bank's chain stops here.
+                    var held = null;
                     grp.forEach(function (ln) {
                         chain = chain.then(function () {
                             if (!known[ln]) return;
+                            if (held) {
+                                record(ln, "tan", [{
+                                    label: __("Fetch"),
+                                    text: __("not attempted — {0} is waiting"
+                                             + " for a release", [held]),
+                                    kind: "err"
+                                }]);
+                                return;
+                            }
                             if (btn) {
                                 btn.textContent = __("Fetching …") + " ("
                                     + run.done + "/" + total + ")";
                             }
-                            return fetchOne(ln);
+                            return fetchOne(ln).then(function (state) {
+                                if (state === "tan") held = ln;
+                            });
                         });
                     });
                     return chain;
