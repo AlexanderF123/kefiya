@@ -33,6 +33,30 @@ def _rows():
         return [r for r in csv.reader(handle) if r]
 
 
+def _po_msgids():
+    """The sources translated in locale/de.po.
+
+    The app carries two catalogues. locale/de.po is the one Frappe v15 builds
+    from the DocType JSON -- labels, Select options, descriptions -- and
+    translations/de.csv holds what the code says at runtime. Both are read for
+    the same site, so a source string in both is a source string translated
+    twice, and which of the two wins is not something this app decides.
+    """
+    path = _app_path("locale", "de.po")
+    if not os.path.exists(path):
+        return set()
+    found = set()
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("msgid \""):
+                text = line[len("msgid \""):].rstrip()[:-1]
+                if text:
+                    found.add(re.sub(
+                        r"\\(.)",
+                        lambda m: _ESCAPES.get(m.group(1), m.group(1)), text))
+    return found
+
+
 #: Left to the framework on purpose: either its translation is already right
 #: ("Bank Account" -> "Bankkonto") or the string is a product name that must
 #: not be translated at all.
@@ -137,12 +161,24 @@ def _sources():
                  # nothing in a stored script notices. They are source
                  # strings now, so this test reads them.
                  ("utils", "outbox.py"),
+                 # The bank connection. Its messages reach the user through
+                 # the fetch panel and the TAN prompt -- "the bank requires a
+                 # TAN before transactions can be read" stood there in English
+                 # on a German site until somebody reported it.
+                 ("utils", "fints_controller.py"),
                  ("kefiya", "doctype", "kefiya_document_service",
                   "kefiya_document_service.py")):
         with open(_app_path(*path), encoding="utf-8") as handle:
             python += handle.read()
+    # Unescaped like the JavaScript above, and for the same reason: what
+    # frappe looks up at runtime is the STRING, not the source text. A message
+    # carrying \n or an escaped quote was compared against its own backslashes
+    # here and read as untranslated for as long as it existed.
     for m in re.finditer(r'_\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\)', python):
-        found.add("".join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))))
+        joined = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1)))
+        found.add(re.sub(r"\\(.)",
+                         lambda m: _ESCAPES.get(m.group(1), m.group(1)),
+                         joined))
 
     return {s for s in found if s.strip()}
 
@@ -150,7 +186,7 @@ def _sources():
 class TestEveryStringIsTranslated(unittest.TestCase):
 
     def test_nothing_is_left_in_english_by_accident(self):
-        translated = {r[0] for r in _rows()}
+        translated = {r[0] for r in _rows()} | _po_msgids()
         missing = sorted(_sources() - translated - LEFT_TO_THE_FRAMEWORK)
         self.assertEqual(
             missing, [],
@@ -170,6 +206,21 @@ class TestEveryStringIsTranslated(unittest.TestCase):
         self.assertEqual(duplicates, [],
                          "One source, two translations -- whichever wins is "
                          "a coin toss.")
+
+    def test_the_two_catalogues_do_not_overlap(self):
+        """The same coin toss, one file further out.
+
+        The account kinds are the case that made this a test. They are Select
+        options, so locale/de.po already had them -- and a second set in
+        de.csv disagreed with it ("Sparkonto" against "Tagesgeld / Sparen").
+        Four of the seven are ERPNext's own words as well, so the duplicate
+        would have renamed "Loan" and "Credit Card" across the entire site.
+        """
+        both = sorted({r[0] for r in _rows()} & _po_msgids())
+        self.assertEqual(
+            both, [],
+            "Translated in locale/de.po already. Remove the row from "
+            "translations/de.csv -- .po is where a DocType label belongs.")
 
 
 class TestNoGenericWordIsHijacked(unittest.TestCase):

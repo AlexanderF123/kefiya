@@ -238,7 +238,7 @@ def probe(limit=1):
     documents = _documents_in(response)
     if documents is None:
         return {"ok": False,
-                "reason": "no list of documents found in the response",
+                "reason": _("no list of documents found in the response"),
                 "top_level_keys": sorted(response.keys())
                 if isinstance(response, dict) else None}
 
@@ -320,7 +320,7 @@ def fetch_statements(dry_run=1):
             response = _call("/listDocuments", _list_filters(doc, row))
             documents = _documents_in(response)
             if documents is None:
-                entry_summary["reason"] = "no list of documents in the response"
+                entry_summary["reason"] = _("no list of documents in the response")
                 summary["accounts"].append(entry_summary)
                 continue
 
@@ -329,7 +329,7 @@ def fetch_statements(dry_run=1):
 
             for index, entry in enumerate(documents):
                 if budget <= 0:
-                    entry_summary["reason"] = "run budget reached"
+                    entry_summary["reason"] = _("run budget reached")
                     break
                 if not isinstance(entry, dict):
                     continue

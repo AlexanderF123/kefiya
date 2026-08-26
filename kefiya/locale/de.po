@@ -165,7 +165,7 @@ msgid "Fetching accounts …"
 msgstr "Kontenabruf läuft …"
 
 msgid "Fetching …"
-msgstr "Rufe ab …"
+msgstr "Wird abgerufen …"
 
 msgid "Guarantee / Credit Line"
 msgstr "Aval / Kreditlinie"

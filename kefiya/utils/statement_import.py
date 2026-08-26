@@ -510,7 +510,7 @@ def attach_statement(bank_account, filename, content_base64, period=None):
         "file_name": safe,
     })
     if existing:
-        return {"stored": False, "file": existing, "reason": "already present"}
+        return {"stored": False, "file": existing, "reason": _("already present")}
 
     try:
         payload = base64.b64decode(content_base64 or "", validate=True)
