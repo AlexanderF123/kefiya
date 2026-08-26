@@ -101,6 +101,42 @@ def as_text(value):
     return _WHITESPACE.sub(" ", text).strip()
 
 
+def picture_of(response):
+    """The photoTAN image, wherever this library version keeps it.
+
+    Two places, and the one we looked at is the empty one.
+
+    python-fints parses the HHD_UC container itself and hands the result over
+    as ``challenge_matrix`` -- a plain (mime, bytes) tuple. Having done that it
+    leaves the top-level ``challenge_hhduc`` at None, and that is the attribute
+    this module read. So on a comdirect access the response carried
+
+        challenge         'Siehe Grafik'
+        challenge_hhduc   None
+        challenge_matrix  ('image/png', b'\x89PNG...')
+
+    and the prompt said "see the graphic" with no graphic under it -- which is
+    precisely the failure the whole module was written to prevent, moved one
+    attribute to the left.
+
+    The library's own parse is preferred where it exists; matrix_code() stays
+    for the versions and paths that hand the raw container over instead. Both
+    are checked because neither is guaranteed.
+
+    :return: (mime type, image bytes), or None
+    """
+    matrix = getattr(response, "challenge_matrix", None)
+    if isinstance(matrix, (tuple, list)) and len(matrix) == 2:
+        mime, image = matrix
+        mime = mime.decode("ascii", "replace") if isinstance(
+            mime, (bytes, bytearray)) else str(mime or "")
+        if mime.startswith("image/") and isinstance(
+                image, (bytes, bytearray)) and image:
+            return mime, bytes(image)
+
+    return matrix_code(getattr(response, "challenge_hhduc", None))
+
+
 def challenge_of(response):
     """Everything the prompt needs in order to be answerable.
 
@@ -119,7 +155,7 @@ def challenge_of(response):
     if text:
         challenge["text"] = text
 
-    picture = matrix_code(getattr(response, "challenge_hhduc", None))
+    picture = picture_of(response)
     if picture:
         mime, image = picture
         challenge["image"] = {
