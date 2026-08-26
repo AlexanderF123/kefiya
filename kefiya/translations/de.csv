@@ -280,8 +280,6 @@ SEPA account object has no key '{0}',Das SEPA-Konto hat keinen Schlüssel „{0}
 Start date is more than the allowed {0} days in the past,Das Startdatum liegt weiter als die erlaubten {0} Tage in der Vergangenheit
 Start transaction import,Umsatzimport starten
 and {0} more,und {0} weitere
-{0}: the bank is waiting for the release in your banking app. Confirm it there and fetch again -- this login uses a decoupled procedure and issues no TAN to type in.,{0}: Die Bank wartet auf die Freigabe in Ihrer Banking-App. Dort bestätigen und erneut abrufen — dieser Zugang nutzt ein entkoppeltes Verfahren und gibt keine TAN zum Eintippen aus.
-{0}: the bank requires a TAN before transactions can be read. Enter the TAN in the prompt and fetch again.,"{0}: Die Bank verlangt eine TAN, bevor die Umsätze gelesen werden können. Die TAN im Fenster eingeben und erneut abrufen."
 no balance,kein Saldo
 bank returned no balance,die Bank hat keinen Saldo geliefert
 balance missing on the response,in der Antwort fehlt der Saldo
@@ -305,3 +303,9 @@ Due today — goes to the bank now,Heute fällig — geht jetzt an die Bank
 Due since {0} — goes to the bank today,"Fällig seit {0} — geht heute an die Bank"
 Today — the bank executes it today,Heute — die Bank führt ihn heute aus
 "Dated {0}, which has passed — the bank cannot execute this","Auf den {0} datiert, der vorbei ist — die Bank kann das nicht ausführen"
+not attempted — {0} is waiting for a release,"Nicht versucht — {0} wartet auf eine Freigabe"
+"counted as cash in the books, but this is {0}","in der Buchhaltung als Guthaben geführt, ist aber {0}"
+Ledger,Buchhaltung
+{0}: the bank is waiting for the release in your banking app. Confirm it there -- this login uses a decoupled procedure and issues no TAN to type in.,{0}: Die Bank wartet auf die Freigabe in Ihrer Banking-App. Dort bestätigen — dieser Zugang nutzt ein entkoppeltes Verfahren und gibt keine TAN zum Eintippen aus.
+{0}: the bank requires a TAN before the bookings can be read. Enter it in the window.,"{0}: Die Bank verlangt eine TAN, bevor die Buchungen gelesen werden können. Bitte im Fenster eingeben."
+The session is then open: fetch this access once more and the bookings come through without another TAN. The panel offers that as a link once the run has finished.,"Danach ist die Sitzung offen: Diesen Zugang noch einmal abrufen, dann kommen die Buchungen ohne weitere TAN durch. Das Panel bietet dafür einen Link an, sobald der Lauf fertig ist."

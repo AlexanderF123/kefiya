@@ -11,7 +11,7 @@ import json
 # production yet, so the resulting NameError stayed latent.
 from frappe import _
 
-from kefiya.utils import account_kind
+from kefiya.utils import account_classification, account_kind
 
 
 def _use_tan_authentication() -> bool:
@@ -413,6 +413,10 @@ def fetch_all(kefiya_login, user_scope=None):
             # So the log can say what this account is, and the reader can see
             # why a guarantee or a share deposit reports no running balance.
             "account_kind": account_kind.kind_of(kefiya_login),
+            # And whether the books agree with the bank about that. Only set
+            # when they do not, so the log stays quiet on the normal case.
+            "ledger_complaint": account_classification.ledger_complaint(
+                kefiya_login),
             "errors": [],
         }
 
