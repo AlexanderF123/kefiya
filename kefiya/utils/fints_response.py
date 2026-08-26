@@ -132,5 +132,42 @@ def as_text(verdict, limit=6):
     return "\n".join(o for o in out if o)
 
 
+#: Return codes we have actually met, and what a person can do about them.
+#:
+#: Deliberately short. A table of all 300 FinTS codes would be a table nobody
+#: maintains and everybody half-trusts; these are the ones this instance has
+#: seen, each with the next step rather than a restatement of the code.
+KNOWN_CODES = {
+    "3945": (
+        "The bank performs Verification of Payee for this order and will not"
+        " release it until the check has been confirmed. The order was not"
+        " sent. This needs the account's capabilities to be read again from"
+        " the bank -- fetch the account once, then send again."
+    ),
+    "9010": (
+        "The bank could not process the message at all. Nothing was sent."
+    ),
+    "9210": (
+        "The bank rejected the order data. The detail in brackets usually"
+        " names the field it objected to."
+    ),
+}
+
+
+def advice(verdict):
+    """What to do about it, for the codes we know. Empty for the rest.
+
+    Only the codes this instance has actually run into, and each says the next
+    step rather than restating the number. An explanation invented for a code
+    nobody here has seen is a guess wearing the clothes of documentation.
+    """
+    seen = []
+    for line in (verdict or {}).get("lines", []):
+        hint = KNOWN_CODES.get(line.get("code"))
+        if hint and hint not in seen:
+            seen.append(hint)
+    return seen
+
+
 def _text(value):
     return "" if value is None else str(value).strip()

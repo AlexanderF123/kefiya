@@ -112,6 +112,34 @@ class TestTheBankIsAskedBeforeAnythingIsConcluded(unittest.TestCase):
         self.assertIn("fints_response.as_text(verdict)", log)
 
 
+class TestTheStoredFintsStateFitsInItsColumn(unittest.TestCase):
+    """A TAN challenge that cannot be persisted is a payment that cannot be
+    completed.
+
+    "Data too long for column 'stored_dialog_state'": the bank DID ask for a
+    TAN on the Sparkasse account, and the send died storing the dialog. Small
+    Text is a MariaDB TEXT -- 65,535 bytes -- and a dialog state carrying the
+    pain.001 message plus the VoP segments goes past it. The comdirect access
+    was already at 36,600 of those bytes.
+    """
+
+    def test_every_stored_fints_blob_is_long_text(self):
+        import json
+
+        root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        with open(os.path.join(root, "kefiya", "doctype", "kefiya_login",
+                               "kefiya_login.json"), encoding="utf-8") as fh:
+            meta = json.load(fh)
+
+        too_small = [f["fieldname"] for f in meta["fields"]
+                     if f.get("fieldname", "").startswith("stored_")
+                     and f.get("fieldtype") in ("Data", "Small Text", "Text")]
+        self.assertEqual(too_small, [],
+                         "These hold FinTS state and will overflow: "
+                         + ", ".join(too_small))
+
+
 class TestNoEmptySecondDialog(unittest.TestCase):
     """frappe.throw renders its own dialog. A second box underneath saying
     "Unknown error." is worse than no second box -- the reader is left

@@ -257,3 +257,7 @@ Refused by the bank,Von der Bank abgelehnt
 
 {0}"
 What the bank said:,Was die Bank gesagt hat:
+What this means:,Was das bedeutet:
+"The bank performs Verification of Payee for this order and will not release it until the check has been confirmed. The order was not sent. This needs the account's capabilities to be read again from the bank -- fetch the account once, then send again.","Die Bank führt für diesen Auftrag eine Empfängerprüfung (VoP) durch und gibt ihn erst frei, wenn die Prüfung bestätigt wurde. Der Auftrag wurde nicht gesendet. Dafür müssen die Fähigkeiten des Kontos neu von der Bank gelesen werden — das Konto einmal abrufen, dann erneut senden."
+The bank could not process the message at all. Nothing was sent.,Die Bank konnte die Nachricht gar nicht verarbeiten. Es wurde nichts gesendet.
+The bank rejected the order data. The detail in brackets usually names the field it objected to.,Die Bank hat die Auftragsdaten zurückgewiesen. Der Zusatz in Klammern nennt meist das beanstandete Feld.
