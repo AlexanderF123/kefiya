@@ -1004,17 +1004,29 @@ class FinTSController:
                 reference_name=self.kefiya_login.name,
             )
 
+        # Both messages end in "fetch again", and that is not a hedge: the
+        # TAN authorises the SESSION, it does not deliver the bookings.
+        # resolve_tan_interaction builds an authenticated controller and stops
+        # there -- nothing asks for the transactions a second time. So the
+        # user hands over six digits and watches nothing happen, which reads
+        # as a failure and is not one. Saying why the second run is needed,
+        # and that it costs no second TAN, is the difference between an
+        # instruction and a dead end.
+        again = _("The session is then open: fetch this access once more and"
+                  " the bookings come through without another TAN. The panel"
+                  " offers that as a link once the run has finished.")
+
         if decoupled:
             raise TanInteractionRequired(_(
                 "{0}: the bank is waiting for the release in your banking app."
-                " Confirm it there and fetch again -- this login uses a"
-                " decoupled procedure and issues no TAN to type in."
-            ).format(self.kefiya_login.name))
+                " Confirm it there -- this login uses a decoupled procedure"
+                " and issues no TAN to type in."
+            ).format(self.kefiya_login.name) + " " + again)
 
         raise TanInteractionRequired(_(
-            "{0}: the bank requires a TAN before transactions can be read."
-            " Enter the TAN in the prompt and fetch again."
-        ).format(self.kefiya_login.name))
+            "{0}: the bank requires a TAN before the bookings can be read."
+            " Enter it in the window."
+        ).format(self.kefiya_login.name) + " " + again)
 
     def _require_fints_account(self, iban=None):
         """Resolve the login's FinTS account, or fail with a usable message.

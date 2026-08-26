@@ -188,7 +188,7 @@ kefiya.interactive = {
 				});
 			}
 
-			frappe.prompt(
+			const dialog = frappe.prompt(
 				fields,
 				(values) => {
 					frappe.call({
@@ -201,6 +201,11 @@ kefiya.interactive = {
 				},
 				title
 			);
+
+			// Straight into the TAN field: the mode and the medium above it
+			// are read-only, so the only thing to do here is type. The rule
+			// itself lives in bank_refresh.js, which owns the other TAN box.
+			if (kefiya.focus_tan_field) kefiya.focus_tan_field(dialog);
 		});
 	},
 }

@@ -594,7 +594,7 @@ frappe.provide("kefiya");
         var challenge = tanChallengeField(data);
         if (challenge) fields.unshift(challenge);
 
-        frappe.prompt(fields, function (values) {
+        var dialog = frappe.prompt(fields, function (values) {
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
                 method: "kefiya.utils.client.resolve_tan_interaction",
@@ -612,6 +612,35 @@ frappe.provide("kefiya");
                 }
             });
         }, tanTitle(data));
+
+        // Into the TAN field, not into the dialog. The mode and the medium
+        // above it are read-only -- the only thing to do here is type six
+        // digits, and Frappe leaves the focus on the dialog itself, so it took
+        // a click first. A TAN expires while you look for the cursor.
+        //
+        // On the decoupled procedure there IS no TAN field: the release
+        // happens in the banking app and the dialog only says so. Focusing
+        // whatever happens to be first would put the cursor somewhere the user
+        // must not change, so nothing is focused at all.
+        focusTanField(dialog);
+        return dialog;
+    }
+
+    // frappe.prompt resolves its dialog synchronously but shows it through a
+    // Bootstrap transition, so the input is not focusable at the moment the
+    // call returns. shown.bs.modal is the event that says it is; the timeout
+    // is the fallback for a desk that renders the modal without the
+    // transition, where the event has already fired.
+    function focusTanField(dialog) {
+        if (!dialog || !dialog.get_field) return;
+        var put = function () {
+            try {
+                var f = dialog.get_field("tan");
+                if (f && f.$input) f.$input.focus().select();
+            } catch (ignored) {}
+        };
+        try { dialog.$wrapper.on("shown.bs.modal", put); } catch (ignoredA) {}
+        setTimeout(put, 300);
     }
 
     // Shared, because a TAN prompt is a TAN prompt: the outgoing-payments page
@@ -619,6 +648,12 @@ frappe.provide("kefiya");
     // of it drifted apart once already -- the second one named neither the bank
     // nor the account, which is the whole reason the context lines exist.
     kefiya.tan_prompt = tanPrompt;
+
+    // The Kefiya Login form builds its own TAN box (it has the form's docname
+    // where this one has a login from the run). It gets the focus rule from
+    // here rather than a second copy of it -- these two boxes have drifted
+    // apart once already.
+    kefiya.focus_tan_field = focusTanField;
 
     function bindRealtime() {
         if (kefiya._bank_refresh_realtime) return;
