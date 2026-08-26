@@ -19,6 +19,7 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
+from kefiya.utils import fints_response
 from kefiya.utils import tan_challenge
 from kefiya.utils.fints_dialog_state import (
     dialog_is_usable, discard_unusable_dialog,
@@ -1635,19 +1636,45 @@ class FinTSController:
                     "status": "tan_required",
                     "docname": self.kefiya_login.name,
                 }
-            # The dialog ended without a TAN. That is either a bank that asks
-            # for none, or an order that was never signed -- and those two look
-            # identical from here.
-            self._refuse_unsigned(multiple, scheduled, instant_payment)
+
+            # What the bank itself said. Asked BEFORE concluding anything from
+            # the absence of a TAN, because a refusal explains that absence:
+            # an order the bank turned down is not an order it wants signed.
+            #
+            # This was the missing question. The old code asked only "VoP?"
+            # and "TAN?" and read everything else as success, so a bank that
+            # refused an order in plain words produced "the bank did not
+            # request a TAN" in the log and "Unbekannter Fehler" on screen.
+            verdict = fints_response.verdict_of(response)
+            if fints_response.refused(verdict):
+                frappe.log_error(
+                    title="Kefiya: the bank refused the transfer",
+                    message="login={0}\n{1}".format(
+                        self.kefiya_login.name,
+                        fints_response.as_text(verdict)),
+                )
+                frappe.throw(
+                    _("The bank refused this order. It was NOT sent."
+                      "\n\n{0}").format(fints_response.as_text(verdict)),
+                    title=_("Refused by the bank"),
+                )
+
+            # The dialog ended without a TAN and without a refusal. That is
+            # either a bank that asks for no signature, or an order that was
+            # never signed.
+            self._refuse_unsigned(multiple, scheduled, instant_payment,
+                                  verdict=verdict)
 
             # Nothing left to object to: the bank asks for no signature on this
             # transaction, so an unsigned dialog is what success looks like.
             # Still recorded, because a credit transfer without strong
-            # authentication is unusual enough to be worth a trail.
+            # authentication is unusual enough to be worth a trail -- and with
+            # what the bank said, so the trail is readable.
             frappe.log_error(
                 title="Kefiya SEPA transfer completed without TAN challenge",
-                message="login={0}: the bank did not request a TAN".format(
-                    self.kefiya_login.name
+                message="login={0}: the bank did not request a TAN\n{1}".format(
+                    self.kefiya_login.name,
+                    fints_response.as_text(verdict) or "(the bank said nothing)"
                 ),
             )
             result = {"status": "submitted"}
@@ -1659,7 +1686,8 @@ class FinTSController:
                     getattr(response, "data", None) or {}).get("task_id")
             return result
 
-    def _refuse_unsigned(self, multiple, scheduled, instant_payment):
+    def _refuse_unsigned(self, multiple, scheduled, instant_payment,
+                         verdict=None):
         """Refuse to call an unsigned order sent, when the bank demands a
         signature for it.
 
@@ -1693,11 +1721,13 @@ class FinTSController:
             # reason to keep the loud log below.
             return
 
+        said = fints_response.as_text(verdict)
         frappe.log_error(
             title="Kefiya: transfer ended without the signature the bank"
                   " requires",
-            message="login={0} capability={1} required_signatures={2}".format(
-                self.kefiya_login.name, capability, needed),
+            message="login={0} capability={1} required_signatures={2}\n{3}"
+                    .format(self.kefiya_login.name, capability, needed,
+                            said or "(the bank said nothing)"),
         )
         frappe.throw(
             _(
@@ -1710,7 +1740,8 @@ class FinTSController:
             ).format(
                 needed,
                 _(capabilities.LABEL_BY_KEY.get(capability, capability)),
-            ),
+            ) + (("\n\n" + _("What the bank said:") + "\n" + said)
+                 if said else ""),
             title=_("Not sent — no signature"),
         )
 

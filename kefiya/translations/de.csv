@@ -250,3 +250,10 @@ SEPA transfer — one banking day,SEPA-Überweisung — ein Bankarbeitstag
 {0} receipts,{0} Belege
 Execution date has passed,Ausführungstermin liegt in der Vergangenheit
 "{0} is dated {1}, which has passed, and the bank is meant to hold it until then. A bank cannot execute an order in the past. Change the date, or set it to be held here and sent on the day.",{0} ist auf den {1} datiert — der ist vorbei — und die Bank soll den Auftrag bis dahin halten. Eine Bank kann keinen Auftrag in der Vergangenheit ausführen. Bitte das Datum ändern oder den Auftrag hier halten lassen und am Termin senden.
+Refused by the bank,Von der Bank abgelehnt
+"The bank refused this order. It was NOT sent.
+
+{0}","Die Bank hat diesen Auftrag abgelehnt. Er wurde NICHT abgesendet.
+
+{0}"
+What the bank said:,Was die Bank gesagt hat:
