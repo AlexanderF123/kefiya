@@ -172,10 +172,29 @@ kefiya.execution_sentence = function (row) {
 	const day = row && row.execution_date
 		? frappe.datetime.str_to_user(row.execution_date) : "";
 	if (!row || !row.execution_date) return __("As soon as possible");
+
+	// Mirrors requested_execution_date() on the server, which is the only
+	// place that decides what date the bank is actually asked for. A day that
+	// has arrived is no longer a date to wait for, and saying "held here until
+	// then" about a day two weeks gone is the same lie in the other
+	// direction: last time the screen was right and the message wrong;
+	// without this the message is right and the screen wrong.
+	const diff = frappe.datetime.get_diff(
+		row.execution_date, frappe.datetime.get_today());
+
 	if (row.manage_due_date) {
-		return __("On {0} — held here until then", [day]);
+		// We hold it. On the day it is sent it is an ordinary immediate
+		// transfer -- the date never reaches the bank.
+		if (diff > 0) return __("On {0} — held here until then", [day]);
+		if (diff === 0) return __("Due today — goes to the bank now");
+		return __("Due since {0} — goes to the bank today", [day]);
 	}
-	return __("On {0} — the bank holds the order", [day]);
+	// The bank holds it, so the date IS the order. The server refuses a date
+	// that has passed rather than moving it quietly forward.
+	if (diff > 0) return __("On {0} — the bank holds the order", [day]);
+	if (diff === 0) return __("Today — the bank executes it today");
+	return __("Dated {0}, which has passed — the bank cannot execute this",
+		[day]);
 };
 
 //: How it travels: as an instant payment or as an ordinary SEPA transfer.
