@@ -1,3 +1,12 @@
+# Server Script `fc_cockpit_data`
+
+Ein Patch zum Einsetzen im Browser, kein lauffähiges Modul — die
+Abschnitte sind Bruchstücke aus der Mitte einer Funktion. Deshalb
+Markdown: eine Datei mit der Endung `.py` wird beim Release-Check
+von Frappe Cloud kompiliert und ein eingerückter Ausschnitt ist
+dort ein Syntaxfehler.
+
+```python
 # ============================================================================
 # PATCH 1 von 3  —  Server Script  fc_cockpit_data
 # ----------------------------------------------------------------------------
@@ -148,3 +157,4 @@ def bucket_of(mem, is_loan_flag):
             # Geld. Beide standen hier bisher mit ihrem vollen Betrag.
             'available': (bal + line) if bucket == 'pay' else 0.0,
             'forecast': pr['end'], 'low': pr['min'],
+```

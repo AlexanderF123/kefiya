@@ -10,12 +10,18 @@ die Seite ein **Server Script** (27 KB) und ein **Custom HTML Block** (82 KB)
 ist und beide Felder über dem Schreiblimit der MCP-Schnittstelle liegen — sie
 müssen im Browser eingesetzt werden.
 
+Sie tragen die Endung `.md` und nicht `.py`/`.js`, und das ist keine Kosmetik:
+Der Release-Check von Frappe Cloud kompiliert jede `.py`-Datei im Repository.
+Ein Patch besteht aus Bruchstücken mitten aus einer Funktion, also
+eingerücktem Code — als Modul gelesen ist das ein Syntaxfehler, und der hat
+genau einmal ein Release blockiert.
+
 ## Reihenfolge
 
-1. `1-server-script-fc_cockpit_data.py` — drei Stellen im Server Script
+1. `1-server-script-fc_cockpit_data.md` — drei Stellen im Server Script
    `fc_cockpit_data`. Danach **im Browser öffnen und mit Strg+S speichern**,
    sonst bleibt die alte Fassung in der Redis-Whitelist stehen.
-2. `2-block-axessio_finanzcockpit.js` — vier Stellen im Custom HTML Block
+2. `2-block-axessio_finanzcockpit.md` — vier Stellen im Custom HTML Block
    `axessio_finanzcockpit`. Danach reicht ein harter Reload (Strg+F5).
 
 Jeder Abschnitt nennt den Suchtext wörtlich; alle Ankertexte wurden gegen die
