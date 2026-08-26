@@ -3,7 +3,11 @@
 //
 // One collective fetch across every bank access, for any page that wants one.
 //
-//   kefiya.bank_refresh({mount, btn, buttonLabel, onRefreshView, onDone})
+//   kefiya.bank_refresh({mount, btn, buttonLabel, onRefreshView, onDone, only})
+//
+// "only" is a list of Kefiya Login names. Given, the run touches those and
+// nothing else -- that is what the "fetch the failed ones again" link in the
+// finished panel uses, and what a caller wanting a single access passes.
 //
 // Returns a Promise resolving to the run summary, or to null when the run was
 // not started at all -- missing permission, no accesses configured, or another
@@ -155,6 +159,17 @@ frappe.provide("kefiya");
                 + "<a href='#' data-kefiya='upd' style='font-size:11px'>"
                 + esc(__("Refresh view")) + "</a>";
         }
+        // Repeating the whole run to reach the three accesses that broke costs
+        // minutes and a strong authentication per bank. This repeats only
+        // those three.
+        var again = run.busy ? [] : unfinished();
+        if (again.length) {
+            links = (links || "<div style='margin-top:6px'>")
+                + (links ? " <span style='color:" + C_MUTED + "'>·</span> " : "")
+                + "<a href='#' data-kefiya='again' style='font-size:11px'>"
+                + esc(__("Fetch the {0} unfinished accesses again",
+                         [again.length])) + "</a>";
+        }
         if (links) links += "</div>";
 
         el.innerHTML = "<div style='font-weight:600;color:"
@@ -165,6 +180,17 @@ frappe.provide("kefiya");
         if (u) u.onclick = function (e) { e.preventDefault(); run.onRefreshView(); };
         var g = el.querySelector("[data-kefiya=log]");
         if (g) g.onclick = function (e) { e.preventDefault(); showLog(); };
+        var a = el.querySelector("[data-kefiya=again]");
+        if (a) {
+            // Read before the new run replaces `run` -- afterwards the list
+            // this link was drawn for no longer exists.
+            var names = again.slice();
+            var opts = (run && run.options) || {};
+            a.onclick = function (e) {
+                e.preventDefault();
+                kefiya.bank_refresh(Object.assign({}, opts, { only: names }));
+            };
+        }
 
         // A log that is already open must not freeze at the state it had when
         // it was opened -- that was the other half of "you only see it
@@ -175,6 +201,16 @@ frappe.provide("kefiya");
                 && run.logDialog.fields_dict.body;
             if (field) field.$wrapper.html(logBody());
         }
+    }
+
+    // The accesses of the current run that did not come through: a real
+    // failure, or a release the bank is still waiting for. Both are worth a
+    // second attempt -- the release because the user has meanwhile confirmed
+    // it in the app, the failure because most of them are transient.
+    function unfinished() {
+        return ((run && run.log) || []).filter(function (e) {
+            return e.state === "err" || e.state === "tan";
+        }).map(function (e) { return e.ln; });
     }
 
     // The shortest true sentence about one failed access: the reason the
@@ -267,7 +303,10 @@ frappe.provide("kefiya");
         add(__("Transactions"), __("{0} new", [t.new_count || 0]));
 
         if (x.account_kind) {
-            add(__("Account Kind"), x.account_kind, "none");
+            // The kind is a stable English key in the database -- a Select
+            // option other code matches on. Only what is shown gets
+            // translated; the stored value must not.
+            add(__("Account Kind"), __(x.account_kind), "none");
         }
 
         report(__("Balance"), "balance", function () {
@@ -649,23 +688,40 @@ frappe.provide("kefiya");
         bindRealtime();
         if (btn) { btn.disabled = true; btn.textContent = __("Checking …"); }
 
+        // A restricted run still asks the server for the list: `only` names
+        // logins, and a name that has meanwhile been deleted or had its
+        // account removed must drop out rather than fail the run.
+        var wanted = null;
+        if (options.only && options.only.length) {
+            wanted = {};
+            options.only.forEach(function (ln) { wanted[ln] = true; });
+        }
+
         return frappe.db.get_list("Kefiya Login", {
             fields: ["name", "account_iban"], limit: 200
         }).then(function (rows) {
             var logins = (rows || [])
                 .filter(function (r) { return r.account_iban; })
+                .filter(function (r) { return !wanted || wanted[r.name]; })
                 .map(function (r) { return r.name; });
             if (!logins.length) {
-                frappe.msgprint(
-                    __("No bank access with an account configured."));
+                frappe.msgprint(wanted
+                    ? __("None of these accesses is still configured.")
+                    : __("No bank access with an account configured."));
                 release();
                 return null;
+            }
+            // Panels used to stack: the second run drew its own above the
+            // first, and the finished one stayed to be read as current.
+            if (run && run.panel && run.panel.isConnected) {
+                run.panel.parentNode.removeChild(run.panel);
             }
             run = {
                 busy: true, order: logins.slice(), log: [],
                 tot: 0, ok: 0, tan: 0, fail: 0, skip: 0, done: 0,
                 mount: options.mount || null, panel: null, logDialog: null,
-                onRefreshView: options.onRefreshView || null
+                onRefreshView: options.onRefreshView || null,
+                options: options
             };
             render();
 
@@ -691,6 +747,10 @@ frappe.provide("kefiya");
                 // never reached, and the bar stopped short.
                 var known = {};
                 logins.forEach(function (ln) { known[ln] = true; });
+                // get_fetch_groups answers for every access. In a restricted
+                // run the groups are the right chains but the wrong contents,
+                // so `known` is what decides -- it already holds only the
+                // logins this run is allowed to touch.
                 var planned = [];
                 groups.forEach(function (grp) {
                     grp.forEach(function (ln) {
