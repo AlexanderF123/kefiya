@@ -205,7 +205,7 @@ def refresh_account_capabilities(kefiya_login, controller=None):
     if not rows:
         # "The bank named nothing" and "we never asked" must not look the same
         # on the document, so the attempt is recorded even when it was empty.
-        return {"stored": [], "skipped": [{"reason": "the bank sent no HIUPD"}],
+        return {"stored": [], "skipped": [{"reason": _("the bank sent no HIUPD")}],
                 "checked_on": None}
 
     stored, skipped = [], []
@@ -214,14 +214,14 @@ def refresh_account_capabilities(kefiya_login, controller=None):
         if not account:
             skipped.append({
                 "iban": _mask(row.get("iban")),
-                "reason": "no bank account with this IBAN",
+                "reason": _("no bank account with this IBAN"),
             })
             continue
         if store_for_account(account, row.get("segments") or {}):
             stored.append(account)
         else:
             skipped.append({"bank_account": account,
-                            "reason": "capability fields not installed"})
+                            "reason": _("capability fields not installed")})
 
     return {"stored": stored, "skipped": skipped,
             "checked_on": str(now_datetime())}

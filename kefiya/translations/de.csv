@@ -38,7 +38,6 @@ Dry run,Prüflauf
 Fetch now,Jetzt abrufen
 Asking the service …,Dienst wird angefragt …
 "Looking, writing nothing …","Nur ansehen, nichts schreiben …"
-Fetching …,Wird abgerufen …
 Connection,Verbindung
 Connection failed,Verbindung fehlgeschlagen
 The service answered.,Der Dienst hat geantwortet.
@@ -94,7 +93,6 @@ On {0} — held here until then,Am {0} — bis dahin hier gehalten
 On {0} — the bank holds the order,Am {0} — die Bank hält den Auftrag
 Paying account,Abgehendes Konto
 Execution,Ausführung
-Instant payment,Echtzeitüberweisung
 "Kept here, released on the day",Wird hier gehalten und am Tag freigegeben
 Left with the bank,Liegt bei der Bank
 Payee verification,Empfängerprüfung
@@ -151,7 +149,6 @@ Open this order,Diesen Auftrag öffnen
 Selected: {0} orders · {1},Markiert: {0} Aufträge · {1}
 Approved and still here: {0},Freigegeben und noch hier: {0}
 Cancel hold,Zurückstellung aufheben
-Hold back,Zurückstellen
 Approve for sending,Freigeben
 Sending needs the right to approve.,"Absenden darf nur, wer Freigaberecht hat."
 Nothing found.,Nichts gefunden.
@@ -190,7 +187,6 @@ Please check the online banking before sending again: if the transfer is there a
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
 Bank challenge,Aufforderung der Bank
 "Scan this with your banking app, then enter the TAN it shows.","Mit der Banking-App scannen, dann die angezeigte TAN eintragen."
-The account the money is paid from.,"Das Konto, von dem das Geld abgeht."
 "Comes from the paying account. Whose money is sent is decided by the account, not chosen here.","Kommt vom abgehenden Konto. Wessen Geld gesendet wird, entscheidet das Konto — nicht die Auswahl hier."
 "The paying account {0} does not name a company, so there is nothing to put on the order as the ordering party. Set the company on the Bank Account first.","Das abgehende Konto {0} nennt keine Gesellschaft, also steht nichts als Auftraggeber auf dem Auftrag. Bitte zuerst die Gesellschaft am Bankkonto setzen."
 Optional first: it narrows the accounts below to that company. Choosing an account sets it.,Zuerst wählbar: schränkt die Konten darunter auf diese Gesellschaft ein. Ein gewähltes Konto setzt sie.
@@ -261,3 +257,47 @@ What this means:,Was das bedeutet:
 "The bank performs Verification of Payee for this order and will not release it until the check has been confirmed. The order was not sent. This needs the account's capabilities to be read again from the bank -- fetch the account once, then send again.","Die Bank führt für diesen Auftrag eine Empfängerprüfung (VoP) durch und gibt ihn erst frei, wenn die Prüfung bestätigt wurde. Der Auftrag wurde nicht gesendet. Dafür müssen die Fähigkeiten des Kontos neu von der Bank gelesen werden — das Konto einmal abrufen, dann erneut senden."
 The bank could not process the message at all. Nothing was sent.,Die Bank konnte die Nachricht gar nicht verarbeiten. Es wurde nichts gesendet.
 The bank rejected the order data. The detail in brackets usually names the field it objected to.,Die Bank hat die Auftragsdaten zurückgewiesen. Der Zusatz in Klammern nennt meist das beanstandete Feld.
+A SEPA order cannot be sent while a bank fetch is running. Wait for the fetch to finish and send it again.,"Während ein Bankabruf läuft, kann kein SEPA-Auftrag gesendet werden. Bitte den Abruf abwarten und dann erneut senden."
+A collective transfer requires a control sum.,Ein Sammelauftrag verlangt eine Kontrollsumme.
+An instant payment cannot be scheduled for a later date.,Eine Echtzeitüberweisung lässt sich nicht auf einen späteren Termin legen.
+Bank Transaction import completed,Import der Banktransaktionen abgeschlossen
+Connection established,Verbindung steht
+Could not conntect to fints server with error<br>{0},Verbindung zum FinTS-Server nicht möglich<br>{0}
+Could not load sepa accounts with error:<br>{0},Die SEPA-Konten konnten nicht geladen werden:<br>{0}
+Error parsing transactions<br>{0},Die Umsätze ließen sich nicht lesen<br>{0}
+Failed to attach file,Die Datei konnte nicht angehängt werden
+Found a total of '{0}' payments,Insgesamt {0} Zahlungen gefunden
+Initialise TAN settings,TAN-Einstellungen einrichten
+Initialise connection,Verbindung aufbauen
+Loading accounts,Konten werden geladen
+Loading accounts completed,Konten geladen
+No FinTS account matching IBAN {0} for login {1}. The bank offered: {2}. Accounts without an IBAN (e.g. credit cards) cannot be fetched this way.,Kein FinTS-Konto mit der IBAN {0} für den Zugang {1}. Die Bank hat angeboten: {2}. Konten ohne IBAN — etwa Kreditkarten — lassen sich auf diesem Weg nicht abrufen.
+No TAN mechanisms available,Kein TAN-Verfahren verfügbar
+No new payments found,Keine neuen Zahlungen gefunden
+No pending Verification of Payee for this login.,Für diesen Zugang steht keine Empfängerprüfung offen.
+No transaction found,Keine Umsätze gefunden
+SEPA account object has no key '{0}',Das SEPA-Konto hat keinen Schlüssel „{0}“
+Start date is more than the allowed {0} days in the past,Das Startdatum liegt weiter als die erlaubten {0} Tage in der Vergangenheit
+Start transaction import,Umsatzimport starten
+and {0} more,und {0} weitere
+{0}: the bank is waiting for the release in your banking app. Confirm it there and fetch again -- this login uses a decoupled procedure and issues no TAN to type in.,{0}: Die Bank wartet auf die Freigabe in Ihrer Banking-App. Dort bestätigen und erneut abrufen — dieser Zugang nutzt ein entkoppeltes Verfahren und gibt keine TAN zum Eintippen aus.
+{0}: the bank requires a TAN before transactions can be read. Enter the TAN in the prompt and fetch again.,"{0}: Die Bank verlangt eine TAN, bevor die Umsätze gelesen werden können. Die TAN im Fenster eingeben und erneut abrufen."
+no balance,kein Saldo
+bank returned no balance,die Bank hat keinen Saldo geliefert
+balance missing on the response,in der Antwort fehlt der Saldo
+no running balance for {0},{0} führt keinen fortlaufenden Saldo
+no bank account linked,kein Bankkonto verknüpft
+field bank_balance not installed,das Feld bank_balance ist nicht installiert
+no fetch window,kein Abrufzeitraum
+no bookings in the window,keine Buchungen im Zeitraum
+the bank sent no HIUPD,die Bank hat kein HIUPD gesendet
+no bank account with this IBAN,kein Bankkonto mit dieser IBAN
+capability fields not installed,die Felder für die Fähigkeiten sind nicht installiert
+already present,bereits vorhanden
+the bank named no limit,die Bank hat kein Limit genannt
+no limit known,kein Limit bekannt
+no list of documents found in the response,in der Antwort steht keine Dokumentenliste
+no list of documents in the response,in der Antwort steht keine Dokumentenliste
+run budget reached,Obergrenze des Laufs erreicht
+Fetch the {0} unfinished accesses again,Die {0} nicht abgeschlossenen Zugänge erneut abrufen
+None of these accesses is still configured.,Keiner dieser Zugänge ist noch eingerichtet.

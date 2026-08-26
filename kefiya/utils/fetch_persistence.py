@@ -61,17 +61,17 @@ def store_balance(kefiya_login, rows):
     """
     login = frappe.get_doc("Kefiya Login", kefiya_login)
     if not login.bank_account:
-        return {"stored": False, "reason": "no bank account linked"}
+        return {"stored": False, "reason": _("no bank account linked")}
 
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:
-        return {"stored": False, "reason": "bank returned no balance"}
+        return {"stored": False, "reason": _("bank returned no balance")}
 
     # Prefer the row that names this login's IBAN; fall back to the first.
     row = next((r for r in rows if r.get("iban") == login.account_iban), rows[0])
     balance = row.get("balance")
     if balance is None:
-        return {"stored": False, "reason": "balance missing on the response"}
+        return {"stored": False, "reason": _("balance missing on the response")}
 
     account = frappe.get_doc("Bank Account", login.bank_account)
     meta = account.meta
@@ -149,34 +149,34 @@ def apply_running_balance(kefiya_login, balance, balance_date=None,
     """
     result = {"updated": 0, "from": None, "to": None}
     if balance is None:
-        result["reason"] = "no balance"
+        result["reason"] = _("no balance")
         return result
 
     # A guarantee line, a loan and a share deposit have no stream of bookings
     # for the balance to be counted back over. Subtracting anyway would write a
     # column of confident numbers that describe nothing.
     if not account_kind.keeps_a_running_balance(kefiya_login):
-        result["reason"] = "no running balance for {0}".format(
-            account_kind.kind_of(kefiya_login))
+        result["reason"] = _("no running balance for {0}").format(
+            _(account_kind.kind_of(kefiya_login)))
         result["account_kind"] = account_kind.kind_of(kefiya_login)
         return result
 
     bank_account = frappe.db.get_value(
         "Kefiya Login", kefiya_login, "bank_account")
     if not bank_account:
-        result["reason"] = "no bank account linked"
+        result["reason"] = _("no bank account linked")
         return result
 
     # The field is a Custom Field on this instance, not part of ERPNext, so
     # its absence must not fail a fetch that has already done its work.
     if not frappe.get_meta("Bank Transaction").has_field("bank_balance"):
-        result["reason"] = "field bank_balance not installed"
+        result["reason"] = _("field bank_balance not installed")
         return result
 
     anchor = getdate(balance_date) if balance_date else now_datetime().date()
     start = getdate(from_date) if from_date else None
     if not start:
-        result["reason"] = "no fetch window"
+        result["reason"] = _("no fetch window")
         return result
 
     filters = {
@@ -190,7 +190,7 @@ def apply_running_balance(kefiya_login, balance, balance_date=None,
         # Newest first: the counting starts at the known current balance.
         order_by="date desc, creation desc, name desc")
     if not rows:
-        result["reason"] = "no bookings in the window"
+        result["reason"] = _("no bookings in the window")
         return result
 
     running = flt(balance)
@@ -247,7 +247,7 @@ def store_credit_card_transactions(kefiya_login, entries):
     """
     login = frappe.get_doc("Kefiya Login", kefiya_login)
     if not login.bank_account:
-        return {"created": 0, "skipped": 0, "reason": "no bank account linked"}
+        return {"created": 0, "skipped": 0, "reason": _("no bank account linked")}
 
     created = skipped = 0
     for raw in (entries or []):
@@ -337,7 +337,7 @@ def download_statements(controller, kefiya_login, listing, limit=3):
     bank_account = frappe.db.get_value(
         "Kefiya Login", kefiya_login, "bank_account")
     if not bank_account:
-        result["reason"] = "no bank account linked"
+        result["reason"] = _("no bank account linked")
         return result
 
     for entry in entries[:limit]:

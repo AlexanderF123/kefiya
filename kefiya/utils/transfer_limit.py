@@ -63,7 +63,7 @@ def refresh_transfer_limit(kefiya_login, controller=None):
         # of them is a reason to let a large order through.
         login.transfer_limit_checked_on = now_datetime()
         login.save(ignore_permissions=True)
-        return {"stored": False, "reason": "the bank named no limit"}
+        return {"stored": False, "reason": _("the bank named no limit")}
 
     login.transfer_limit_amount = flt(chosen.get("amount"))
     login.transfer_limit_type = chosen.get("limit_type")
@@ -175,7 +175,7 @@ def check_batch(docs):
         # pretends to have been checked either.
         return {"ok": True, "limit": None, "limit_type": None,
                 "available": None, "total": total,
-                "reason": "no limit known"}
+                "reason": _("no limit known")}
 
     if limit_type == LIMIT_SINGLE:
         # Per ORDER, so a batch is judged per document -- the bank sees one
