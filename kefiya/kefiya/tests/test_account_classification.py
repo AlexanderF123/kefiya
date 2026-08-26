@@ -9,7 +9,8 @@ which is the whole reason it is a separate function from the query around it.
 
 import unittest
 
-from kefiya.utils.ledger_rule import LIQUID, NOT_LIQUID, is_misclassified
+from kefiya.utils.ledger_rule import (
+    LIQUID, NOT_LIQUID, is_misclassified, is_stated)
 
 
 class TestWhatCountsAsCash(unittest.TestCase):
@@ -87,3 +88,23 @@ class TestWhatCountsAsCash(unittest.TestCase):
                          "account_kind.py grew or lost a kind. Decide whether "
                          "the books may count it as cash, then update "
                          "NOT_LIQUID.")
+
+
+class TestTheDefaultIsNotAnAnswer(unittest.TestCase):
+    """account_kind defaults to "Current Account" and kind_of() returns it for
+    every login nobody configured. Reading that as "this is a giro account"
+    moved eight Volksbank Darlehen into the payment accounts -- and into the
+    liquidity -- when a first version of the Finanzübersicht grouping trusted
+    the field in both directions."""
+
+    def test_a_non_payment_kind_was_chosen_by_somebody(self):
+        for kind in NOT_LIQUID:
+            self.assertTrue(is_stated(kind), kind)
+
+    def test_a_payment_kind_may_just_be_the_default(self):
+        for kind in ("Current Account", "Savings", "Credit Card"):
+            self.assertFalse(is_stated(kind), kind)
+
+    def test_nothing_at_all_is_not_an_answer_either(self):
+        self.assertFalse(is_stated(None))
+        self.assertFalse(is_stated(""))

@@ -39,3 +39,23 @@ def is_misclassified(kind, account_type):
     :return: bool
     """
     return kind in NOT_LIQUID and account_type == LIQUID
+
+
+def is_stated(kind):
+    """True where the account kind is an answer rather than a default.
+
+    account_kind's default is "Current Account", and kind_of() returns it for
+    every login nobody has configured -- indistinguishable from a real giro
+    account. So the field is evidence in one direction only: a kind that is
+    not a payment account was chosen by somebody, a payment account may just
+    be the field lying still.
+
+    This is not theory. A grouping built on "the account kind wins, always"
+    moved eight Volksbank Darlehen into the payment accounts -- and into the
+    liquidity -- because their logins carry the untouched default. Same shape
+    as duplicate_rule: an absent answer is not an answer.
+
+    :param kind: one of account_kind.KINDS, or None
+    :return: bool
+    """
+    return kind in NOT_LIQUID
