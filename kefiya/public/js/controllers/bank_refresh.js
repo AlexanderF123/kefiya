@@ -667,6 +667,146 @@ frappe.provide("kefiya");
         });
     }
 
+    // One account's outcome, whoever fetched it. The worker and the
+    // account-by-account fallback below hand in the same summary, so they must
+    // read it the same way -- two copies of this drifted once and the log said
+    // "2 neu" for every account in the run.
+    function noteResult(ln, x, failure) {
+        if (!run) return "err";
+        if (failure) {
+            record(ln, "err",
+                [{ label: __("Fetch"), text: __("failed"), kind: "err" }],
+                String(failure).slice(0, 600));
+            return "err";
+        }
+        x = x || {};
+        var t = x.transactions || {};
+        var state = "ok";
+        if (x.skipped || t.status === "skipped") state = "skip";
+        else if (x.tan_required || t.status === "tan_required") state = "tan";
+        run.tot += (t.new_count || 0);
+        record(ln, state, buildLines(x));
+        return state;
+    }
+
+    function progressLabel(btn, total) {
+        if (btn) {
+            btn.textContent = __("Fetching …") + " ("
+                + run.done + "/" + total + ")";
+        }
+    }
+
+    // Runs a worker is holding, by the id start_fetch_group gave them. The
+    // realtime handlers are bound once for the page, so this map is how an
+    // event finds the group it belongs to.
+    var pending = {};
+
+    function bindGroupRealtime() {
+        if (kefiya._bank_refresh_group_realtime) return;
+        kefiya._bank_refresh_group_realtime = true;
+        frappe.realtime.on("kefiya_fetch_progress", function (d) {
+            var g = d && pending[d.run];
+            if (!g) return;
+            g.seen();
+            noteResult(d.login, d.summary, d.error);
+            progressLabel(g.btn, g.total);
+        });
+        frappe.realtime.on("kefiya_fetch_group_done", function (d) {
+            var g = d && pending[d.run];
+            if (!g) return;
+            g.done();
+        });
+    }
+
+    // How long a group may say nothing before the run stops waiting for it.
+    // A worker that dies -- killed, out of memory, a bank that never answers
+    // -- publishes no closing event, and without this the panel would sit at
+    // "fetching" until the page is reloaded.
+    var GROUP_SILENCE_MS = 10 * 60 * 1000;
+
+    // One bank access, one dialog, all of its accounts -- the whole point of
+    // fetch_group, which the server has had all along and nobody called. The
+    // browser used to fetch account by account, so thirty accounts on one
+    // access meant thirty handshakes and thirty strong authentications
+    // against the same bank.
+    function fetchWholeAccess(logins, btn, total) {
+        return new Promise(function (res) {
+            frappe.call({
+                method: "kefiya.utils.client.start_fetch_group",
+                args: { logins: logins, user_scope: logins[0] },
+                silent: true,
+                callback: function (r) {
+                    var id = r && r.message && r.message.run;
+                    if (!id) { res(fetchOneByOne(logins, btn, total)); return; }
+                    var timer = null;
+                    var settled = false;
+                    var finish = function () {
+                        if (settled) return;
+                        settled = true;
+                        if (timer) clearTimeout(timer);
+                        delete pending[id];
+                        res(null);
+                    };
+                    var arm = function () {
+                        if (timer) clearTimeout(timer);
+                        timer = setTimeout(function () {
+                            // Whatever never reported is neither fetched nor
+                            // failed as far as we know. Say that, rather than
+                            // leave the bar short of its total for good.
+                            logins.forEach(function (ln) {
+                                if (!recorded(ln)) {
+                                    noteResult(ln, null, __(
+                                        "The worker stopped reporting. Fetch"
+                                        + " this access again."));
+                                }
+                            });
+                            finish();
+                        }, GROUP_SILENCE_MS);
+                    };
+                    pending[id] = { btn: btn, total: total,
+                                    seen: arm, done: finish };
+                    arm();
+                },
+                // An older server without the endpoint, or a caller without
+                // the rights the worker would need. Neither is a reason to
+                // fetch nothing.
+                error: function () { res(fetchOneByOne(logins, btn, total)); }
+            });
+        });
+    }
+
+    function recorded(ln) {
+        return ((run && run.log) || []).some(function (e) {
+            return e.ln === ln;
+        });
+    }
+
+    // The fallback: one request per account, as it was before the worker.
+    // Keeps the client-side stop at a parked release, because here the client
+    // is the only one who can see it.
+    function fetchOneByOne(logins, btn, total) {
+        var chain = Promise.resolve();
+        var held = null;
+        logins.forEach(function (ln) {
+            chain = chain.then(function () {
+                if (held) {
+                    record(ln, "tan", [{
+                        label: __("Fetch"),
+                        text: __("not attempted — {0} is waiting"
+                                 + " for a release", [held]),
+                        kind: "err"
+                    }]);
+                    return;
+                }
+                progressLabel(btn, total);
+                return fetchOne(ln).then(function (state) {
+                    if (state === "tan") held = ln;
+                });
+            });
+        });
+        return chain;
+    }
+
     function fetchOne(ln) {
         return new Promise(function (res) {
             frappe.call({
@@ -674,24 +814,10 @@ frappe.provide("kefiya");
                 args: { kefiya_login: ln, user_scope: ln },
                 silent: true,
                 callback: function (r) {
-                    var x = (r && r.message) || {};
-                    var t = x.transactions || {};
-                    var state = "ok";
-                    if (x.skipped || t.status === "skipped") state = "skip";
-                    else if (x.tan_required || t.status === "tan_required") {
-                        state = "tan";
-                    }
-                    run.tot += (t.new_count || 0);
-                    record(ln, state, buildLines(x));
-                    res(state);
+                    res(noteResult(ln, (r && r.message) || {}));
                 },
                 error: function (r) {
-                    var t = errText(r) || __("Error");
-                    record(ln, "err",
-                        [{ label: __("Fetch"), text: __("failed"),
-                           kind: "err" }],
-                        t.slice(0, 600));
-                    res("err");
+                    res(noteResult(ln, null, errText(r) || __("Error")));
                 }
             });
         });
@@ -727,6 +853,7 @@ frappe.provide("kefiya");
         }
 
         bindRealtime();
+        bindGroupRealtime();
         if (btn) { btn.disabled = true; btn.textContent = __("Checking …"); }
 
         // A restricted run still asks the server for the list: `only` names
@@ -802,39 +929,13 @@ frappe.provide("kefiya");
                 var total = run.order.length;
 
                 var chains = groups.map(function (grp) {
-                    var chain = Promise.resolve();
-                    // The login this bank is waiting on. A release that the
-                    // bank asks for in the banking app is parked on the
-                    // access, and the access holds ONE dialog: starting the
-                    // next account of the same bank opens a new one and
-                    // overwrites the parked challenge, so the release the
-                    // user then gives belongs to a dialog that no longer
-                    // exists -- "die App hat schon keine Daten mehr". Every
-                    // further account asks again, and each ask invalidates
-                    // the one before it. So the bank's chain stops here.
-                    var held = null;
-                    grp.forEach(function (ln) {
-                        chain = chain.then(function () {
-                            if (!known[ln]) return;
-                            if (held) {
-                                record(ln, "tan", [{
-                                    label: __("Fetch"),
-                                    text: __("not attempted — {0} is waiting"
-                                             + " for a release", [held]),
-                                    kind: "err"
-                                }]);
-                                return;
-                            }
-                            if (btn) {
-                                btn.textContent = __("Fetching …") + " ("
-                                    + run.done + "/" + total + ")";
-                            }
-                            return fetchOne(ln).then(function (state) {
-                                if (state === "tan") held = ln;
-                            });
-                        });
-                    });
-                    return chain;
+                    var mine = grp.filter(function (ln) { return known[ln]; });
+                    if (!mine.length) return Promise.resolve();
+                    // The whole access in one go. The stop at a parked
+                    // release lives in fetch_group now: the server is the
+                    // only one that sees it the moment it happens, and it is
+                    // the one holding the dialog the release belongs to.
+                    return fetchWholeAccess(mine, btn, total);
                 });
                 return Promise.all(chains).then(function () {
                     run.busy = false;
