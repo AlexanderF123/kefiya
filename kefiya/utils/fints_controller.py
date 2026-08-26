@@ -231,6 +231,20 @@ def fints_session():
 #: Kept as a module-level name because callers throughout this file use it.
 _mask_iban = mask_iban
 
+
+def _advice_block(verdict):
+    """What to do about the codes the bank sent, appended to a refusal.
+
+    Empty for a code nobody here has met, and that is the point: the bank's
+    own sentence is always shown, and an explanation is added only where we
+    know one. An invented explanation reads exactly like a researched one.
+    """
+    hints = fints_response.advice(verdict)
+    if not hints:
+        return ""
+    return "\n\n" + _("What this means:") + "\n" + "\n".join(
+        "• " + _(hint) for hint in hints)
+
 class FinTSController:
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
         self.kefiya_login = frappe.get_doc("Kefiya Login", kefiya_login_docname)
@@ -1655,7 +1669,8 @@ class FinTSController:
                 )
                 frappe.throw(
                     _("The bank refused this order. It was NOT sent."
-                      "\n\n{0}").format(fints_response.as_text(verdict)),
+                      "\n\n{0}").format(fints_response.as_text(verdict))
+                    + _advice_block(verdict),
                     title=_("Refused by the bank"),
                 )
 
@@ -1688,6 +1703,7 @@ class FinTSController:
 
     def _refuse_unsigned(self, multiple, scheduled, instant_payment,
                          verdict=None):
+        # (see _advice_block below for how the bank's codes are explained)
         """Refuse to call an unsigned order sent, when the bank demands a
         signature for it.
 
@@ -1741,7 +1757,8 @@ class FinTSController:
                 needed,
                 _(capabilities.LABEL_BY_KEY.get(capability, capability)),
             ) + (("\n\n" + _("What the bank said:") + "\n" + said)
-                 if said else ""),
+                 if said else "")
+              + _advice_block(verdict),
             title=_("Not sent — no signature"),
         )
 

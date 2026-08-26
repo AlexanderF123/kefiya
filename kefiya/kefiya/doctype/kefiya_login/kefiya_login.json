@@ -172,12 +172,12 @@
   },
   {
    "fieldname": "stored_dialog_state",
-   "fieldtype": "Small Text",
+   "fieldtype": "Long Text",
    "label": "Stored Dialog State"
   },
   {
    "fieldname": "stored_tan_state",
-   "fieldtype": "Small Text",
+   "fieldtype": "Long Text",
    "label": "Stored TAN State"
   },
   {
@@ -195,7 +195,7 @@
   },
   {
    "fieldname": "stored_client_state",
-   "fieldtype": "Small Text",
+   "fieldtype": "Long Text",
    "label": "Stored Client State"
   },
   {
@@ -266,12 +266,12 @@
   },
   {
    "fieldname": "stored_vop_state",
-   "fieldtype": "Small Text",
+   "fieldtype": "Long Text",
    "label": "Stored VoP State"
   },
   {
    "fieldname": "stored_vop_dialog_state",
-   "fieldtype": "Small Text",
+   "fieldtype": "Long Text",
    "label": "Stored VoP Dialog State"
   },
   {

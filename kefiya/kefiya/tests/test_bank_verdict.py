@@ -133,3 +133,29 @@ class TestItSaysTheBanksOwnWords(unittest.TestCase):
     def test_only_the_complaints_when_that_is_what_is_wanted(self):
         v = fr.verdict_of(Answer([Line("0010", "ok"), Line("9010", "nein")]))
         self.assertEqual([c["code"] for c in fr.complaints(v)], ["9010"])
+
+
+class TestTheCodesWeHaveMetAreExplained(unittest.TestCase):
+    """Only the ones this instance has actually run into. An explanation
+    invented for a code nobody here has seen is a guess wearing the clothes of
+    documentation."""
+
+    def test_3945_says_what_to_do(self):
+        """The one that stopped a real payment: the bank runs Verification of
+        Payee for this order and will not release it unconfirmed."""
+        hints = fr.advice(fr.verdict_of(Answer([
+            Line("3945", "Freigabe ohne VOP-Bestätigung nicht möglich.")])))
+        self.assertEqual(len(hints), 1)
+        self.assertIn("Verification of Payee", hints[0])
+
+    def test_an_unknown_code_gets_no_invented_explanation(self):
+        self.assertEqual(fr.advice(fr.verdict_of(
+            Answer([Line("3076", "Starke Kundenauthentifizierung")]))), [])
+
+    def test_a_code_seen_twice_is_explained_once(self):
+        hints = fr.advice(fr.verdict_of(Answer([
+            Line("9010", "nein"), Line("9010", "wieder nein")])))
+        self.assertEqual(len(hints), 1)
+
+    def test_nothing_said_needs_no_advice(self):
+        self.assertEqual(fr.advice(fr.verdict_of(object())), [])
