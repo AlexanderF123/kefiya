@@ -77,6 +77,13 @@ kefiya.outbox_state = function (r) {
 		return { key: "failed", label: __("Failed to send"), rank: 1,
 			fg: "#A32D2D", bg: "#FBEDED" };
 	}
+	// Not a failure and not on its way: the bank is holding the order until
+	// somebody confirms the payee check. Saying "approved for sending" here
+	// would leave a parked order looking like every other one in the list.
+	if (r.vop_pending && r.status !== "Sent") {
+		return { key: "vop", label: __("Payee check open"), rank: 2,
+			fg: "#854F0B", bg: "#FDF3E3" };
+	}
 	if (r.on_hold) {
 		return { key: "hold", label: __("Held back"), rank: 2,
 			fg: "#A32D2D", bg: "#FBEDED" };
@@ -915,6 +922,32 @@ kefiya.payment_outbox = function (root) {
 				frappe.show_alert({
 					message: __("The bank asks for a release."),
 					indicator: "orange" }, 8);
+			} else if (m.status === "vop_mismatch") {
+				// Nothing was handed to the bank. This branch did not exist,
+				// so a parked payee check fell into the "sent" case below and
+				// was reported in green -- for an order that never left.
+				kefiya.vop_prompt({
+					login: login,
+					scope: login,
+					vop_result: m.vop_result,
+					payee: m.payee,
+					onResult: function (r2) {
+						if (r2 && r2.status === "error") {
+							frappe.msgprint({ title: __("Not sent"),
+								indicator: "red",
+								message: esc(r2.message || "") });
+						} else if (r2 && r2.status === "tan_required") {
+							frappe.show_alert({
+								message: __("The bank asks for a release."),
+								indicator: "orange" }, 8);
+						} else {
+							frappe.show_alert({
+								message: __("Handed to the bank."),
+								indicator: "green" }, 8);
+						}
+						load();
+					}
+				});
 			} else {
 				view.selected = {};
 				frappe.show_alert({

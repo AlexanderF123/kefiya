@@ -339,3 +339,6 @@ The account the money went to.,"Das Konto, auf das das Geld ging."
 "IBAN and payee name, normalised. This is what a later order is looked up by; it is unique, so one decision is stored once.","IBAN und Empfängername, vereinheitlicht. Danach wird ein späterer Auftrag gesucht; er ist eindeutig, damit eine Entscheidung genau einmal gespeichert ist."
 The bank access the order went out through.,"Der Bankzugang, über den der Auftrag hinausging."
 "Who the parked order pays, and what the bank answered about them, as JSON. Read back when the reviewer releases the order, so their decision is remembered against the payee the bank was actually asked about.","Wen der zurückgestellte Auftrag bezahlt und was die Bank dazu geantwortet hat, als JSON. Wird bei der Freigabe wieder gelesen, damit die Entscheidung zu genau dem Empfänger gespeichert wird, nach dem die Bank gefragt wurde."
+Payee check open,Empfängerprüfung offen
+Handed to the bank.,An die Bank übergeben.
+The bank is holding this order until the payee check is confirmed. Nothing has been sent. Send it to the bank again — the check then comes back for review and release.,"Die Bank hält diesen Auftrag zurück, bis die Empfängerprüfung bestätigt ist. Es wurde nichts gesendet. Den Auftrag erneut an die Bank senden — die Prüfung kommt dann zur Ansicht und Freigabe zurück."

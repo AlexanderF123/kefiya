@@ -25,6 +25,19 @@ the command segment that was sent, and both are local to the method above.
 So this subclasses that one method and adds that one branch. Everything else
 is the library's, line for line, including the parts that look redundant.
 
+And a second one, which the first live transfer found: at this bank the check
+is ASYNCHRONOUS. The first answer carries no verdict at all, only a polling id
+and "ask again in two seconds"::
+
+    HIVPP1(header=..., polling_id=b'587d03b8-...', wait_for_seconds=2)
+
+HKVPP carries that polling id for exactly this follow-up, and the library
+never sends it. Without the follow-up there is nothing to decide on -- and the
+challenge that got parked instead could never be released, because the
+approval segment is HKVPA(vop_id=...) and this answer has no VoP-ID. So the
+method now waits for the verdict before it decides anything, and parks nothing
+when the verdict never comes.
+
 WHY THIS CANNOT SEND TWICE, which is the only question that matters here:
 
     3945 means the bank did NOT release the order. The added branch turns a
@@ -51,6 +64,13 @@ KNOWN_GOOD = "5.0.0b1"
 
 #: The bank checked the payee and wants the check confirmed before releasing.
 CONFIRMATION_DEMANDED = "3945"
+
+#: How long to keep asking while the bank is still checking. The bank names
+#: the pause between two questions itself (wait_for_seconds); this only bounds
+#: the total, because somebody is sitting in front of a spinner.
+POLL_LIMIT_SECONDS = 30
+#: What to wait when the bank names nothing.
+DEFAULT_POLL_SECONDS = 2
 
 
 def installed_version():
@@ -106,6 +126,59 @@ def demands_confirmation(response, tan_seg):
     return False
 
 
+def verdict_of(hivpp):
+    """The payee-check result for a single payment, or "" where there is none.
+
+    It sits in the EVPE inside the HIVPP segment, not on the segment. Reading
+    the segment alone finds nothing.
+    """
+    try:
+        inner = getattr(hivpp, "vop_single_result", None)
+        return str(getattr(inner, "result", "") or "")
+    except Exception:
+        return ""
+
+
+def still_checking(hivpp):
+    """Has the bank not finished checking the payee yet?
+
+    This is the case the Volksbank actually produces, and it took a failed
+    transfer to find: the first answer carries a polling id and a wait, and
+    nothing else -- no VoP-ID, no result, no name::
+
+        HIVPP1(header=..., polling_id=b'587d03b8-...', wait_for_seconds=2)
+
+    Parking that as a challenge is useless and looks like a bug to whoever
+    gets it: the approval segment is HKVPA(vop_id=...) and there is no VoP-ID
+    to put in it, so the release could never go through. The only thing to do
+    with this answer is ask again.
+    """
+    if hivpp is None:
+        return False
+    if not getattr(hivpp, "polling_id", None):
+        return False
+    if verdict_of(hivpp):
+        return False
+    if getattr(hivpp, "payment_status_report", None):
+        return False
+    return True
+
+
+def poll_pause(hivpp):
+    """How long to wait before asking again, within reason.
+
+    The bank names it. Bounded on both sides so a missing or absurd value
+    cannot turn into a busy loop or a request nobody waits out.
+    """
+    try:
+        said = float(getattr(hivpp, "wait_for_seconds", 0) or 0)
+    except Exception:
+        said = 0.0
+    if said <= 0:
+        said = DEFAULT_POLL_SECONDS
+    return max(1.0, min(said, 10.0))
+
+
 def client_class():
     """The client class to build a bank connection with.
 
@@ -158,6 +231,40 @@ def _build(parts):
     class VopAwarePinTanClient(base):
         """A client that can also be told "confirm the payee first"."""
 
+        def _await_vop_result(self, dialog, vop_standard, hivpp):
+            """Keep asking until the bank has finished checking the payee.
+
+            The check is asynchronous at some banks: the first answer is a
+            polling id and "ask again in n seconds". HKVPP carries that
+            polling id for exactly this, and the library never sends it.
+
+            Bounded, and honest when it runs out: the caller gets back the
+            answer as it stands, still_checking() is still true, and the
+            order ends unsent with the bank's own words. A parked challenge
+            without a VoP-ID would be a dead end wearing the clothes of one
+            that can be released.
+            """
+            import time
+
+            waited = 0.0
+            while still_checking(hivpp) and waited < POLL_LIMIT_SECONDS:
+                pause = poll_pause(hivpp)
+                time.sleep(pause)
+                waited += pause
+                try:
+                    again = dialog.send(HKVPP1(
+                        supported_reports=PSRD1(psrd=[vop_standard]),
+                        polling_id=hivpp.polling_id))
+                    nxt = again.find_segment_first(HIVPP1)
+                except Exception:
+                    # The bank would not answer the follow-up. Whatever the
+                    # reason, this order is not going out on a guess.
+                    break
+                if nxt is None:
+                    break
+                hivpp = nxt
+            return hivpp
+
         def _send_pay_with_possible_retry(self, dialog, command_seg,
                                           resume_func):
             vop_seg = []
@@ -174,7 +281,12 @@ def _build(parts):
 
                     if vop_standard:
                         hivpp = response.find_segment_first(HIVPP1, throw=True)
-                        vop_result = hivpp.vop_single_result
+                        # Wait for the verdict before deciding anything. The
+                        # first answer is often only "still checking, ask
+                        # again", and everything below needs a result.
+                        hivpp = self._await_vop_result(
+                            dialog, vop_standard, hivpp)
+
                         # Not applicable, no match, close match -- the
                         # library's own three, unchanged.
                         #
@@ -182,7 +294,14 @@ def _build(parts):
                         # existing: the check went through and the bank still
                         # wants it confirmed. Same parked challenge, so the
                         # same deliberate approval releases it.
-                        if (vop_result.result in ('RVNA', 'RVNM', 'RVMC')
+                        #
+                        # A check that never finished parks nothing: without a
+                        # VoP-ID the approval segment is empty and the release
+                        # could not go through, so the order falls through to
+                        # the bank's own refusal instead of to a button that
+                        # cannot work.
+                        if not still_checking(hivpp) and (
+                                verdict_of(hivpp) in ('RVNA', 'RVNM', 'RVMC')
                                 or demands_confirmation(response, tan_seg)):
                             return NeedVOPResponse(
                                 vop_result=hivpp,

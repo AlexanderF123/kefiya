@@ -27,7 +27,10 @@ shipping, and that check is the only thing that catches it.
 import os
 import unittest
 
-from kefiya.utils.fints_vop import CONFIRMATION_DEMANDED, demands_confirmation
+from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
+                                    DEFAULT_POLL_SECONDS,
+                                    demands_confirmation, poll_pause,
+                                    still_checking, verdict_of)
 
 
 class Line:
@@ -113,3 +116,78 @@ class TestACopyKnowsWhatItIsACopyOf(unittest.TestCase):
         parked challenge cannot send anything a second time -- and the
         approval that follows is a person's deliberate act."""
         self.assertIn("WHY THIS CANNOT SEND TWICE", self._source())
+
+
+class Evpe:
+    def __init__(self, result=None):
+        self.result = result
+
+
+class Hivpp:
+    """What the bank hands back. Three shapes turn up in practice."""
+
+    def __init__(self, polling_id=None, wait_for_seconds=None, inner=None,
+                 report=None, vop_id=None):
+        self.polling_id = polling_id
+        self.wait_for_seconds = wait_for_seconds
+        self.vop_single_result = inner
+        self.payment_status_report = report
+        self.vop_id = vop_id
+
+
+class TestTheCheckThatIsNotFinishedYet(unittest.TestCase):
+    """The Volksbank answers asynchronously, and the first live transfer is
+    what found it: polling id, a wait, and no verdict. Parking that produced
+    a challenge nobody could release -- HKVPA carries the VoP-ID and there
+    was none."""
+
+    def test_a_polling_id_without_a_verdict_means_ask_again(self):
+        self.assertTrue(still_checking(
+            Hivpp(polling_id=b"587d03b8", wait_for_seconds=2)))
+
+    def test_a_verdict_ends_the_asking(self):
+        for code in ("RCVC", "RVMC", "RVNM", "RVNA"):
+            self.assertFalse(still_checking(
+                Hivpp(polling_id=b"587d03b8", inner=Evpe(code))), code)
+
+    def test_a_batch_report_ends_the_asking(self):
+        """A collective order is answered as a payment status report, not as
+        a single result. Asking again for it would never stop."""
+        self.assertFalse(still_checking(
+            Hivpp(polling_id=b"587d03b8", report=b"<xml/>")))
+
+    def test_no_polling_id_is_not_something_to_ask_about(self):
+        self.assertFalse(still_checking(Hivpp(inner=Evpe(None))))
+        self.assertFalse(still_checking(None))
+        self.assertFalse(still_checking(object()))
+
+    def test_the_verdict_is_read_out_of_the_inner_group(self):
+        self.assertEqual(verdict_of(Hivpp(inner=Evpe("RVMC"))), "RVMC")
+        self.assertEqual(verdict_of(Hivpp()), "")
+        self.assertEqual(verdict_of(None), "")
+        self.assertEqual(verdict_of("kaputt"), "")
+
+    def test_the_bank_names_the_pause(self):
+        self.assertEqual(poll_pause(Hivpp(wait_for_seconds=2)), 2.0)
+
+    def test_an_absurd_pause_is_brought_back_into_range(self):
+        """Neither a busy loop nor a request nobody waits out."""
+        self.assertEqual(poll_pause(Hivpp(wait_for_seconds=0)),
+                         float(DEFAULT_POLL_SECONDS))
+        self.assertEqual(poll_pause(Hivpp(wait_for_seconds=900)), 10.0)
+        self.assertEqual(poll_pause(Hivpp(wait_for_seconds=-5)),
+                         float(DEFAULT_POLL_SECONDS))
+        self.assertEqual(poll_pause(Hivpp(wait_for_seconds="zwei")),
+                         float(DEFAULT_POLL_SECONDS))
+
+    def test_the_copy_waits_before_it_decides(self):
+        """Asserted from the source: the decision must not be taken on the
+        first answer, and an unfinished check must park nothing."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("hivpp = self._await_vop_result(", source)
+        self.assertIn("if not still_checking(hivpp) and (", source)
+        self.assertIn("waited < POLL_LIMIT_SECONDS", source)

@@ -32,103 +32,27 @@ function kefiya_handle_transfer_response(frm, msg) {
 
 /**
  * Verification of Payee mismatch: the bank could not confirm that the payee
- * name belongs to the IBAN. No money has moved. The order is parked server-side
- * and can only continue through this dialog, after a human compared the payee
- * against the underlying document -- a VoP mismatch is exactly what a payment
- * diversion (redirected invoice) looks like, so it is never waved through.
+ * name belongs to the IBAN. No money has moved. The order is parked
+ * server-side and can only continue through this box, after a human compared
+ * the payee against the underlying document -- a VoP mismatch is exactly what
+ * a payment diversion (redirected invoice) looks like, so it is never waved
+ * through.
+ *
+ * The box itself is kefiya.vop_prompt, in the bundle. It used to live here,
+ * and this file is included into doctype JS rather than bundled -- so the
+ * outgoing-payments page could not reach it and reported a parked order as
+ * sent. One box, both callers.
  */
-function kefiya_vop_payee_block(payee) {
-    /* Who the order pays, in the three lines that decide the question.
-     *
-     * The raw answer is dumped below this as well, because it is what the
-     * bank actually said -- but nobody compares an invoice against a parsed
-     * segment, and this dialog exists to be read.
-     */
-    if (!payee || !payee.name) return "";
-    const row = (label, value) =>
-        "<tr><td style='padding:2px 12px 2px 0;color:#6c7680'>"
-        + frappe.utils.escape_html(label) + "</td><td><b>"
-        + frappe.utils.escape_html(String(value)) + "</b></td></tr>";
-    let rows = row(__("Payee on the order"), payee.name);
-    if (payee.iban) rows += row(__("IBAN"), payee.iban);
-    if (payee.bank_name) rows += row(__("Name at the Bank"), payee.bank_name);
-    if (payee.result) rows += row(__("Bank's Answer"), payee.result);
-    return "<table style='margin:10px 0'>" + rows + "</table>";
-}
-
 function kefiya_prompt_vop_release(frm, kefiya_login, vop_result, payee) {
-    let details = "";
-    if (vop_result && typeof vop_result === "object") {
-        const rows = Object.keys(vop_result).map((key) =>
-            "<tr><td style='padding:2px 10px 2px 0'><b>"
-            + frappe.utils.escape_html(key)
-            + "</b></td><td>"
-            + frappe.utils.escape_html(String(vop_result[key]))
-            + "</td></tr>"
-        );
-        details = "<table style='margin-top:8px'>" + rows.join("") + "</table>";
-    } else if (vop_result) {
-        details = "<pre style='white-space:pre-wrap'>"
-            + frappe.utils.escape_html(String(vop_result)) + "</pre>";
-    }
-
-    const d = new frappe.ui.Dialog({
-        title: __("Verification of Payee — mismatch"),
-        fields: [
-            {
-                fieldtype: "HTML",
-                options:
-                    "<div class='alert alert-warning' style='margin-bottom:10px'>"
-                    + __("The bank could not confirm that the payee name matches the IBAN. <b>No money has been sent.</b>")
-                    + "</div>"
-                    + __("Compare the recipient against the invoice before releasing. If the account details were changed recently or came in by email, treat this as a possible fraud attempt and clarify by phone using a known number.")
-                    + kefiya_vop_payee_block(payee)
-                    + ((payee && payee.name && payee.iban)
-                        ? "<div class='text-muted' style='margin-bottom:8px'>"
-                          + __("Once you release it, this payee is remembered: a later payment to the same name and the same IBAN goes through without asking again.")
-                          + "</div>"
-                        : "")
-                    + details
-            },
-            {
-                fieldtype: "Check",
-                fieldname: "reviewed",
-                label: __("I verified the recipient against the original document"),
-                default: 0,
-                reqd: 1
-            }
-        ],
-        primary_action_label: __("Release transfer"),
-        primary_action: function (values) {
-            if (!values.reviewed) {
-                frappe.msgprint(__("Please confirm you verified the recipient."));
-                return;
-            }
-            d.hide();
-            frappe.call({
-                method: "kefiya.utils.client.approve_vop_transfer",
-                args: {
-                    kefiya_login: kefiya_login,
-                    user_scope: frm.docname,
-                    confirmed: 1
-                },
-                freeze: true,
-                freeze_message: __("Releasing transfer..."),
-                callback: function (r) {
-                    kefiya_handle_transfer_response(frm, r.message);
-                }
-            });
-        },
-        secondary_action_label: __("Cancel transfer"),
-        secondary_action: function () {
-            d.hide();
-            frappe.show_alert({
-                message: __("Transfer not released. No money was sent."),
-                indicator: "orange"
-            });
+    kefiya.vop_prompt({
+        login: kefiya_login,
+        scope: frm.docname,
+        vop_result: vop_result,
+        payee: payee,
+        onResult: function (msg) {
+            kefiya_handle_transfer_response(frm, msg);
         }
     });
-    d.show();
 }
 
 function kefiya_prompt_transfer_tan(frm, kefiya_login) {

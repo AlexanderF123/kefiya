@@ -556,3 +556,47 @@ class TestAnUnsignedOrderIsNotASentOrder(unittest.TestCase):
         body = self._controller().split("def _refuse_unsigned(")[1].split(
             "\n    def ")[0]
         self.assertIn("check the online banking before sending again", body)
+
+
+class TestAParkedPayeeCheckIsNotASend(unittest.TestCase):
+    """The one that cost a real transfer.
+
+    The send handler had three branches -- error, tan_required, else -- and
+    "else" reported "Handed to the bank: 1 orders" in green. A parked payee
+    check returns "vop_mismatch", fell into that else, and an order that never
+    left the building was reported as sent. There was no way to release it
+    either: the box lived in a file this page cannot reach.
+    """
+
+    def test_the_send_handler_knows_the_parked_case(self):
+        body = _function(_source(), "function handToBank(")
+        self.assertIn('m.status === "vop_mismatch"', body)
+        self.assertIn("kefiya.vop_prompt({", body)
+
+    def test_the_parked_case_is_decided_before_the_success_branch(self):
+        """Order matters: the success branch is the else of this chain."""
+        body = _function(_source(), "function handToBank(")
+        self.assertLess(body.index('"vop_mismatch"'),
+                        body.index("Handed to the bank: {0} orders"))
+
+    def test_the_box_is_in_the_bundle_so_this_page_can_reach_it(self):
+        bundle = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "public", "js",
+            "kefiya.bundle.js")
+        with open(bundle, encoding="utf-8") as handle:
+            self.assertIn('import "./controllers/vop_prompt";', handle.read())
+        self.assertIn("kefiya.vop_prompt = vopPrompt;", _source("vop_prompt.js"))
+
+    def test_the_transfer_form_uses_the_same_box(self):
+        """Two copies of a money dialog drifted apart once already."""
+        flow = _source("fints_transfer_flow.js")
+        self.assertIn("kefiya.vop_prompt({", flow)
+        self.assertNotIn("new frappe.ui.Dialog", flow.split(
+            "function kefiya_prompt_vop_release(")[1].split("\n}")[0])
+
+    def test_a_parked_order_is_not_shown_as_approved_for_sending(self):
+        state = _function(_source(), "kefiya.outbox_state = function (r) {")
+        self.assertIn("r.vop_pending", state)
+        self.assertLess(state.index("r.vop_pending"),
+                        state.index("Approved for sending"))
