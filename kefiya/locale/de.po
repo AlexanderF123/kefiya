@@ -566,9 +566,6 @@ msgstr "Die Bank verlangt eine TAN. Bitte {0} öffnen und sie dort eingeben."
 msgid "The bank could not confirm a payee name. No money was sent. Open {0} to review and release it."
 msgstr "Die Bank konnte einen Empfängernamen nicht bestätigen. Es ist kein Geld abgegangen. Bitte {0} öffnen, prüfen und freigeben."
 
-msgid "The bank flagged a payee mismatch. Use 'Send to bank' to review and release it."
-msgstr "Die Bank meldet eine Abweichung beim Empfänger. Über „An die Bank senden“ prüfen und freigeben."
-
 msgid "The account the money is paid from."
 msgstr "Das Konto, von dem das Geld abgeht."
 

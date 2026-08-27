@@ -974,7 +974,21 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
             doc.db_set("bank_task_id", result["task_id"])
     elif status == "vop_mismatch":
         doc.db_set("vop_pending", 1)
+        _parked_is_not_failed(doc)
     return result
+
+
+def _parked_is_not_failed(doc):
+    """An order held at the payee check is not an order that failed.
+
+    A "Failed" left over from an earlier attempt survives the next one --
+    db_set on vop_pending does not touch it -- and the list then shows red
+    for an order that is approved, unsent and waiting for one confirmation.
+    Only that stale state is cleared; Due or On Hold say something this does
+    not know better than.
+    """
+    if doc.status == "Failed":
+        doc.db_set("status", "Approved")
 
 
 def present_due_transfers():
@@ -1479,6 +1493,7 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
     elif status == "vop_mismatch":
         for doc in docs:
             doc.db_set("vop_pending", 1)
+            _parked_is_not_failed(doc)
 
     result["sent"] = transfer_names
     # What the send approved on its way out, so the page can name an order
@@ -1527,10 +1542,15 @@ def get_pending_vop(kefiya_login):
         result = json.loads(result) if result else None
     except Exception:
         pass
+    try:
+        payee = json.loads(login.vop_payee or "{}") or {}
+    except Exception:
+        payee = {}
     return {
         "status": "pending",
         "reference": login.vop_reference,
         "vop_result": result,
+        "payee": payee,
     }
 
 

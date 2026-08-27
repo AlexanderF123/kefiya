@@ -69,6 +69,7 @@ class KefiyaLogin(Document):
         self.stored_vop_dialog_blob = None
         self.vop_reference = None
         self.vop_result = None
+        self.vop_payee = None
 
     def read_crypted_string_to_blob(self, encoded_encrypted_string: str) -> bytes | None:
         """Decrypts ascii base64, and decrypts result to return blob"""

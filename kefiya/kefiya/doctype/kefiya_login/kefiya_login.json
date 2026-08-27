@@ -46,7 +46,8 @@
   "stored_vop_state",
   "stored_vop_dialog_state",
   "vop_reference",
-  "vop_result"
+  "vop_result",
+  "vop_payee"
  ],
  "fields": [
   {
@@ -284,6 +285,13 @@
    "fieldname": "vop_result",
    "fieldtype": "Small Text",
    "label": "VoP Result",
+   "read_only": 1
+  },
+  {
+   "description": "Who the parked order pays, and what the bank answered about them, as JSON. Read back when the reviewer releases the order, so their decision is remembered against the payee the bank was actually asked about.",
+   "fieldname": "vop_payee",
+   "fieldtype": "Small Text",
+   "label": "VoP Payee",
    "read_only": 1
   },
   {

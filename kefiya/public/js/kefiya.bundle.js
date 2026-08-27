@@ -29,6 +29,11 @@ import "./controllers/call_error";
 // and the Kefiya Login form -- and no share in what any of them does
 // otherwise, so it is not a part of any one of them.
 import "./controllers/tan_prompt";
+// The box that shows what the bank said about a payee and releases the
+// order. Two callers -- the transfer form and the outgoing payments --
+// and the second one had no way to reach it while it lived in a file that
+// is included into doctype JS rather than bundled.
+import "./controllers/vop_prompt";
 // One account's fetch result as log lines. A pure function of the server's
 // summary, kept apart from the run that produces it.
 import "./controllers/fetch_log";

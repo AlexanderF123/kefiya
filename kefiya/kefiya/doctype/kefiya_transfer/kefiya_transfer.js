@@ -127,8 +127,12 @@ frappe.ui.form.on("Kefiya Transfer", {
 				"green"
 			);
 		} else if (frm.doc.vop_pending) {
+			// Not "release it": the parked challenge belongs to the request
+			// it was raised in. Sending again is what brings the check back,
+			// and it is safe -- the bank did not release the order, so
+			// nothing was debited.
 			frm.dashboard.set_headline_alert(
-				__("The bank flagged a payee mismatch. Use 'Send to bank' to review and release it."),
+				__("The bank is holding this order until the payee check is confirmed. Nothing has been sent. Send it to the bank again — the check then comes back for review and release."),
 				"orange"
 			);
 		}
