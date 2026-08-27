@@ -8,7 +8,7 @@ dort ein Syntaxfehler.
 
 ```javascript
 // ============================================================================
-// PATCH 4 von 5  —  Custom HTML Block  axessio_finanzcockpit, Feld "script"
+// PATCH 4 von 7  —  Custom HTML Block  axessio_finanzcockpit, Feld "script"
 // ----------------------------------------------------------------------------
 // SUCHEN (in der Funktion, die mit "Ov(){" beginnt, direkt nach ensureWin()):
 //
@@ -30,7 +30,7 @@ dort ein Syntaxfehler.
 
 
 // ============================================================================
-// PATCH 5 von 5  —  gleicher Block, weiter unten im selben Aufbau
+// PATCH 5 von 7  —  gleicher Block, weiter unten im selben Aufbau
 // ----------------------------------------------------------------------------
 // SUCHEN:
 //

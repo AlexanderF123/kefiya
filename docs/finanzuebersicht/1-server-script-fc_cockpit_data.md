@@ -8,7 +8,7 @@ dort ein Syntaxfehler.
 
 ```python
 # ============================================================================
-# PATCH 1 von 3  —  Server Script  fc_cockpit_data
+# PATCH 1 von 7  —  Server Script  fc_cockpit_data
 # ----------------------------------------------------------------------------
 # SUCHEN (steht direkt nach dem Kommentar "... weiss nichts / ueber sich"):
 #
@@ -77,7 +77,7 @@ def bucket_of(mem, is_loan_flag):
 
 
 # ============================================================================
-# PATCH 2 von 3  —  gleiches Server Script, Abschnitt 'liquidity'
+# PATCH 2 von 7  —  gleiches Server Script, Abschnitt 'liquidity'
 # ----------------------------------------------------------------------------
 # SUCHEN:
 #
@@ -104,7 +104,7 @@ def bucket_of(mem, is_loan_flag):
 
 
 # ============================================================================
-# PATCH 3 von 3  —  gleiches Server Script, Abschnitt mit der Kontenliste
+# PATCH 3 von 7  —  gleiches Server Script, Abschnitt mit der Kontenliste
 # ----------------------------------------------------------------------------
 # SUCHEN (in der Schleife "for mem in group_accounts(rows):"):
 #
