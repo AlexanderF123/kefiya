@@ -138,11 +138,26 @@ def as_text(verdict, limit=6):
 #: maintains and everybody half-trusts; these are the ones this instance has
 #: seen, each with the next step rather than a restatement of the code.
 KNOWN_CODES = {
+    # "Fetch the account once, then send again" stood here, and it was wrong.
+    # It was a guess -- that the cached bank parameters were too old to
+    # advertise VoP -- and reading them settled it: HIVPPS is present, it lists
+    # HKIPZ and HKCCS among the orders it covers, and the state was hours old.
+    # The advice sent the user in a circle.
+    #
+    # What actually happens: python-fints does send HKVPP and the bank does
+    # check, but it then asks for an explicit confirmation, and the library
+    # only turns a VoP answer into something this app can act on when the
+    # check came back not-applicable, no-match or close-match. A bank that
+    # checked successfully and still wants the confirmation falls through --
+    # its own docstring calls that case "seems related to something not
+    # implemented right now" -- and the order stops here.
     "3945": (
-        "The bank performs Verification of Payee for this order and will not"
-        " release it until the check has been confirmed. The order was not"
-        " sent. This needs the account's capabilities to be read again from"
-        " the bank -- fetch the account once, then send again."
+        "The bank checked the payee for this order and will not release it"
+        " until that check is confirmed. The order was NOT sent. Confirming it"
+        " is a step this app cannot yet take: the FinTS library it uses"
+        " recognises a payee check that failed, but not one that succeeded and"
+        " still asks to be confirmed. Send this transfer from your online"
+        " banking for now."
     ),
     "9010": (
         "The bank could not process the message at all. Nothing was sent."

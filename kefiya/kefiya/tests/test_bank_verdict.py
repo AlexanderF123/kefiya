@@ -140,13 +140,27 @@ class TestTheCodesWeHaveMetAreExplained(unittest.TestCase):
     invented for a code nobody here has seen is a guess wearing the clothes of
     documentation."""
 
-    def test_3945_says_what_to_do(self):
-        """The one that stopped a real payment: the bank runs Verification of
-        Payee for this order and will not release it unconfirmed."""
-        hints = fr.advice(fr.verdict_of(Answer([
+    def _hint_3945(self):
+        return fr.advice(fr.verdict_of(Answer([
             Line("3945", "Freigabe ohne VOP-Bestätigung nicht möglich.")])))
+
+    def test_3945_says_what_to_do(self):
+        """The one that stopped a real payment: the bank checked the payee and
+        will not release the order until that check is confirmed."""
+        hints = self._hint_3945()
         self.assertEqual(len(hints), 1)
-        self.assertIn("Verification of Payee", hints[0])
+        self.assertIn("payee", hints[0])
+        self.assertIn("NOT sent", hints[0])
+
+    def test_3945_no_longer_sends_the_user_in_a_circle(self):
+        """It used to say "fetch the account once, then send again", on the
+        theory that the cached bank parameters were too old to advertise VoP.
+        Reading them settled it: HIVPPS is there, it lists HKIPZ and HKCCS, and
+        the state was hours old. Fetching changes nothing, and saying so cost a
+        user two attempts."""
+        hint = self._hint_3945()[0].lower()
+        self.assertNotIn("fetch the account", hint)
+        self.assertNotIn("capabilities", hint)
 
     def test_an_unknown_code_gets_no_invented_explanation(self):
         self.assertEqual(fr.advice(fr.verdict_of(
