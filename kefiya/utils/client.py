@@ -244,6 +244,13 @@ def fetch_group(logins, user_scope=None, run=None):
     # import it twice.
     ordered = list(dict.fromkeys(str(name) for name in logins if name))
 
+    # A worker inherits the user but not their language: frappe.local.lang
+    # stays at the system default, so every _() in here answered in English
+    # while the same string on the same site translates fine for a request.
+    # The fetch panel read half German, half English again, and this time the
+    # translation was not missing -- it was never asked for.
+    _speak_the_users_language()
+
     results = {}
     failed = {}
     held = None
@@ -294,6 +301,20 @@ def fetch_group(logins, user_scope=None, run=None):
             user=frappe.session.user)
 
     return {"results": results, "failed": failed}
+
+
+def _speak_the_users_language():
+    """Set the language of the user this job was queued for.
+
+    Never raises: a job that cannot read a preference should answer in the
+    site's language, not fail a fetch that is about to talk to a bank.
+    """
+    try:
+        lang = frappe.db.get_value("User", frappe.session.user, "language")
+        if lang:
+            frappe.local.lang = lang
+    except Exception:
+        pass
 
 
 def _not_attempted(held):
