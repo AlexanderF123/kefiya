@@ -345,7 +345,12 @@ frappe.provide("kefiya");
         // which the run needs the user.
         frappe.realtime.on("fints_tan_interaction_required", function (data) {
             if (!run || !run.busy) return;
-            kefiya.tan_prompt(data, function () {
+            kefiya.tan_prompt(data, function (ok) {
+                // Only a release the server accepted. A refused one used to
+                // arm this just the same, and the fetch it started made the
+                // bank ask again -- a circle the user could only leave by
+                // refusing to answer the box.
+                if (!ok) return;
                 resumeWanted = true;
                 // Not now: the worker still holds the access, and a second
                 // dialog on it is the very damage the run is built to avoid.
@@ -356,13 +361,20 @@ frappe.provide("kefiya");
     }
 
     // Fetch what the bank held back, once the run that hit the release has
-    // finished. Guarded three ways: only after a release was actually given,
-    // only when no run is going, and only once -- a second release inside the
-    // resumed run sets the flag again on its own.
+    // finished. Guarded four ways: only after a release the server ACCEPTED,
+    // only when no run is going, only once per armed release, and never from
+    // inside a run that is itself a continuation.
     function maybeResume() {
         if (!resumeWanted) return;
         if (run && run.busy) return;
         resumeWanted = false;
+        // At most one automatic continuation per run the user started. Even
+        // an accepted release can come back needing another one -- a bank
+        // entitled to ask again for the next command -- and then this would
+        // start a run that starts a run. One is a continuation; two is a
+        // loop. What is still unfetched after it stays on the panel, behind
+        // the link that exists for exactly that.
+        if (run && run.resumed) return;
         var again = unfinished();
         if (!again.length) return;
         var opts = (run && run.options) || {};
@@ -371,7 +383,9 @@ frappe.provide("kefiya");
                         + " were waiting for it.", [again.length]),
             indicator: "blue"
         }, 7);
-        kefiya.bank_refresh(Object.assign({}, opts, { only: again }));
+        kefiya.bank_refresh(Object.assign({}, opts, {
+            only: again, resumed: true
+        }));
     }
 
     // One account's outcome, whoever fetched it. The worker and the
@@ -580,7 +594,8 @@ frappe.provide("kefiya");
                 tot: 0, ok: 0, tan: 0, fail: 0, skip: 0, done: 0,
                 mount: options.mount || null, panel: null, logDialog: null,
                 onRefreshView: options.onRefreshView || null,
-                options: options
+                options: options,
+                resumed: !!options.resumed
             };
             render();
 

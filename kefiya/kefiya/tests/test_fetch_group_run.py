@@ -162,3 +162,35 @@ class TestOneReaderForOneSummary(unittest.TestCase):
             js.count("run.tot += (t.new_count || 0);"), 1,
             "The worker path and the fallback must read one summary reader.")
         self.assertIn("noteResult(ln,", js)
+
+
+class TestOneReleaseDoesNotBecomeALoop(unittest.TestCase):
+    """A run that continues itself must not be able to start another one.
+
+    What happened without this: the TAN box reported the same way whether the
+    release had been accepted or refused, and the caller read that as
+    "released, carry on". A refused release started a fetch, the bank asked
+    again, the box came back -- and the user confirmed their way around that
+    circle for as long as they were willing to. Accounts were fetched over and
+    over.
+    """
+
+    def setUp(self):
+        self.js = _read("public", "js", "controllers", "bank_refresh.js")
+        self.box = _read("public", "js", "controllers", "tan_prompt.js")
+
+    def test_the_box_says_whether_it_was_accepted(self):
+        self.assertIn("if (done) done(true);", self.box)
+        self.assertIn("if (done) done(false);", self.box)
+
+    def test_a_refused_release_arms_nothing(self):
+        self.assertIn("function (ok) {", self.js)
+        self.assertIn("if (!ok) return;", self.js)
+
+    def test_a_continuation_cannot_continue_itself(self):
+        """Even an accepted release can come back needing another one. One
+        automatic continuation per run the user started; what is still
+        unfetched stays behind the link that exists for it."""
+        self.assertIn("if (run && run.resumed) return;", self.js)
+        self.assertIn("resumed: true", self.js)
+        self.assertIn("resumed: !!options.resumed", self.js)

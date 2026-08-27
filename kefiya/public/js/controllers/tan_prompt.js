@@ -22,6 +22,31 @@ frappe.provide("kefiya");
 (function () {
     "use strict";
 
+    // The boxes that are open right now, by the login they belong to. A
+    // decoupled release is confirmed on a phone, so the answer arrives from
+    // the server rather than from this box -- and a box asking for something
+    // that has already been given is a box the user has to dismiss for no
+    // reason.
+    var openBoxes = {};
+
+    function bindReleaseArrived() {
+        if (kefiya._tan_release_realtime) return;
+        kefiya._tan_release_realtime = true;
+        frappe.realtime.on("kefiya_release_arrived", function (d) {
+            var box = d && openBoxes[d.docname];
+            if (!box) return;
+            delete openBoxes[d.docname];
+            // hide(), not the primary action: the release already went
+            // through on the server. Running the action would answer a
+            // challenge that is no longer waiting.
+            try { box.hide(); } catch (ignored) {}
+            frappe.show_alert({
+                message: __("Release received — carrying on."),
+                indicator: "green"
+            }, 5);
+        });
+    }
+
     function tanTitle(data) {
         return data.account_label
             ? __("Verification required") + " – " + data.account_label
@@ -72,6 +97,9 @@ frappe.provide("kefiya");
                  options: html + "</div>" };
     }
 
+    // done(ok) fires once the answer has been handed to the server: true when
+    // it was accepted, false when it was refused. A caller that acts on the
+    // release MUST look at the flag.
     function tanPrompt(data, done) {
         var fields = [];
         if (data.possible_tan_modes) {
@@ -124,14 +152,20 @@ frappe.provide("kefiya");
                 args: { fints_login: data.docname,
                         values: Object.assign({}, data, values) },
                 silent: true,
-                callback: function () { if (done) done(); },
+                // done(ok). The flag is the whole point: it used to fire the
+                // same way whether the release went through or not, and the
+                // caller took that as "released, carry on". A refused release
+                // then started a fetch, the bank asked again, the box came
+                // back, and the user confirmed their way around that circle
+                // for as long as they were willing to.
+                callback: function () { if (done) done(true); },
                 error: function (r) {
                     frappe.show_alert({
                         message: __("TAN release failed.") + " "
                             + kefiya.call_error(r),
                         indicator: "red"
                     }, 10);
-                    if (done) done();
+                    if (done) done(false);
                 }
             });
         }, tanTitle(data));
@@ -146,6 +180,16 @@ frappe.provide("kefiya");
         // whatever happens to be first would put the cursor somewhere the user
         // must not change, so nothing is focused at all.
         focusTanField(dialog);
+
+        // Only the decoupled box waits on the server; the others are answered
+        // in the box itself.
+        if (data.mfa_required && data.docname) {
+            bindReleaseArrived();
+            openBoxes[data.docname] = dialog;
+            dialog.$wrapper.on("hidden.bs.modal", function () {
+                delete openBoxes[data.docname];
+            });
+        }
         return dialog;
     }
 

@@ -79,53 +79,25 @@ def _is_missing_bank_parameters(exc):
     return "could not fetch BPD" in text
 
 
-#: The bank checked the payee and now wants that check confirmed. python-fints
-#: 5.0.0b1 turns a VoP answer into a NeedVOPResponse only for not-applicable,
-#: no-match and close-match; a check that SUCCEEDED and still asks to be
-#: confirmed falls through its handler, and the order stops with this code.
+#: The bank checked the payee and now wants that check confirmed.
 VOP_CONFIRMATION_DEMANDED = "3945"
 
-
-def _record_vop_demand(login, verdict, response):
-    """Write down what the bank sent with a 3945, so the gap can be closed.
-
-    The confirmation step needs the payee the bank found -- it travels in an
-    HIVPP segment -- and that segment is not in anything this app currently
-    keeps. Without it, building the confirmation would be guesswork about a
-    message nobody here has ever seen.
-
-    So the next 3945 leaves a record. Bounded and best-effort: a diagnostic
-    that can fail a transfer is worse than no diagnostic, and a response
-    written out in full would be a log entry nobody opens.
-    """
-    try:
-        codes = [line.get("code") for line in (verdict or {}).get("lines", [])]
-        if VOP_CONFIRMATION_DEMANDED not in codes:
-            return
-
-        found = []
-        for name in ("HIVPP", "HIVPA"):
-            try:
-                seg = response.find_segment_first(name)
-            except Exception:
-                seg = None
-            found.append("{0}: {1}".format(
-                name, repr(seg)[:1500] if seg else "not in the response"))
-
-        frappe.log_error(
-            title="Kefiya: bank wants a VoP confirmation (3945)",
-            message=(
-                "login={0}\n\n{1}\n\nWhat the bank said:\n{2}\n\n"
-                "Kept because python-fints 5.0.0b1 does not surface this case:"
-                " its VoP handler returns a NeedVOPResponse only for RVNA,"
-                " RVNM and RVMC. Closing the gap needs the payee data below."
-            ).format(login, "\n".join(found),
-                     fints_response.as_text(verdict)),
-            reference_doctype="Kefiya Login",
-            reference_name=login,
-        )
-    except Exception:
-        pass
+#: There was a diagnostic here that wrote the bank's HIVPP segment to the
+#: Error Log on a 3945, so the confirmation could be built from real data
+#: instead of guesswork. It could not have worked, and shipping it was a
+#: second guess on top of the first.
+#:
+#: By the time submit_sepa_transfer sees the answer, python-fints has turned
+#: the FinTS message into a TransactionResponse -- which holds status,
+#: responses and data, and neither the raw segments nor a find_segment_first
+#: to look for them in. The log line would have read "HIVPP: not in the
+#: response" every time, and read as a fact about the bank.
+#:
+#: The same applies to the confirmation itself, and that is the real finding:
+#: approve_vop_response needs the HIVPP *and* the command segment that was
+#: sent, and both are local to _send_pay_with_possible_retry inside the
+#: library. Neither can be recovered downstream. Closing this needs the send
+#: flow itself, not something bolted to its result.
 
 
 def _has_bank_parameters(connection):
@@ -1124,6 +1096,22 @@ class FinTSController:
 
         decoupled = bool(getattr(response, "decoupled", False))
 
+        # Ask, then wait. A decoupled release is given in the banking app and
+        # the bank will tell us when it lands -- so the run does not have to
+        # end here and make the user start it again. See _await_release.
+        if decoupled:
+            self.ask_for_tan(response, decoupled=True)
+            released = self._await_release(response)
+            if released is not None:
+                return released
+            # Not released in the time we were willing to wait. The challenge
+            # stays parked exactly as before, and the prompt is already up.
+            raise TanInteractionRequired(_(
+                "{0}: the release did not arrive in time. Confirm it in your"
+                " banking app and fetch this access again -- the challenge is"
+                " still open."
+            ).format(self.kefiya_login.name))
+
         # Park the challenge and publish the matching prompt. Guarded: the
         # scheduler runs with no UI attached, and this error path must not fail
         # on its own -- the TanInteractionRequired below has to reach the caller
@@ -1161,6 +1149,88 @@ class FinTSController:
             "{0}: the bank requires a TAN before the bookings can be read."
             " Enter it in the window."
         ).format(self.kefiya_login.name) + " " + again)
+
+
+    #: How long a run waits for a release given in the banking app. The bank
+    #: states its own limits in HITANS (the Volksbank: first poll after 2s,
+    #: then every 2s, up to 150 times) and those are respected where they are
+    #: readable -- these are the ceiling, not the schedule.
+    #:
+    #: Two minutes is the judgement: long enough to unlock a phone and tap
+    #: confirm, short enough that a run does not sit on a worker for the rest
+    #: of the afternoon because somebody walked away.
+    DECOUPLED_MAX_WAIT_SECONDS = 120
+    DECOUPLED_POLL_SECONDS = 2
+
+    def _await_release(self, challenge):
+        """Wait for a decoupled release, then carry on where the bank stopped.
+
+        The reason this exists: the release authorises the SESSION, and an
+        access holds one dialog. Ending the run at the challenge meant the
+        user confirmed in the app, came back to a finished run, and started
+        another one -- and every account of that access asked again. Thirty
+        accounts, thirty releases, which is what the user was actually
+        living with.
+
+        python-fints does the asking: send_tan on a decoupled challenge sends
+        TAN process 'S', a status query. The bank answers 3956 for "not yet"
+        and the library hands back a fresh NeedTANResponse to ask again with;
+        anything else means it went through, and the library resumes the
+        command that was waiting.
+
+        Never raises. A poll that fails for any reason leaves the challenge
+        parked and the caller behaves exactly as it did before this existed.
+
+        :return: the resumed response, or None if it did not arrive in time
+        """
+        import time
+
+        deadline = time.monotonic() + self.DECOUPLED_MAX_WAIT_SECONDS
+        # The bank's own cap, where the parameters can be read. Its count is a
+        # maximum, not a promise -- the deadline above still decides.
+        limit = 1 + int(self.DECOUPLED_MAX_WAIT_SECONDS
+                        / self.DECOUPLED_POLL_SECONDS)
+
+        for _attempt in range(limit):
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(self.DECOUPLED_POLL_SECONDS)
+            try:
+                answer = self.fints_connection.send_tan(challenge, "")
+            except Exception:
+                frappe.log_error(
+                    title="Kefiya: asking whether the release arrived failed",
+                    message=frappe.get_traceback(),
+                    reference_doctype="Kefiya Login",
+                    reference_name=self.kefiya_login.name,
+                )
+                return None
+
+            if not isinstance(answer, NeedTANResponse):
+                # Released. The library has already resumed the command, so
+                # this is the answer the caller was waiting for all along.
+                self.__persist_fints_state()
+                self._tell_the_browser_it_can_stop_waiting()
+                return answer
+
+            # Still waiting. The bank hands back a new challenge to ask with.
+            challenge = answer
+
+        return None
+
+    def _tell_the_browser_it_can_stop_waiting(self):
+        """Close the "confirm in your app" box, now that it has been.
+
+        Best-effort: the box carries a Close button, and a realtime hiccup
+        must not fail a fetch that has just succeeded.
+        """
+        try:
+            frappe.publish_realtime(
+                "kefiya_release_arrived",
+                {"docname": self.kefiya_login.name},
+                user=frappe.session.user)
+        except Exception:
+            pass
 
     def _require_fints_account(self, iban=None):
         """Resolve the login's FinTS account, or fail with a usable message.
@@ -1832,7 +1902,6 @@ class FinTSController:
             # refused an order in plain words produced "the bank did not
             # request a TAN" in the log and "Unbekannter Fehler" on screen.
             verdict = fints_response.verdict_of(response)
-            _record_vop_demand(self.kefiya_login.name, verdict, response)
             if fints_response.refused(verdict):
                 frappe.log_error(
                     title="Kefiya: the bank refused the transfer",
