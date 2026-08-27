@@ -30,6 +30,7 @@ from .import_bank_transaction import (
 )
 from .auto_reconcile import run_after_import
 from .assign_payment_controller import AssignmentController
+from kefiya.utils import fints_vop
 from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
 from kefiya.utils.fints_masking import mask_iban
 
@@ -429,7 +430,10 @@ class FinTSController:
         )
 
         try:
-            self.fints_connection = FinTS3PinTanClient(
+            # The library's own class, unless this is the one release the
+            # missing VoP branch was written against. See fints_vop.
+            client_class = fints_vop.client_class() or FinTS3PinTanClient
+            self.fints_connection = client_class(
                 self.kefiya_login.blz,
                 self.kefiya_login.fints_login,
                 self.kefiya_login.get_password("fints_password"),
