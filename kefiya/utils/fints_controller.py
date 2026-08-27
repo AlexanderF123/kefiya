@@ -347,6 +347,10 @@ class FinTSController:
 
         self.name = self.kefiya_login.name
         self.interactive = FinTSInteractive(interactive)
+        # Which login, as opposed to which screen. A transfer passes its own
+        # docname as the UI scope, and everything that read the login out of
+        # that was reading the wrong document.
+        self.interactive.fints_login = self.kefiya_login.name
 
         self.__init_fints_connection()
 
@@ -434,8 +438,37 @@ class FinTSController:
                     self.fints_connection.init_tan_response):
                 raise TanInteractionRequired()
 
+            # What the bank said to the TAN, asked here and only here.
+            #
+            # Both endpoints that answer a parked challenge -- send_transfer_tan
+            # and resolve_tan_interaction -- used to build a controller and
+            # report success if that did not raise. Neither looked at the
+            # answer, so a bank that refused the order got the same green
+            # "authorised and submitted" as one that accepted it. Asking at the
+            # point the TAN is actually answered means every caller inherits
+            # it, and none of them has to reach into this object for it.
+            self._refuse_a_refused_order()
+
             # on success clear stored tan state
             self.__persist_fints_state()
+
+    def _refuse_a_refused_order(self):
+        """Stop where the bank turned the order down after the release."""
+        verdict = fints_response.verdict_of(
+            getattr(self.fints_connection, "init_tan_response", None))
+        if not fints_response.refused(verdict):
+            return
+        frappe.log_error(
+            title="Kefiya: the bank refused the order after the release",
+            message="login={0}\n{1}".format(
+                self.kefiya_login.name, fints_response.as_text(verdict)),
+        )
+        frappe.throw(
+            _("The bank refused this order after the release. It was NOT"
+              " sent.\n\n{0}").format(fints_response.as_text(verdict))
+            + _advice_block(verdict),
+            title=_("Refused by the bank"),
+        )
 
     def __init_fints_connection(self):
         """Private: Initialise new fints connection.
@@ -1238,6 +1271,45 @@ class FinTSController:
     DECOUPLED_MAX_WAIT_SECONDS = 120
     DECOUPLED_POLL_SECONDS = 2
 
+    def _settle_tan(self, response):
+        """What to do about a TAN the bank asked for.
+
+        Answers a pair, exactly one of them set -- the same shape
+        _confirm_or_park_vop uses two hundred lines below, for the same kind
+        of question:
+
+            (response, None)   carry on: no TAN was wanted, or a decoupled
+                               release arrived while we waited
+            (None, result)     hand this back to the caller: the challenge is
+                               parked and somebody has to answer it
+
+        A decoupled release is given in the banking app. This waited for one
+        only on the statement-fetch path; a transfer that met a decoupled
+        procedure -- which is what the Sparkasse uses -- parked its challenge
+        and answered "tan_required" straight away, and nothing polled
+        afterwards. When the banking app then reported an error there was no
+        request in flight to report it to, and the user saw nothing at all.
+        """
+        if not isinstance(response, NeedTANResponse):
+            return response, None
+
+        if bool(getattr(response, "decoupled", False)):
+            self._publish_tan_prompt(response, decoupled=True)
+            released = self._await_release(response)
+            if released is not None:
+                return released, None
+            # Out of patience. Park it, so the release still finds something
+            # to unlock; the box is already up.
+            self._park_tan_challenge(response)
+        else:
+            self.ask_for_tan(response)
+
+        return None, {
+            "status": "tan_required",
+            "docname": self.kefiya_login.name,
+            "decoupled": bool(getattr(response, "decoupled", False)),
+        }
+
     def _await_release(self, challenge):
         """Wait for a decoupled release, then carry on where the bank stopped.
 
@@ -1779,11 +1851,10 @@ class FinTSController:
         with self.fints_connection:
             account = self._require_fints_account()
             response = self.fints_connection.sepa_debit(account, pain008_xml)
-            if self.is_tan_required_and_requested(response):
-                return {
-                    "status": "tan_required",
-                    "docname": self.kefiya_login.name,
-                }
+            response, pending = self._settle_tan(response)
+            if pending is not None:
+                return pending
+
             frappe.log_error(
                 title="Kefiya SEPA debit completed without TAN challenge",
                 message="login={0}: the bank did not request a TAN".format(
@@ -1956,11 +2027,9 @@ class FinTSController:
                     bank_name=parked.get("bank_name"),
                     kefiya_login=self.kefiya_login.name)
 
-            if self.is_tan_required_and_requested(response):
-                return {
-                    "status": "tan_required",
-                    "docname": self.kefiya_login.name,
-                }
+            response, pending = self._settle_tan(response)
+            if pending is not None:
+                return pending
 
             frappe.log_error(
                 title="Kefiya SEPA transfer approved via VoP without TAN",
@@ -2062,11 +2131,9 @@ class FinTSController:
             if parked is not None:
                 return parked
 
-            if self.is_tan_required_and_requested(response):
-                return {
-                    "status": "tan_required",
-                    "docname": self.kefiya_login.name,
-                }
+            response, pending = self._settle_tan(response)
+            if pending is not None:
+                return pending
 
             # What the bank itself said. Asked BEFORE concluding anything from
             # the absence of a TAN, because a refusal explains that absence:

@@ -1602,10 +1602,14 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     """Continue a pending SEPA transfer by sending the user's TAN.
 
     Reuses the controller's stored-TAN resume mechanism (the pending transfer
-    dialog was persisted when the TAN was requested). The bank response is
-    reported truthfully: the transfer is only "submitted" when the bank accepted
-    the TAN without asking for a further challenge, so a money movement is never
-    reported as done on a guess.
+    dialog was persisted when the TAN was requested).
+
+    What the bank answered is checked by the controller, at the point the TAN
+    is answered -- see _refuse_a_refused_order. This used to return
+    {"status": "submitted"} whenever building the controller did not raise,
+    never looking at the answer at all, while its own docstring promised that
+    a money movement is never reported as done on a guess. A refusal now
+    arrives here as an exception and is reported as one.
     """
     # Permission gate: continuing a money transfer with a TAN requires write
     # rights on the paying Kefiya Login (whitelisted endpoint would otherwise be

@@ -149,7 +149,7 @@ frappe.provide("kefiya");
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
                 method: "kefiya.utils.client.resolve_tan_interaction",
-                args: { fints_login: data.docname,
+                args: { fints_login: data.fints_login || data.docname,
                         values: Object.assign({}, data, values) },
                 silent: true,
                 // done(ok). The flag is the whole point: it used to fire the

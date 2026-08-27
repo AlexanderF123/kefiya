@@ -194,7 +194,10 @@ kefiya.interactive = {
 					frappe.call({
 						method: "kefiya.utils.client.resolve_tan_interaction",
 						args: {
-							fints_login: frm.doc.name,
+							// The login the run belongs to, which is this form only
+							// on the Kefiya Login screen. A transfer's box used to
+							// answer against its own KEF-TRF-... name.
+							fints_login: data.fints_login || frm.doc.name,
 							values: { ...data, ...values },
 						},
 					});
