@@ -254,7 +254,6 @@ Refused by the bank,Von der Bank abgelehnt
 {0}"
 What the bank said:,Was die Bank gesagt hat:
 What this means:,Was das bedeutet:
-"The bank performs Verification of Payee for this order and will not release it until the check has been confirmed. The order was not sent. This needs the account's capabilities to be read again from the bank -- fetch the account once, then send again.","Die Bank führt für diesen Auftrag eine Empfängerprüfung (VoP) durch und gibt ihn erst frei, wenn die Prüfung bestätigt wurde. Der Auftrag wurde nicht gesendet. Dafür müssen die Fähigkeiten des Kontos neu von der Bank gelesen werden — das Konto einmal abrufen, dann erneut senden."
 The bank could not process the message at all. Nothing was sent.,Die Bank konnte die Nachricht gar nicht verarbeiten. Es wurde nichts gesendet.
 The bank rejected the order data. The detail in brackets usually names the field it objected to.,Die Bank hat die Auftragsdaten zurückgewiesen. Der Zusatz in Klammern nennt meist das beanstandete Feld.
 A SEPA order cannot be sent while a bank fetch is running. Wait for the fetch to finish and send it again.,"Während ein Bankabruf läuft, kann kein SEPA-Auftrag gesendet werden. Bitte den Abruf abwarten und dann erneut senden."
@@ -300,10 +299,10 @@ run budget reached,Obergrenze des Laufs erreicht
 Fetch the {0} unfinished accesses again,Die {0} nicht abgeschlossenen Zugänge erneut abrufen
 None of these accesses is still configured.,Keiner dieser Zugänge ist noch eingerichtet.
 Due today — goes to the bank now,Heute fällig — geht jetzt an die Bank
-Due since {0} — goes to the bank today,"Fällig seit {0} — geht heute an die Bank"
+Due since {0} — goes to the bank today,Fällig seit {0} — geht heute an die Bank
 Today — the bank executes it today,Heute — die Bank führt ihn heute aus
 "Dated {0}, which has passed — the bank cannot execute this","Auf den {0} datiert, der vorbei ist — die Bank kann das nicht ausführen"
-not attempted — {0} is waiting for a release,"Nicht versucht — {0} wartet auf eine Freigabe"
+not attempted — {0} is waiting for a release,Nicht versucht — {0} wartet auf eine Freigabe
 "counted as cash in the books, but this is {0}","in der Buchhaltung als Guthaben geführt, ist aber {0}"
 Ledger,Buchhaltung
 {0}: the bank is waiting for the release in your banking app. Confirm it there -- this login uses a decoupled procedure and issues no TAN to type in.,{0}: Die Bank wartet auf die Freigabe in Ihrer Banking-App. Dort bestätigen — dieser Zugang nutzt ein entkoppeltes Verfahren und gibt keine TAN zum Eintippen aus.
@@ -318,3 +317,4 @@ Connection could not be rebuilt,Verbindung ließ sich nicht wiederherstellen
 Before sending again, look in your online banking: if the transfer is there after all, cancel this order instead of repeating it.","Die Bankverbindung für {0} ließ sich aus dem gespeicherten Zustand nicht wiederherstellen. Nach allem, was diese App erkennen kann, wurde der Auftrag NICHT gesendet. Der gespeicherte Zustand wurde verworfen, der nächste Versuch baut die Verbindung neu auf.
 
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
+"The bank checked the payee for this order and will not release it until that check is confirmed. The order was NOT sent. Confirming it is a step this app cannot yet take: the FinTS library it uses recognises a payee check that failed, but not one that succeeded and still asks to be confirmed. Send this transfer from your online banking for now.","Die Bank hat den Empfänger für diesen Auftrag geprüft und gibt ihn erst frei, wenn diese Prüfung bestätigt ist. Der Auftrag wurde NICHT gesendet. Diese Bestätigung kann die App noch nicht leisten: die verwendete FinTS-Bibliothek erkennt eine fehlgeschlagene Empfängerprüfung, aber keine erfolgreiche, die trotzdem bestätigt werden will. Bitte diese Überweisung vorerst im Online-Banking auslösen."

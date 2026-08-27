@@ -79,6 +79,55 @@ def _is_missing_bank_parameters(exc):
     return "could not fetch BPD" in text
 
 
+#: The bank checked the payee and now wants that check confirmed. python-fints
+#: 5.0.0b1 turns a VoP answer into a NeedVOPResponse only for not-applicable,
+#: no-match and close-match; a check that SUCCEEDED and still asks to be
+#: confirmed falls through its handler, and the order stops with this code.
+VOP_CONFIRMATION_DEMANDED = "3945"
+
+
+def _record_vop_demand(login, verdict, response):
+    """Write down what the bank sent with a 3945, so the gap can be closed.
+
+    The confirmation step needs the payee the bank found -- it travels in an
+    HIVPP segment -- and that segment is not in anything this app currently
+    keeps. Without it, building the confirmation would be guesswork about a
+    message nobody here has ever seen.
+
+    So the next 3945 leaves a record. Bounded and best-effort: a diagnostic
+    that can fail a transfer is worse than no diagnostic, and a response
+    written out in full would be a log entry nobody opens.
+    """
+    try:
+        codes = [line.get("code") for line in (verdict or {}).get("lines", [])]
+        if VOP_CONFIRMATION_DEMANDED not in codes:
+            return
+
+        found = []
+        for name in ("HIVPP", "HIVPA"):
+            try:
+                seg = response.find_segment_first(name)
+            except Exception:
+                seg = None
+            found.append("{0}: {1}".format(
+                name, repr(seg)[:1500] if seg else "not in the response"))
+
+        frappe.log_error(
+            title="Kefiya: bank wants a VoP confirmation (3945)",
+            message=(
+                "login={0}\n\n{1}\n\nWhat the bank said:\n{2}\n\n"
+                "Kept because python-fints 5.0.0b1 does not surface this case:"
+                " its VoP handler returns a NeedVOPResponse only for RVNA,"
+                " RVNM and RVMC. Closing the gap needs the payee data below."
+            ).format(login, "\n".join(found),
+                     fints_response.as_text(verdict)),
+            reference_doctype="Kefiya Login",
+            reference_name=login,
+        )
+    except Exception:
+        pass
+
+
 def _has_bank_parameters(connection):
     """Did this connection actually reach the bank's parameter data?
 
@@ -1783,6 +1832,7 @@ class FinTSController:
             # refused an order in plain words produced "the bank did not
             # request a TAN" in the log and "Unbekannter Fehler" on screen.
             verdict = fints_response.verdict_of(response)
+            _record_vop_demand(self.kefiya_login.name, verdict, response)
             if fints_response.refused(verdict):
                 frappe.log_error(
                     title="Kefiya: the bank refused the transfer",
