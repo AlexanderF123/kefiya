@@ -398,10 +398,14 @@ class TestEveryMoneyPathAsksTheBank(unittest.TestCase):
 
     def test_none_of_them_reports_success_without_asking(self):
         for name, body in self._bodies().items():
-            self.assertIn('return {"status": "submitted"}', body, name)
-            self.assertIn("self._refuse_a_refused_order(response)", body, name)
-            self.assertLess(body.index("self._refuse_a_refused_order(response)"),
-                            body.index('return {"status": "submitted"}'), name)
+            # Past the docstring: its :return: line names "submitted" too, and
+            # matching that would compare against prose rather than code --
+            # the assertion would then pass with the call in the wrong place.
+            code = body[body.index('"""', body.index('"""') + 3) + 3:]
+            self.assertIn('{"status": "submitted"}', code, name)
+            self.assertIn("self._refuse_a_refused_order(response)", code, name)
+            self.assertLess(code.index("self._refuse_a_refused_order(response)"),
+                            code.index('{"status": "submitted"}'), name)
 
     def test_the_question_is_asked_in_one_place(self):
         """It was written out inline in submit_sepa_transfer -- log, throw,
