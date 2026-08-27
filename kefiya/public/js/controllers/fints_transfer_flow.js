@@ -18,7 +18,7 @@ function kefiya_handle_transfer_response(frm, msg) {
         frappe.show_alert({ message: __("Transfer submitted."), indicator: "green" });
         frm.reload_doc();
     } else if (msg.status === "tan_required") {
-        kefiya_prompt_transfer_tan(frm, msg.docname);
+        kefiya_prompt_transfer_tan(frm, msg.docname, msg.decoupled);
     } else if (msg.status === "vop_mismatch") {
         kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
     } else {
@@ -54,30 +54,50 @@ function kefiya_prompt_vop_release(frm, kefiya_login, answer) {
     });
 }
 
-function kefiya_prompt_transfer_tan(frm, kefiya_login) {
+function kefiya_prompt_transfer_tan(frm, kefiya_login, decoupled) {
+    /* A decoupled procedure -- pushTAN, SecureGo, S-pushTAN -- produces no
+     * code to type. The field was mandatory here regardless, so a Sparkasse
+     * transfer ended in a box demanding something that does not exist.
+     *
+     * The server now waits for the release itself, so this box is only what
+     * is left when that wait ran out: confirm in the app, then press the
+     * button. Nothing to type, and nothing pretending there is.
+     */
+    const fields = decoupled
+        ? [{
+            fieldtype: "HTML",
+            options: "<div class='alert alert-info'>"
+                + __("Confirm the transfer in your banking app. There is no TAN to type for this procedure. Press below once you have confirmed.")
+                + "</div>"
+        }]
+        : [{
+            fieldname: "tan",
+            fieldtype: "Data",
+            label: __("TAN"),
+            reqd: 1,
+            description: __("Enter the TAN from your bank's app/device.")
+        }];
+
     const d = new frappe.ui.Dialog({
-        title: __("Enter TAN to authorise the transfer"),
-        fields: [
-            {
-                fieldname: "tan",
-                fieldtype: "Data",
-                label: __("TAN"),
-                reqd: 1,
-                description: __("Enter the TAN from your bank's app/device. For push-TAN, confirm in the app, then submit.")
-            }
-        ],
-        primary_action_label: __("Confirm transfer"),
+        title: decoupled
+            ? __("Confirm the transfer in your banking app")
+            : __("Enter TAN to authorise the transfer"),
+        fields: fields,
+        primary_action_label: decoupled
+            ? __("I have confirmed it")
+            : __("Confirm transfer"),
         primary_action: function (values) {
             d.hide();
             frappe.call({
                 method: "kefiya.utils.client.send_transfer_tan",
                 args: {
                     kefiya_login: kefiya_login,
-                    tan: values.tan,
+                    tan: decoupled ? "" : values.tan,
                     user_scope: frm.docname
                 },
                 freeze: true,
-                freeze_message: __("Sending TAN..."),
+                freeze_message: decoupled
+                    ? __("Asking the bank …") : __("Sending TAN..."),
                 callback: function (r) {
                     if (r.message && r.message.status === "submitted") {
                         frappe.show_alert({
@@ -85,11 +105,15 @@ function kefiya_prompt_transfer_tan(frm, kefiya_login) {
                             indicator: "green"
                         });
                         frm.reload_doc();
+                    } else if (r.message && r.message.status === "tan_required") {
+                        kefiya_prompt_transfer_tan(frm, kefiya_login,
+                                                   r.message.decoupled);
                     } else {
                         frappe.msgprint({
-                            title: __("TAN failed"),
+                            title: __("Not sent"),
                             indicator: "red",
-                            message: (r.message && r.message.message) || __("Unknown error")
+                            message: (r.message && r.message.message)
+                                || __("The bank gave no reason. Check your online banking before sending again.")
                         });
                     }
                 }

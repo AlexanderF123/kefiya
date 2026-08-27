@@ -229,3 +229,90 @@ class TestOutboxHardening(unittest.TestCase):
         source = inspect.getsource(kefiya_transfer.KefiyaTransfer.set_hold)
         self.assertIn("has_permission", source)
         self.assertIn('ptype="submit"', source)
+
+
+class TestADecoupledReleaseOnTheTransferPath(unittest.TestCase):
+    """The Sparkasse uses a decoupled procedure, and this path could not do
+    one at all.
+
+    _await_release was reachable from exactly one place -- the statement
+    fetch. A transfer that met a decoupled challenge parked it and answered
+    "tan_required", and the browser then opened a box with a MANDATORY TAN
+    field for a procedure that produces no code. Nothing polled afterwards,
+    so when the banking app reported an error there was no request in flight
+    to report it to: the user saw nothing at all.
+    """
+
+    def test_the_transfer_waits_for_the_release(self):
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        source = inspect.getsource(FinTSController.submit_sepa_transfer)
+        self.assertIn("self._settle_decoupled(response)", source)
+        self.assertLess(source.index("self._settle_decoupled(response)"),
+                        source.index("is_tan_required_and_requested(response)"))
+
+    def test_the_release_after_a_payee_approval_waits_too(self):
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        self.assertIn("self._settle_decoupled(response)",
+                      inspect.getsource(FinTSController.approve_pending_vop))
+
+    def test_one_place_knows_how_a_decoupled_release_is_done(self):
+        """Prompt, wait on the live dialog, park only when it runs out --
+        written once, used by the fetch and by both money paths."""
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        body = inspect.getsource(FinTSController._settle_decoupled)
+        self.assertIn("self._publish_tan_prompt(response, decoupled=True)", body)
+        self.assertIn("self._await_release(response)", body)
+        self.assertIn("self._park_tan_challenge(response)", body)
+        self.assertLess(body.index("self._await_release(response)"),
+                        body.index("self._park_tan_challenge(response)"))
+
+    def test_an_ordinary_tan_is_left_alone(self):
+        """Only a decoupled challenge is waited out. A typed TAN is answered
+        by a person in a later request, as it always was."""
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        body = inspect.getsource(FinTSController._settle_decoupled)
+        self.assertIn('getattr(response, "decoupled", False)', body)
+        self.assertIn("return None", body)
+
+    def test_the_browser_is_told_which_kind_it_is(self):
+        """Without this the box cannot know whether to offer a field."""
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        self.assertIn('"decoupled": bool(getattr(response, "decoupled", False))',
+                      inspect.getsource(FinTSController.submit_sepa_transfer))
+
+
+class TestTheBankIsAskedNotAssumed(unittest.TestCase):
+    """send_transfer_tan returned {"status": "submitted"} whenever building
+    the controller did not raise -- it never read the answer -- while its own
+    docstring promised that a money movement is never reported on a guess."""
+
+    def test_the_answer_is_read(self):
+        import inspect
+
+        from kefiya.utils import client
+        source = inspect.getsource(client.send_transfer_tan)
+        self.assertIn("init_tan_response", source)
+        self.assertIn("fints_response.verdict_of(answer)", source)
+
+    def test_a_refusal_is_not_a_submission(self):
+        import inspect
+
+        from kefiya.utils import client
+        source = inspect.getsource(client.send_transfer_tan)
+        self.assertIn("fints_response.refused(verdict)", source)
+        self.assertLess(source.index("fints_response.refused(verdict)"),
+                        source.index('return {"status": "submitted"'))
+        refusal = source[source.index("fints_response.refused(verdict)"):
+                         source.index('return {"status": "submitted"')]
+        self.assertIn('"status": "error"', refusal)
+        self.assertIn("NOT sent", refusal)

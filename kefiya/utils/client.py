@@ -1602,10 +1602,14 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     """Continue a pending SEPA transfer by sending the user's TAN.
 
     Reuses the controller's stored-TAN resume mechanism (the pending transfer
-    dialog was persisted when the TAN was requested). The bank response is
-    reported truthfully: the transfer is only "submitted" when the bank accepted
-    the TAN without asking for a further challenge, so a money movement is never
-    reported as done on a guess.
+    dialog was persisted when the TAN was requested).
+
+    What the bank said is READ, not assumed. This used to return
+    {"status": "submitted"} whenever building the controller did not raise --
+    it never looked at the answer at all -- while its own docstring promised
+    that "a money movement is never reported as done on a guess". It was
+    exactly a guess: a bank that answered "order rejected" got the same green
+    "Transfer authorised and submitted" as one that accepted it.
     """
     # Permission gate: continuing a money transfer with a TAN requires write
     # rights on the paying Kefiya Login (whitelisted endpoint would otherwise be
@@ -1613,6 +1617,7 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     frappe.has_permission(
         "Kefiya Login", ptype="write", doc=kefiya_login, throw=True)
 
+    from kefiya.utils import fints_response
     from kefiya.utils.fints_controller import (
         FinTSController,
         TanInteractionRequired,
@@ -1620,7 +1625,7 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     interactive = {"docname": user_scope, "enabled": True}
     try:
         # Re-instantiating with the TAN resumes the stored dialog and sends it.
-        FinTSController(kefiya_login, interactive, tan=tan)
+        controller = FinTSController(kefiya_login, interactive, tan=tan)
     except TanInteractionRequired:
         # The bank requested a further/renewed challenge; the UI re-prompts.
         return {"status": "tan_required", "docname": kefiya_login}
@@ -1630,7 +1635,24 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
             message=frappe.get_traceback(),
         )
         return {"status": "error", "message": str(e)}
-    return {"status": "submitted"}
+
+    # The answer the bank gave to the TAN. Where it refused, saying "submitted"
+    # would send somebody looking for money that never moved.
+    answer = getattr(
+        getattr(controller, "fints_connection", None), "init_tan_response", None)
+    verdict = fints_response.verdict_of(answer)
+    if fints_response.refused(verdict):
+        frappe.log_error(
+            title="Kefiya: the bank refused the transfer after the TAN",
+            message="login={0}\n{1}".format(
+                kefiya_login, fints_response.as_text(verdict)),
+        )
+        return {"status": "error",
+                "message": _("The bank refused this order after the release."
+                             " It was NOT sent.\n\n{0}").format(
+                    fints_response.as_text(verdict))}
+
+    return {"status": "submitted", "bank_said": fints_response.as_text(verdict)}
 
 
 @frappe.whitelist()

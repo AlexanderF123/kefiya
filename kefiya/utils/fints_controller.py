@@ -1238,6 +1238,32 @@ class FinTSController:
     DECOUPLED_MAX_WAIT_SECONDS = 120
     DECOUPLED_POLL_SECONDS = 2
 
+    def _settle_decoupled(self, response):
+        """Show the release box, wait on the LIVE dialog, park only if it
+        runs out. The one place that knows how a decoupled release is done.
+
+        Answers the response to carry on with, or None where the release did
+        not arrive and the challenge has been parked for a later request.
+
+        It existed only on the statement-fetch path. A transfer that met a
+        decoupled procedure -- which is what the Sparkasse uses -- parked its
+        challenge and returned "tan_required", and the browser then asked for
+        a TAN code that a decoupled procedure never produces. Nothing polled,
+        so when the banking app reported an error there was no request in
+        flight to report it to, and the user saw nothing at all.
+        """
+        if not isinstance(response, NeedTANResponse):
+            return response
+        if not bool(getattr(response, "decoupled", False)):
+            return None
+
+        self._publish_tan_prompt(response, decoupled=True)
+        released = self._await_release(response)
+        if released is not None:
+            return released
+        self._park_tan_challenge(response)
+        return None
+
     def _await_release(self, challenge):
         """Wait for a decoupled release, then carry on where the bank stopped.
 
@@ -1956,10 +1982,14 @@ class FinTSController:
                     bank_name=parked.get("bank_name"),
                     kefiya_login=self.kefiya_login.name)
 
-            if self.is_tan_required_and_requested(response):
+            released = self._settle_decoupled(response)
+            if released is not None:
+                response = released
+            elif self.is_tan_required_and_requested(response):
                 return {
                     "status": "tan_required",
                     "docname": self.kefiya_login.name,
+                    "decoupled": bool(getattr(response, "decoupled", False)),
                 }
 
             frappe.log_error(
@@ -2062,10 +2092,18 @@ class FinTSController:
             if parked is not None:
                 return parked
 
-            if self.is_tan_required_and_requested(response):
+            # A decoupled release is given in the banking app, and this path
+            # used to park it and hand the browser a box asking for a code
+            # that no decoupled procedure produces. Wait for it here instead,
+            # in the request the user is looking at.
+            released = self._settle_decoupled(response)
+            if released is not None:
+                response = released
+            elif self.is_tan_required_and_requested(response):
                 return {
                     "status": "tan_required",
                     "docname": self.kefiya_login.name,
+                    "decoupled": bool(getattr(response, "decoupled", False)),
                 }
 
             # What the bank itself said. Asked BEFORE concluding anything from
