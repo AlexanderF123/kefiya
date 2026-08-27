@@ -354,7 +354,8 @@ class TestTheStylesheetReachesThePage(unittest.TestCase):
     """
 
     def test_the_stylesheet_goes_where_the_list_lives(self):
-        body = _source().split("kefiya.outbox_style = function (root) {")[1]
+        body = _source("outbox_style.js").split(
+            "kefiya.outbox_style = function (root) {")[1]
         body = body.split("\nkefiya.payment_outbox")[0]
         self.assertIn("root.getRootNode()", body,
                       "getRootNode answers the shadow root inside a block and "
@@ -369,7 +370,8 @@ class TestTheStylesheetReachesThePage(unittest.TestCase):
 
     def test_it_is_not_put_inside_the_element_that_gets_rewritten(self):
         """render() replaces #zk's innerHTML on every draw."""
-        body = _source().split("kefiya.outbox_style = function (root) {")[1]
+        body = _source("outbox_style.js").split(
+            "kefiya.outbox_style = function (root) {")[1]
         body = body.split("\nkefiya.payment_outbox")[0]
         self.assertNotIn("root.appendChild(el)", body)
 
@@ -569,15 +571,25 @@ class TestAParkedPayeeCheckIsNotASend(unittest.TestCase):
     """
 
     def test_the_send_handler_knows_the_parked_case(self):
-        body = _function(_source(), "function handToBank(")
+        body = _function(_source(), "function reportSendResult(")
         self.assertIn('m.status === "vop_mismatch"', body)
         self.assertIn("kefiya.vop_prompt({", body)
 
     def test_the_parked_case_is_decided_before_the_success_branch(self):
         """Order matters: the success branch is the else of this chain."""
-        body = _function(_source(), "function handToBank(")
+        body = _function(_source(), "function reportSendResult(")
         self.assertLess(body.index('"vop_mismatch"'),
                         body.index("Handed to the bank: {0} orders"))
+
+    def test_one_place_says_what_a_send_came_back_with(self):
+        """The send and the release after a parked check come back the same
+        three ways. Written out twice, the next status the server learns to
+        return gets handled in one of them."""
+        source = _source()
+        self.assertEqual(source.count("Handed to the bank"), 1)
+        self.assertEqual(source.count('status === "tan_required"'), 1)
+        self.assertIn("reportSendResult(m, (m.sent || []).length",
+                      _function(source, "function handToBank("))
 
     def test_the_box_is_in_the_bundle_so_this_page_can_reach_it(self):
         bundle = os.path.join(

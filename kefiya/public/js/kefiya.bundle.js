@@ -46,4 +46,6 @@ import "./controllers/transfer_details";
 import "./controllers/transfer_form";
 // The outgoing-payments list. It used to be a stored script on one site; the
 // page there is now a bootstrap that calls kefiya.payment_outbox().
+// Das Aussehen dieser Liste, getrennt von ihrem Verhalten.
+import "./controllers/outbox_style";
 import "./controllers/payment_outbox";

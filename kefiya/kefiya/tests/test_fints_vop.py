@@ -30,7 +30,8 @@ import unittest
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
                                     DEFAULT_POLL_SECONDS,
                                     demands_confirmation, poll_pause,
-                                    still_checking, verdict_of)
+                                    still_checking)
+from kefiya.utils.vop_rule import result_from
 
 
 class Line:
@@ -161,11 +162,18 @@ class TestTheCheckThatIsNotFinishedYet(unittest.TestCase):
         self.assertFalse(still_checking(None))
         self.assertFalse(still_checking(object()))
 
-    def test_the_verdict_is_read_out_of_the_inner_group(self):
-        self.assertEqual(verdict_of(Hivpp(inner=Evpe("RVMC"))), "RVMC")
-        self.assertEqual(verdict_of(Hivpp()), "")
-        self.assertEqual(verdict_of(None), "")
-        self.assertEqual(verdict_of("kaputt"), "")
+    def test_the_verdict_is_read_by_the_one_reader(self):
+        """vop_rule.result_from, not a second copy of it here. Both modules
+        are frappe-free, so there was never a reason for two."""
+        self.assertEqual(result_from(Hivpp(inner=Evpe("RVMC"))), "RVMC")
+        self.assertEqual(result_from(Hivpp()), "")
+        self.assertEqual(result_from(None), "")
+        self.assertEqual(result_from("kaputt"), "")
+        source = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_vop.py"),
+            encoding="utf-8").read()
+        self.assertNotIn("def verdict_of(", source)
 
     def test_the_bank_names_the_pause(self):
         self.assertEqual(poll_pause(Hivpp(wait_for_seconds=2)), 2.0)

@@ -152,3 +152,24 @@ def bank_name_from(vop_result):
 def result_from(vop_result):
     """The answer code, or "" where it cannot be read."""
     return _field(vop_result, "result")
+
+
+def parked_answer(stored):
+    """What was written down about a parked check, read back.
+
+    The counterpart to storing it: one JSON record with result, the name the
+    bank holds and who the order pays. Two readers -- the dialog that shows a
+    reviewer the decision, and the code that files it once they have made it.
+
+    {} for anything unreadable, so a record from an older release simply says
+    nothing rather than raising on a payment path.
+    """
+    if not stored:
+        return {}
+    try:
+        import json
+
+        value = json.loads(stored)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
