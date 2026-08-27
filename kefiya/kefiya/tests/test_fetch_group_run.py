@@ -109,11 +109,18 @@ class TestTheReleaseStopsTheAccess(unittest.TestCase):
                       "Marked so the retry link picks it up together with the "
                       "account it is waiting on.")
 
-    def test_the_fallback_still_stops_it_client_side(self):
-        """Without the endpoint the browser fetches account by account again,
-        and then it is the only one who can see the parked release."""
-        self.assertIn("function fetchOneByOne", self.js)
-        self.assertIn("if (state === 'tan') held = ln;".replace("'", '\"'), self.js)
+    def test_the_rule_exists_exactly_once(self):
+        """It used to exist twice: once in fetch_group, once in an
+        account-by-account fallback in the browser -- two implementations of
+        one rule, in two languages, with two translated sentences. The one
+        that gets forgotten is whichever is edited second.
+
+        The fallback is gone. The client has no copy to drift from.
+        """
+        self.assertNotIn("fetchOneByOne", self.js)
+        self.assertNotIn("held = ln", self.js)
+        body = _py_function(self.py, "fetch_group")
+        self.assertIn("if held:", body)
 
 
 class TestNothingWaitsForever(unittest.TestCase):
@@ -131,8 +138,18 @@ class TestNothingWaitsForever(unittest.TestCase):
         self.assertIn("recorded(ln)", self.js)
         self.assertIn("The worker stopped reporting", self.js)
 
-    def test_a_missing_endpoint_falls_back_instead_of_fetching_nothing(self):
-        self.assertIn("fetchOneByOne(logins, btn, total)", self.js)
+    def test_a_failed_start_names_every_account_it_could_not_reach(self):
+        """No second fetch path to fall back to, so the honest answer is the
+        one every other server error already gets. Silence would leave the bar
+        short of its total for good."""
+        # Both exits, counted -- not just the name. "failAll(logins," also
+        # matches the definition, so asserting it once passed with every call
+        # site deleted. That is the second time this file's assertions matched
+        # a def instead of a call; the count is what stops it.
+        self.assertEqual(self.js.count("failAll(logins,"), 3,
+                         "One definition and both exits: no start, and a "
+                         "start the server refused.")
+        self.assertIn("failAll(logins, kefiya.call_error(r)", self.js)
 
 
 class TestOneReaderForOneSummary(unittest.TestCase):

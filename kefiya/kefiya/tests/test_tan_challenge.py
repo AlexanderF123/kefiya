@@ -144,7 +144,7 @@ class TestNothingSwallowsTheChallengeOnTheWay(unittest.TestCase):
 
     def test_the_dialog_renders_the_picture(self):
         js = _source(os.path.join("public", "js", "controllers",
-                                  "bank_refresh.js"))
+                                  "tan_prompt.js"))
         self.assertIn("function tanChallengeField(data)", js)
         self.assertIn("data:", js)
         self.assertIn("fields.unshift(challenge)", js,
@@ -154,7 +154,7 @@ class TestNothingSwallowsTheChallengeOnTheWay(unittest.TestCase):
         """A photoTAN app reads the mosaic off the screen. Given in pixels it
         comes out too small to focus on at high resolution."""
         js = _source(os.path.join("public", "js", "controllers",
-                                  "bank_refresh.js"))
+                                  "tan_prompt.js"))
         self.assertTrue(re.search(r"width:\d+mm;height:\d+mm", js), js[:0])
 
 
@@ -181,7 +181,7 @@ class TestTheCursorStartsInTheTanField(unittest.TestCase):
         # alone passed with the call deleted, and so did "focusTanField(dialog)":
         # the definition reads "function focusTanField(dialog) {" and contains
         # both. The statement is the only form that ends in a semicolon.
-        self.assertIn("focusTanField(dialog);", self._js("bank_refresh.js"))
+        self.assertIn("focusTanField(dialog);", self._js("tan_prompt.js"))
 
     def test_the_form_box_asks_the_same_helper(self):
         # Not a second copy: these two boxes have drifted apart once already,
@@ -189,14 +189,14 @@ class TestTheCursorStartsInTheTanField(unittest.TestCase):
         self.assertIn("kefiya.focus_tan_field(dialog)",
                       self._js("fints_interactive.js"))
         self.assertIn("kefiya.focus_tan_field = focusTanField",
-                      self._js("bank_refresh.js"))
+                      self._js("tan_prompt.js"))
 
     def test_the_focus_waits_for_the_dialog_to_be_shown(self):
         # frappe.prompt returns before Bootstrap has finished showing the
         # modal, so focusing straight away focuses nothing. The timeout is the
         # fallback for a desk that renders without the transition, where the
         # event has already fired by then.
-        source = self._js("bank_refresh.js")
+        source = self._js("tan_prompt.js")
         self.assertIn("shown.bs.modal", source)
         self.assertIn("setTimeout(put", source)
 
@@ -204,7 +204,7 @@ class TestTheCursorStartsInTheTanField(unittest.TestCase):
         # There is no TAN field when the release happens in the banking app.
         # get_field returns nothing and the helper does nothing -- focusing
         # whatever is first would put the cursor on a read-only mode field.
-        source = self._js("bank_refresh.js")
+        source = self._js("tan_prompt.js")
         head = source[source.index("function focusTanField"):]
         body = head[:head.index("\n    }")]
         self.assertIn('get_field("tan")', body)

@@ -390,7 +390,7 @@ class TestTheTanPromptIsTheSharedOne(unittest.TestCase):
 
     def test_the_shared_prompt_is_actually_exported(self):
         self.assertIn("kefiya.tan_prompt = tanPrompt;",
-                      _source("bank_refresh.js"))
+                      _source("tan_prompt.js"))
 
     def test_a_stale_view_cannot_answer_for_the_live_one(self):
         """The handler is bound once per page load; the list is rebuilt on

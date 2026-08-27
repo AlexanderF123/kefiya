@@ -302,7 +302,6 @@ Due today — goes to the bank now,Heute fällig — geht jetzt an die Bank
 Due since {0} — goes to the bank today,Fällig seit {0} — geht heute an die Bank
 Today — the bank executes it today,Heute — die Bank führt ihn heute aus
 "Dated {0}, which has passed — the bank cannot execute this","Auf den {0} datiert, der vorbei ist — die Bank kann das nicht ausführen"
-not attempted — {0} is waiting for a release,Nicht versucht — {0} wartet auf eine Freigabe
 "counted as cash in the books, but this is {0}","in der Buchhaltung als Guthaben geführt, ist aber {0}"
 Ledger,Buchhaltung
 {0}: the bank is waiting for the release in your banking app. Confirm it there -- this login uses a decoupled procedure and issues no TAN to type in.,{0}: Die Bank wartet auf die Freigabe in Ihrer Banking-App. Dort bestätigen — dieser Zugang nutzt ein entkoppeltes Verfahren und gibt keine TAN zum Eintippen aus.

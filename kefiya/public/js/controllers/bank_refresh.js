@@ -81,29 +81,6 @@ frappe.provide("kefiya");
         return frappe.utils.escape_html("" + v);
     }
 
-    // A readable message out of a failed frappe.call response.
-    function errText(r) {
-        try {
-            if (!r) return "";
-            var d = r.responseJSON || r;
-            if (d && d.exception) return "" + d.exception;
-            if (d && d._error_message) return "" + d._error_message;
-            var sm = (d && d._server_messages) || r._server_messages;
-            if (sm) {
-                try {
-                    var a = JSON.parse(sm);
-                    if (a && a.length) {
-                        var o = JSON.parse(a[0]);
-                        return o.message || a[0];
-                    }
-                } catch (ignoredA) {
-                    return "" + sm;
-                }
-            }
-            if (r.responseText) return ("" + r.responseText).slice(0, 220);
-        } catch (ignoredB) {}
-        return "";
-    }
 
     // Held by reference, not by selector, so it works inside a shadow root as
     // well as in plain DOM.
@@ -255,157 +232,6 @@ frappe.provide("kefiya");
             + "</div>";
     }
 
-    // What the server reported per account, turned into readable lines.
-    // errors and unsupported are kept strictly apart: a real failure must not
-    // look like an absent bank feature.
-    function buildLines(x) {
-        var lines = [];
-        var errs = x.errors || [];
-        var uns = x.unsupported || [];
-        var why = x.error_details || {};
-        var whyNot = x.unsupported_details || {};
-
-        function add(label, text, kind) {
-            lines.push({ label: label, text: text, kind: kind || "ok" });
-        }
-
-        // name = the identifier _optional_fetch uses on the server.
-        function report(label, name, describe) {
-            if (errs.indexOf(name) >= 0) {
-                add(label, __("Error") + ": "
-                    + (why[name] || __("reason in the Error Log")), "err");
-                return;
-            }
-            if (uns.indexOf(name) >= 0) {
-                // Some banks refuse the query for this account only, rather
-                // than not knowing it. Where the server could tell the two
-                // apart, the more precise reason stands here.
-                add(label, whyNot[name] || __("not offered by the bank"),
-                    "none");
-                return;
-            }
-            var d = describe();
-            add(label, d === null ? __("nothing delivered") : d,
-                d === null ? "none" : "ok");
-        }
-
-        var t = x.transactions || {};
-        if (x.skipped || t.status === "skipped") {
-            add(__("Fetch"), __("This access is excluded from the fetch"), "none");
-            return lines;
-        }
-        if (t.status === "tan_required") {
-            add(__("Transactions"),
-                x.message || __("Release required, then fetch again"),
-                "err");
-            return lines;
-        }
-        add(__("Transactions"), __("{0} new", [t.new_count || 0]));
-
-        if (x.account_kind) {
-            // The kind is a stable English key in the database -- a Select
-            // option other code matches on. Only what is shown gets
-            // translated; the stored value must not.
-            add(__("Account Kind"), __(x.account_kind), "none");
-        }
-        // Only present when the books and the bank disagree about what this
-        // account is. Marked as an error rather than a note: an account that
-        // is not money counted as money overstates what can be paid out.
-        if (x.ledger_complaint) {
-            add(__("Ledger"), x.ledger_complaint, "err");
-        }
-
-        report(__("Balance"), "balance", function () {
-            var b = x.balance;
-            if (!b) return null;
-            if (!b.stored) {
-                return __("not stored") + " ("
-                    + (b.reason || __("unknown")) + ")";
-            }
-            var cur = b.currency || undefined;
-            var s = format_currency(b.balance, cur);
-            if (b.line_of_credit) {
-                s += " · " + __("Credit line") + " "
-                    + format_currency(b.line_of_credit, cur);
-            }
-            // The same balance, counted back over the bookings just fetched.
-            if (b.running && b.running.updated) {
-                s += " · " + __("{0} bookings given a balance",
-                                [b.running.updated]);
-            } else if (b.running && b.running.reason) {
-                s += " · " + b.running.reason;
-            }
-            return s;
-        });
-
-        report(__("Pending"), "pending_transactions", function () {
-            var p = x.pending;
-            if (!p) return null;
-            return __("{0} new, {1} unchanged, {2} settled",
-                      [p.created || 0, p.updated || 0, p.cancelled || 0]);
-        });
-
-        report(__("Securities"), "holdings", function () {
-            var h = x.holdings;
-            if (!h) return null;
-            return __("{0} new, {1} updated",
-                      [h.created || 0, h.updated || 0]);
-        });
-
-        // HKDBS: money we collect once on a date. It was labelled "standing
-        // orders" here, which is a different business transaction entirely.
-        report(__("Scheduled debits"), "scheduled_debits", function () {
-            var p = x.planned;
-            if (!p) return null;
-            return __("{0} new, {1} unchanged, {2} cancelled",
-                      [p.created || 0, p.updated || 0, p.cancelled || 0]);
-        });
-
-        report(__("Standing orders"), "standing_orders", function () {
-            var o = x.standing_orders;
-            if (!o) return null;
-            var txt = __("{0} held by the bank", [o.count || 0]);
-            if (o.count && !o.schedule_confirmed) {
-                txt += " · " + __("cycle not yet verified");
-            }
-            return txt;
-        });
-
-        report(__("Statements"), "statements", function () {
-            var s = x.statements;
-            if (!s) return null;
-            if (s.reason) return s.reason;
-            var txt = __("{0} downloaded of {1} available",
-                         [s.downloaded || 0, s.available || 0]);
-            if (s.already_present) {
-                txt += ", " + __("{0} already present", [s.already_present]);
-            }
-            if (s.failed_at) {
-                txt += " · " + __("stopped at statement {0}", [s.failed_at]);
-            }
-            return txt;
-        });
-
-        report(__("Credit card"), "credit_card", function () {
-            var c = x.credit_card;
-            if (!c) return null;
-            if (c.reason) return c.reason;
-            return __("{0} new", [c.created || 0])
-                + (c.skipped
-                    ? (", " + __("{0} already known", [c.skipped])) : "");
-        });
-
-        report(__("Transfer limit"), "transfer_limit", function () {
-            var l = x.transfer_limit;
-            if (!l) return null;
-            if (l.reason) return l.reason;
-            if (!l.amount) return null;
-            return format_currency(l.amount)
-                + (l.limit_type ? (" · " + l.limit_type) : "");
-        });
-
-        return lines;
-    }
 
     function logBody() {
         var entries = (run && run.log) || [];
@@ -499,161 +325,6 @@ frappe.provide("kefiya");
     // on screen looked identical every time -- so the user had to guess which
     // banking app to open. The payload now carries the access; this puts it
     // where the eye lands, in the heading and in the first line of the dialog.
-    function tanTitle(data) {
-        return data.account_label
-            ? __("Verification required") + " – " + data.account_label
-            : __("Verification required");
-    }
-
-    function tanContextField(data) {
-        if (!data.account_detail) return null;
-        return {
-            fieldtype: "HTML", fieldname: "kefiya_tan_context",
-            options: '<div class="text-muted small" '
-                + 'style="margin-bottom:8px">'
-                + frappe.utils.escape_html(data.account_detail) + "</div>"
-        };
-    }
-
-    // What the bank asks, where it does not ask in words. comdirect sends a
-    // photoTAN -- a coloured mosaic the phone app reads before it shows the
-    // digits -- and a Sparkasse sends chipTAN-QR the same way. Without the
-    // picture the box asks for a TAN and shows nothing to scan.
-    //
-    // Sized in millimetres, not pixels: a photoTAN app reads the mosaic off
-    // the screen, and on a high-resolution display a picture given in pixels
-    // comes out too small to focus on. 40 mm is what the banks' own web
-    // interfaces use.
-    function tanChallengeField(data) {
-        var c = data.challenge;
-        if (!c || (!c.image && !c.text)) return null;
-
-        var html = '<div class="kefiya-tan-challenge" '
-            + 'style="text-align:center;margin-bottom:10px">';
-        if (c.image && c.image.data) {
-            html += '<img alt="' + __("Bank challenge") + '" '
-                + 'style="width:40mm;height:40mm;image-rendering:pixelated;'
-                + 'border:1px solid var(--border-color);border-radius:4px;'
-                + 'background:#fff;padding:4px" src="data:'
-                + frappe.utils.escape_html(c.image.mime || "image/png")
-                + ";base64," + frappe.utils.escape_html(c.image.data) + '">';
-            html += '<div class="text-muted small" style="margin-top:6px">'
-                + __("Scan this with your banking app, then enter the TAN it"
-                    + " shows.") + "</div>";
-        }
-        if (c.text) {
-            html += '<div class="small" style="margin-top:6px;text-align:left">'
-                + frappe.utils.escape_html(c.text) + "</div>";
-        }
-        return { fieldtype: "HTML", fieldname: "kefiya_tan_challenge",
-                 options: html + "</div>" };
-    }
-
-    function tanPrompt(data, done) {
-        var fields = [];
-        if (data.possible_tan_modes) {
-            fields.push({ fieldtype: "Select", fieldname: "tan_mode",
-                label: __("TAN Mode"), options: data.possible_tan_modes,
-                reqd: 1 });
-            if (data.possible_tan_mediums) {
-                fields[0].default = data.possible_tan_modes[0];
-                fields[0].read_only = 1;
-                fields.push({ fieldtype: "Select", fieldname: "tan_medium",
-                    label: __("TAN Medium"),
-                    options: data.possible_tan_mediums, reqd: 1 });
-            }
-        }
-        if (data.tan_required || data.mfa_required) {
-            if (data.possible_tan_modes && !fields[0].default) {
-                fields[0].default = data.possible_tan_modes[0];
-                fields[0].read_only = 1;
-            }
-            if (data.possible_tan_mediums) {
-                fields[1].default = data.possible_tan_mediums[0];
-                fields[1].read_only = 1;
-            }
-            fields.push({ fieldtype: "Check", fieldname: "mfa_confirmation",
-                label: __("Confirm MFA"), default: 1, hidden: 1 });
-            if (data.tan_required) {
-                fields.push({ fieldtype: "Data", fieldname: "tan",
-                    label: __("TAN"), reqd: 1 });
-            } else if (data.mfa_required) {
-                fields.push({ fieldtype: "HTML", fieldname: "waiting",
-                    label: __("Waiting for Interaction"),
-                    options: __("Follow the instructions on your banking app or device.") });
-            }
-        }
-        // Prepended only now: everything above addresses the fields by index
-        // (fields[0] is the mode, fields[1] the medium), so an entry inserted
-        // ahead of them earlier would silently make the mode read-only field
-        // the wrong one.
-        var context = tanContextField(data);
-        if (context) fields.unshift(context);
-        // Above the account line: the picture is the question, and the
-        // question belongs at the top.
-        var challenge = tanChallengeField(data);
-        if (challenge) fields.unshift(challenge);
-
-        var dialog = frappe.prompt(fields, function (values) {
-            // Explicit feedback, because the run mutes the standard error box.
-            frappe.call({
-                method: "kefiya.utils.client.resolve_tan_interaction",
-                args: { fints_login: data.docname,
-                        values: Object.assign({}, data, values) },
-                silent: true,
-                callback: function () { if (done) done(); },
-                error: function (r) {
-                    frappe.show_alert({
-                        message: __("TAN release failed.") + " "
-                            + errText(r),
-                        indicator: "red"
-                    }, 10);
-                    if (done) done();
-                }
-            });
-        }, tanTitle(data));
-
-        // Into the TAN field, not into the dialog. The mode and the medium
-        // above it are read-only -- the only thing to do here is type six
-        // digits, and Frappe leaves the focus on the dialog itself, so it took
-        // a click first. A TAN expires while you look for the cursor.
-        //
-        // On the decoupled procedure there IS no TAN field: the release
-        // happens in the banking app and the dialog only says so. Focusing
-        // whatever happens to be first would put the cursor somewhere the user
-        // must not change, so nothing is focused at all.
-        focusTanField(dialog);
-        return dialog;
-    }
-
-    // frappe.prompt resolves its dialog synchronously but shows it through a
-    // Bootstrap transition, so the input is not focusable at the moment the
-    // call returns. shown.bs.modal is the event that says it is; the timeout
-    // is the fallback for a desk that renders the modal without the
-    // transition, where the event has already fired.
-    function focusTanField(dialog) {
-        if (!dialog || !dialog.get_field) return;
-        var put = function () {
-            try {
-                var f = dialog.get_field("tan");
-                if (f && f.$input) f.$input.focus().select();
-            } catch (ignored) {}
-        };
-        try { dialog.$wrapper.on("shown.bs.modal", put); } catch (ignoredA) {}
-        setTimeout(put, 300);
-    }
-
-    // Shared, because a TAN prompt is a TAN prompt: the outgoing-payments page
-    // needs the same box when the bank asks for a release on a send. Two copies
-    // of it drifted apart once already -- the second one named neither the bank
-    // nor the account, which is the whole reason the context lines exist.
-    kefiya.tan_prompt = tanPrompt;
-
-    // The Kefiya Login form builds its own TAN box (it has the form's docname
-    // where this one has a login from the run). It gets the focus rule from
-    // here rather than a second copy of it -- these two boxes have drifted
-    // apart once already.
-    kefiya.focus_tan_field = focusTanField;
 
     // Set when the user has answered a TAN box during a run: the release is
     // given, so the accounts the bank held back can be fetched -- and nothing
@@ -674,7 +345,7 @@ frappe.provide("kefiya");
         // which the run needs the user.
         frappe.realtime.on("fints_tan_interaction_required", function (data) {
             if (!run || !run.busy) return;
-            tanPrompt(data, function () {
+            kefiya.tan_prompt(data, function () {
                 resumeWanted = true;
                 // Not now: the worker still holds the access, and a second
                 // dialog on it is the very damage the run is built to avoid.
@@ -721,7 +392,7 @@ frappe.provide("kefiya");
         if (x.skipped || t.status === "skipped") state = "skip";
         else if (x.tan_required || t.status === "tan_required") state = "tan";
         run.tot += (t.new_count || 0);
-        record(ln, state, buildLines(x));
+        record(ln, state, kefiya.fetch_log_lines(x));
         return state;
     }
 
@@ -773,7 +444,12 @@ frappe.provide("kefiya");
                 silent: true,
                 callback: function (r) {
                     var id = r && r.message && r.message.run;
-                    if (!id) { res(fetchOneByOne(logins, btn, total)); return; }
+                    if (!id) {
+                        failAll(logins, __("The server accepted the request"
+                            + " but named no run."));
+                        res(null);
+                        return;
+                    }
                     var timer = null;
                     var settled = false;
                     var finish = function () {
@@ -803,59 +479,38 @@ frappe.provide("kefiya");
                                     seen: arm, done: finish };
                     arm();
                 },
-                // An older server without the endpoint, or a caller without
-                // the rights the worker would need. Neither is a reason to
-                // fetch nothing.
-                error: function () { res(fetchOneByOne(logins, btn, total)); }
+                // There used to be a second, account-by-account fetch path
+                // here as a fallback. It carried its own copy of the rule that
+                // stops an access at a parked release -- the same rule
+                // fetch_group applies on the server, in another language, with
+                // its own translated sentence. Two implementations of one rule
+                // is one that gets forgotten.
+                //
+                // What it guarded against was a client and a server out of
+                // step, and those ship as one app. The one real window is a
+                // browser holding stale JS for a few minutes after a deploy,
+                // and the honest answer there is the one every other server
+                // error already gets: say so.
+                error: function (r) {
+                    failAll(logins, kefiya.call_error(r) || __("Error"));
+                    res(null);
+                }
             });
+        });
+    }
+
+    // Every account of an access that never got started. Used where the run
+    // cannot say anything about them individually, so saying nothing would
+    // leave the bar short of its total for good.
+    function failAll(logins, why) {
+        logins.forEach(function (ln) {
+            if (!recorded(ln)) noteResult(ln, null, why);
         });
     }
 
     function recorded(ln) {
         return ((run && run.log) || []).some(function (e) {
             return e.ln === ln;
-        });
-    }
-
-    // The fallback: one request per account, as it was before the worker.
-    // Keeps the client-side stop at a parked release, because here the client
-    // is the only one who can see it.
-    function fetchOneByOne(logins, btn, total) {
-        var chain = Promise.resolve();
-        var held = null;
-        logins.forEach(function (ln) {
-            chain = chain.then(function () {
-                if (held) {
-                    record(ln, "tan", [{
-                        label: __("Fetch"),
-                        text: __("not attempted — {0} is waiting"
-                                 + " for a release", [held]),
-                        kind: "err"
-                    }]);
-                    return;
-                }
-                progressLabel(btn, total);
-                return fetchOne(ln).then(function (state) {
-                    if (state === "tan") held = ln;
-                });
-            });
-        });
-        return chain;
-    }
-
-    function fetchOne(ln) {
-        return new Promise(function (res) {
-            frappe.call({
-                method: "kefiya.utils.client.fetch_all",
-                args: { kefiya_login: ln, user_scope: ln },
-                silent: true,
-                callback: function (r) {
-                    res(noteResult(ln, (r && r.message) || {}));
-                },
-                error: function (r) {
-                    res(noteResult(ln, null, errText(r) || __("Error")));
-                }
-            });
         });
     }
 
@@ -1010,7 +665,7 @@ frappe.provide("kefiya");
             release();
             maybeResume();
             frappe.msgprint(__("The account fetch was aborted.") + " "
-                + errText(r));
+                + kefiya.call_error(r));
             return null;
         });
     };
