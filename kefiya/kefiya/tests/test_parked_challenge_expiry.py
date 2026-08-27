@@ -95,3 +95,107 @@ class TestParkedChallengeExpiry(unittest.TestCase):
             instance._FinTSController__discard_parked_challenge()
 
         persist.assert_not_called()
+
+
+class TestTheDecoupledWaitCanActuallyPoll(unittest.TestCase):
+    """The one that cost three accounts three months of statements.
+
+    A decoupled release is polled for on the live dialog. Parking the
+    challenge pauses that dialog, and python-fints refuses to send on a paused
+    one -- "Cannot send() on a paused dialog". The fetch parked FIRST and
+    waited second, so the very first poll raised, the wait answered None, and
+    the user was told the release had not arrived in time after no time had
+    passed at all. Every attempt asked for another release.
+    """
+
+    def _source(self):
+        import inspect
+
+        import kefiya.utils.fints_controller as fc
+        return inspect.getsource(fc.FinTSController._get_transactions_checked)
+
+    def test_the_prompt_goes_up_before_the_wait(self):
+        source = self._source()
+        # The call, not the word: "See _await_release." stands in the comment
+        # above it, and matching that made this pass with the code the wrong
+        # way round.
+        self.assertLess(
+            source.index("self._publish_tan_prompt(response, decoupled=True)"),
+            source.index("self._await_release(response)"))
+
+    def test_nothing_is_parked_before_the_wait(self):
+        """Parking is what pauses the dialog. Doing it first is the bug."""
+        source = self._source()
+        self.assertLess(source.index("self._await_release(response)"),
+                        source.index("self._park_tan_challenge(response)"))
+        self.assertNotIn("self.ask_for_tan(response, decoupled=True)", source)
+
+    def test_it_is_still_parked_when_the_wait_runs_out(self):
+        """Otherwise a release given a minute later unlocks nothing."""
+        source = self._source()
+        self.assertIn("self._park_tan_challenge(response)", source)
+        self.assertLess(source.index("self._park_tan_challenge(response)"),
+                        source.index("TanInteractionRequired"))
+
+    def test_asking_still_parks_for_every_other_caller(self):
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        source = inspect.getsource(FinTSController.ask_for_tan)
+        self.assertIn("self._park_tan_challenge(response)", source)
+        self.assertIn("self._publish_tan_prompt(", source)
+
+
+class TestHowLongToWaitForARelease(unittest.TestCase):
+    """The bank says both numbers itself. Waiting a flat two minutes stopped
+    at 40 % of what this bank allows -- 150 polls two seconds apart."""
+
+    def test_the_banks_numbers_win(self):
+        from kefiya.utils.fints_controller import decoupled_wait
+
+        class Parameters:
+            wait_before_next_poll = 2
+            decoupled_max_poll_number = 150
+
+        pause, total = decoupled_wait(Parameters(), 2, 120)
+        self.assertEqual(pause, 2.0)
+        self.assertEqual(total, 300)
+
+    def test_without_them_the_old_behaviour_stands(self):
+        from kefiya.utils.fints_controller import decoupled_wait
+
+        self.assertEqual(decoupled_wait(None, 2, 120), (2, 120))
+        self.assertEqual(decoupled_wait(object(), 2, 120), (2, 120))
+
+    def test_a_bank_that_asks_for_less_does_not_shorten_it(self):
+        """Its count is a maximum, not a promise. Somebody may still be
+        reaching for their phone."""
+        from kefiya.utils.fints_controller import decoupled_wait
+
+        class Parameters:
+            wait_before_next_poll = 2
+            decoupled_max_poll_number = 5
+
+        self.assertEqual(decoupled_wait(Parameters(), 2, 120)[1], 120)
+
+    def test_nobody_waits_longer_than_the_ceiling(self):
+        from kefiya.utils.fints_controller import (
+            DECOUPLED_WAIT_CEILING_SECONDS, decoupled_wait)
+
+        class Parameters:
+            wait_before_next_poll = 10
+            decoupled_max_poll_number = 9999
+
+        self.assertEqual(decoupled_wait(Parameters(), 2, 120)[1],
+                         DECOUPLED_WAIT_CEILING_SECONDS)
+
+    def test_nonsense_parameters_do_not_make_a_busy_loop(self):
+        from kefiya.utils.fints_controller import decoupled_wait
+
+        class Parameters:
+            wait_before_next_poll = 0
+            decoupled_max_poll_number = "viele"
+
+        pause, total = decoupled_wait(Parameters(), 2, 120)
+        self.assertEqual(pause, 2)
+        self.assertEqual(total, 120)

@@ -128,11 +128,15 @@ def _source(name):
 
 class TestNothingSwallowsTheChallengeOnTheWay(unittest.TestCase):
     """It was already there once and never passed on -- the object sat in
-    ask_for_tan() while the prompt showed a bare input field."""
+    ask_for_tan() while the prompt showed a bare input field.
+
+    The publishing half is its own method now: the decoupled fetch has to put
+    the box up WITHOUT parking, because parking pauses the dialog it is about
+    to poll on."""
 
     def test_the_controller_passes_it_to_both_kinds_of_prompt(self):
         source = _source(os.path.join("utils", "fints_controller.py"))
-        body = source.split("def ask_for_tan(")[1].split("\n    def ")[0]
+        body = source.split("def _publish_tan_prompt(")[1].split("\n    def ")[0]
         self.assertIn("tan_challenge.challenge_of(response)", body)
         self.assertEqual(body.count("challenge=challenge"), 2,
                          "A TAN prompt and a decoupled confirmation both have "

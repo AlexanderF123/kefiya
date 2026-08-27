@@ -153,14 +153,20 @@ KNOWN_CODES = {
     #
     # fints_vop adds that branch, so in the ordinary case this code no longer
     # reaches a user at all: the confirmation is given, or a reviewer is
-    # asked. Seeing it means the branch is not active -- another library
-    # release, or a shape that moved -- which is what the advice now says.
+    # asked.
+    #
+    # There are now three ways to still land here, and the advice must not
+    # pick one of them: the branch is not active (another library release, or
+    # a shape that moved), the follow-up query failed, or the bank simply did
+    # not finish checking in the time we waited. Each of the three writes its
+    # own line to the Error Log; the advice points there rather than naming a
+    # cause nobody established. It named one for a while, and it was wrong.
     "3945": (
         "The bank checked the payee for this order and will not release it"
         " until that check is confirmed. The order was NOT sent. Normally this"
         " app confirms the check itself and asks you only when the bank could"
-        " not confirm the name. That this did not happen means its payee"
-        " confirmation is not working against the installed FinTS library."
+        " not confirm the name. Why it did not get that far this time is in"
+        " the Error Log -- most often the bank had not finished checking."
         " Send this transfer from your online banking and report this message."
     ),
     "9010": (

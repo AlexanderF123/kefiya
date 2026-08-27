@@ -45,7 +45,15 @@ frappe.provide("kefiya");
         if (answer.iban) rows += row(__("IBAN"), answer.iban);
         if (answer.bank_name) rows += row(__("Name at the Bank"), answer.bank_name);
         if (answer.result) rows += row(__("Bank's Answer"), answer.result);
-        return "<table style='margin:10px 0'>" + rows + "</table>";
+        return "<table style='margin:10px 0'>" + rows + "</table>"
+            // No verdict is not the same as no answer. This bank replies with
+            // a payment status report -- a pain.002 document neither this app
+            // nor python-fints reads -- so the row above is simply absent, and
+            // saying nothing would leave the reviewer looking for it.
+            + (answer.result ? ""
+                : "<div class='alert alert-info' style='margin:10px 0'>"
+                  + __("This bank returns its result in a format this app cannot read, so it is not shown above. Check the recipient against the original document yourself — here, you are the check.")
+                  + "</div>");
     }
 
     function vopPrompt(opts) {

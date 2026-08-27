@@ -29,8 +29,8 @@ import unittest
 
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
                                     DEFAULT_POLL_SECONDS,
-                                    demands_confirmation, poll_pause,
-                                    still_checking)
+                                    can_be_approved, demands_confirmation,
+                                    poll_pause, readable_verdict)
 from kefiya.utils.vop_rule import result_from
 
 
@@ -136,44 +136,49 @@ class Hivpp:
         self.vop_id = vop_id
 
 
-class TestTheCheckThatIsNotFinishedYet(unittest.TestCase):
-    """The Volksbank answers asynchronously, and the first live transfer is
-    what found it: polling id, a wait, and no verdict. Parking that produced
-    a challenge nobody could release -- HKVPA carries the VoP-ID and there
-    was none."""
+class TestWhatMakesAnAnswerReleasable(unittest.TestCase):
+    """One thing, and it is not the verdict: the VoP-ID.
 
-    def test_a_polling_id_without_a_verdict_means_ask_again(self):
-        self.assertTrue(still_checking(
-            Hivpp(polling_id=b"587d03b8", wait_for_seconds=2)))
+    The approval segment is HKVPA(vop_id=...) and nothing else. This was asked
+    the other way round -- "is the bank still checking", reading the verdict
+    fields -- and at this bank that question has a permanent answer. Its BPD
+    says::
 
-    def test_a_verdict_ends_the_asking(self):
-        for code in ("RCVC", "RVMC", "RVNM", "RVNA"):
-            self.assertFalse(still_checking(
-                Hivpp(polling_id=b"587d03b8", inner=Evpe(code))), code)
+        ParameterVoP(report_complete='V',
+                     supported_report_formats='...pain.002.001.10')
 
-    def test_a_batch_report_ends_the_asking(self):
-        """A collective order is answered as a payment status report, not as
-        a single result. Asking again for it would never stop."""
-        self.assertFalse(still_checking(
-            Hivpp(polling_id=b"587d03b8", report=b"<xml/>")))
+    'V' means the complete payment status report: a pain.002 document in
+    HIVPP.payment_status_report, which is mutually exclusive with
+    vop_single_result -- and vop_single_result is where every verdict reader
+    here and in python-fints looks. The library's client.py mentions
+    payment_status_report zero times. So the verdict was never readable, the
+    old predicate was permanently true, and no transfer could go out.
+    """
 
-    def test_no_polling_id_is_not_something_to_ask_about(self):
-        self.assertFalse(still_checking(Hivpp(inner=Evpe(None))))
-        self.assertFalse(still_checking(None))
-        self.assertFalse(still_checking(object()))
+    def test_a_vop_id_is_what_releases_an_order(self):
+        self.assertTrue(can_be_approved(Hivpp(vop_id=b"587d03b8")))
 
-    def test_the_verdict_is_read_by_the_one_reader(self):
-        """vop_rule.result_from, not a second copy of it here. Both modules
-        are frappe-free, so there was never a reason for two."""
-        self.assertEqual(result_from(Hivpp(inner=Evpe("RVMC"))), "RVMC")
-        self.assertEqual(result_from(Hivpp()), "")
-        self.assertEqual(result_from(None), "")
-        self.assertEqual(result_from("kaputt"), "")
-        source = open(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "utils", "fints_vop.py"),
-            encoding="utf-8").read()
-        self.assertNotIn("def verdict_of(", source)
+    def test_without_one_there_is_nothing_to_release_with(self):
+        self.assertFalse(can_be_approved(Hivpp(polling_id=b"x",
+                                               wait_for_seconds=2)))
+        self.assertFalse(can_be_approved(None))
+        self.assertFalse(can_be_approved(object()))
+
+    def test_a_verdict_alone_does_not_make_it_releasable(self):
+        """It reads well and cannot be sent: HKVPA carries the VoP-ID."""
+        self.assertFalse(can_be_approved(Hivpp(inner=Evpe("RVMC"))))
+
+    def test_a_report_this_app_cannot_read_is_still_releasable(self):
+        """The whole point. The reviewer becomes the check, and the dialog
+        says so -- but the order can go out."""
+        answer = Hivpp(vop_id=b"587d03b8", report=b"<Document/>")
+        self.assertTrue(can_be_approved(answer))
+        self.assertEqual(readable_verdict(answer), "")
+
+    def test_the_verdict_is_read_where_the_bank_puts_one(self):
+        self.assertEqual(readable_verdict(Hivpp(inner=Evpe("RVMC"))), "RVMC")
+        self.assertEqual(readable_verdict(Hivpp()), "")
+        self.assertEqual(readable_verdict(None), "")
 
     def test_the_bank_names_the_pause(self):
         self.assertEqual(poll_pause(Hivpp(wait_for_seconds=2)), 2.0)
@@ -188,14 +193,22 @@ class TestTheCheckThatIsNotFinishedYet(unittest.TestCase):
         self.assertEqual(poll_pause(Hivpp(wait_for_seconds="zwei")),
                          float(DEFAULT_POLL_SECONDS))
 
-    def test_the_copy_waits_before_it_decides(self):
-        """Asserted from the source: the decision must not be taken on the
-        first answer, and an unfinished check must park nothing."""
+    def test_the_copy_waits_for_a_vop_id_before_it_decides(self):
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__)))), "utils", "fints_vop.py")
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
         self.assertIn("hivpp = self._await_vop_result(", source)
-        self.assertIn("if not still_checking(hivpp) and (", source)
-        self.assertIn("waited < POLL_LIMIT_SECONDS", source)
+        self.assertIn("while not can_be_approved(hivpp)", source)
+        self.assertIn("if can_be_approved(hivpp) and (", source)
+
+    def test_an_unreadable_verdict_no_longer_blocks_the_order(self):
+        """The regression this replaces: requiring a readable verdict meant
+        nothing could ever be parked at a bank that sends a report."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertNotIn("still_checking", source)
