@@ -20,7 +20,7 @@ function kefiya_handle_transfer_response(frm, msg) {
     } else if (msg.status === "tan_required") {
         kefiya_prompt_transfer_tan(frm, msg.docname);
     } else if (msg.status === "vop_mismatch") {
-        kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result, msg.payee);
+        kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
     } else {
         frappe.msgprint({
             title: __("Transfer failed"),
@@ -43,12 +43,11 @@ function kefiya_handle_transfer_response(frm, msg) {
  * outgoing-payments page could not reach it and reported a parked order as
  * sent. One box, both callers.
  */
-function kefiya_prompt_vop_release(frm, kefiya_login, vop_result, payee) {
+function kefiya_prompt_vop_release(frm, kefiya_login, answer) {
     kefiya.vop_prompt({
         login: kefiya_login,
         scope: frm.docname,
-        vop_result: vop_result,
-        payee: payee,
+        answer: answer,
         onResult: function (msg) {
             kefiya_handle_transfer_response(frm, msg);
         }

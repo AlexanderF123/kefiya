@@ -3,7 +3,10 @@
 //
 // The box that shows what the bank said about a payee, and releases the order.
 //
-//   kefiya.vop_prompt(opts)   opts: {login, scope, vop_result, payee, onResult}
+//   kefiya.vop_prompt({login, scope, answer, onResult})
+//
+// `answer` is what the server stored about the parked check: the result code,
+// the name the bank holds for that IBAN, and who the order pays.
 //
 // Its own file for the same reason the TAN box has one: two callers -- the
 // transfer form and the outgoing-payments page -- and no share in what either
@@ -22,43 +25,33 @@ frappe.provide("kefiya");
     "use strict";
 
     function esc(value) {
-        return frappe.utils.escape_html(String(value === undefined || value === null ? "" : value));
+        return frappe.utils.escape_html(
+            String(value === undefined || value === null ? "" : value));
     }
 
-    // Who the order pays, in the lines that decide the question. The raw
-    // answer is shown below it as well, because it is what the bank actually
-    // said -- but nobody compares an invoice against a parsed segment.
-    function payeeBlock(payee) {
-        if (!payee || !payee.name) return "";
+    // Who the order pays, in the lines that decide the question.
+    //
+    // What stood here as well: a <pre> dump of the raw answer. For a parsed
+    // segment that is its repr -- "HIVPP1(header=..., polling_id=b'587d...')"
+    // -- shown to the person deciding whether money leaves. Nobody compares an
+    // invoice against that. The segment is in the Error Log.
+    function answerBlock(answer) {
+        if (!answer || !answer.payee_name) return "";
         var row = function (label, value) {
             return "<tr><td style='padding:2px 12px 2px 0;color:#6c7680'>"
                 + esc(label) + "</td><td><b>" + esc(value) + "</b></td></tr>";
         };
-        var rows = row(__("Payee on the order"), payee.name);
-        if (payee.iban) rows += row(__("IBAN"), payee.iban);
-        if (payee.bank_name) rows += row(__("Name at the Bank"), payee.bank_name);
-        if (payee.result) rows += row(__("Bank's Answer"), payee.result);
+        var rows = row(__("Payee on the order"), answer.payee_name);
+        if (answer.iban) rows += row(__("IBAN"), answer.iban);
+        if (answer.bank_name) rows += row(__("Name at the Bank"), answer.bank_name);
+        if (answer.result) rows += row(__("Bank's Answer"), answer.result);
         return "<table style='margin:10px 0'>" + rows + "</table>";
-    }
-
-    function rawBlock(vop_result) {
-        if (vop_result && typeof vop_result === "object") {
-            var rows = Object.keys(vop_result).map(function (key) {
-                return "<tr><td style='padding:2px 10px 2px 0'><b>" + esc(key)
-                    + "</b></td><td>" + esc(vop_result[key]) + "</td></tr>";
-            });
-            return "<table style='margin-top:8px'>" + rows.join("") + "</table>";
-        }
-        if (vop_result) {
-            return "<pre style='white-space:pre-wrap'>" + esc(vop_result) + "</pre>";
-        }
-        return "";
     }
 
     function vopPrompt(opts) {
         opts = opts || {};
-        var payee = opts.payee || {};
-        var remembers = !!(payee.name && payee.iban);
+        var answer = opts.answer || {};
+        var remembers = !!(answer.payee_name && answer.iban);
 
         var d = new frappe.ui.Dialog({
             title: __("Verification of Payee — mismatch"),
@@ -70,13 +63,12 @@ frappe.provide("kefiya");
                         + __("The bank could not confirm that the payee name matches the IBAN. <b>No money has been sent.</b>")
                         + "</div>"
                         + __("Compare the recipient against the invoice before releasing. If the account details were changed recently or came in by email, treat this as a possible fraud attempt and clarify by phone using a known number.")
-                        + payeeBlock(payee)
+                        + answerBlock(answer)
                         + (remembers
                             ? "<div class='text-muted' style='margin-bottom:8px'>"
                               + __("Once you release it, this payee is remembered: a later payment to the same name and the same IBAN goes through without asking again.")
                               + "</div>"
                             : "")
-                        + rawBlock(opts.vop_result)
                 },
                 {
                     fieldtype: "Check",

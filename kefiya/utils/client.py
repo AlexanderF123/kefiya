@@ -1537,20 +1537,12 @@ def get_pending_vop(kefiya_login):
     if not login.stored_vop_state:
         return {"status": "none"}
 
-    result = login.vop_result
-    try:
-        result = json.loads(result) if result else None
-    except Exception:
-        pass
-    try:
-        payee = json.loads(login.vop_payee or "{}") or {}
-    except Exception:
-        payee = {}
+    from kefiya.utils import vop_rule
+
     return {
         "status": "pending",
         "reference": login.vop_reference,
-        "vop_result": result,
-        "payee": payee,
+        "vop_result": vop_rule.parked_answer(login.vop_result),
     }
 
 

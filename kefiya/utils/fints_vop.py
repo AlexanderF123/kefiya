@@ -57,6 +57,11 @@ implementation is strictly better than running a stale copy against a bank.
 # be exercised. The same reason duplicate_rule and fints_response stand apart
 # from the code that queries for them.
 
+# The result code is read by vop_rule.result_from -- the same nesting, the
+# same defensiveness, and it already handles the mapping shape a parked answer
+# comes back in. A second reader of one field is a second thing to keep right.
+from kefiya.utils.vop_rule import result_from
+
 #: The release this copy was taken from. Any other one gets the library's own
 #: method, unchanged -- a stale copy of a payment path is worse than a missing
 #: feature.
@@ -126,19 +131,6 @@ def demands_confirmation(response, tan_seg):
     return False
 
 
-def verdict_of(hivpp):
-    """The payee-check result for a single payment, or "" where there is none.
-
-    It sits in the EVPE inside the HIVPP segment, not on the segment. Reading
-    the segment alone finds nothing.
-    """
-    try:
-        inner = getattr(hivpp, "vop_single_result", None)
-        return str(getattr(inner, "result", "") or "")
-    except Exception:
-        return ""
-
-
 def still_checking(hivpp):
     """Has the bank not finished checking the payee yet?
 
@@ -157,7 +149,7 @@ def still_checking(hivpp):
         return False
     if not getattr(hivpp, "polling_id", None):
         return False
-    if verdict_of(hivpp):
+    if result_from(hivpp):
         return False
     if getattr(hivpp, "payment_status_report", None):
         return False
@@ -301,7 +293,7 @@ def _build(parts):
                         # the bank's own refusal instead of to a button that
                         # cannot work.
                         if not still_checking(hivpp) and (
-                                verdict_of(hivpp) in ('RVNA', 'RVNM', 'RVMC')
+                                result_from(hivpp) in ('RVNA', 'RVNM', 'RVMC')
                                 or demands_confirmation(response, tan_seg)):
                             return NeedVOPResponse(
                                 vop_result=hivpp,
