@@ -131,29 +131,43 @@ def demands_confirmation(response, tan_seg):
     return False
 
 
-def still_checking(hivpp):
-    """Has the bank not finished checking the payee yet?
+def can_be_approved(hivpp):
+    """Is there enough in this answer to release the order with?
 
-    This is the case the Volksbank actually produces, and it took a failed
-    transfer to find: the first answer carries a polling id and a wait, and
-    nothing else -- no VoP-ID, no result, no name::
+    Exactly one thing decides it: the VoP-ID. The approval segment is
+    HKVPA(vop_id=...) and nothing else, so an answer without one cannot be
+    released no matter what else it carries -- and an answer WITH one can,
+    whether or not we can read the verdict.
 
-        HIVPP1(header=..., polling_id=b'587d03b8-...', wait_for_seconds=2)
+    This used to ask "is the bank still checking", which read the verdict
+    fields. That was the wrong question at this bank, and measurably so::
 
-    Parking that as a challenge is useless and looks like a bug to whoever
-    gets it: the approval segment is HKVPA(vop_id=...) and there is no VoP-ID
-    to put in it, so the release could never go through. The only thing to do
-    with this answer is ask again.
+        HIVPPS1(parameter=ParameterVoP(..., report_complete='V',
+                supported_report_formats='urn:iso:std:iso:20022:tech:xsd:pain.002.001.10',
+                payment_order_segment=['HKCCS', ..., 'HKIPZ', ...]))
+
+    report_complete='V' means this bank answers with the COMPLETE payment
+    status report -- a pain.002 document in HIVPP.payment_status_report -- and
+    that field is mutually exclusive with vop_single_result, which is where
+    every verdict reader in this codebase and in python-fints looks.
+    payment_status_report appears zero times in the library's client.py. So
+    the verdict is never readable here, "still checking" was permanently true,
+    and the order fell through to the bank's refusal every time.
+
+    Asking for the VoP-ID instead makes the release possible at a bank whose
+    answer we cannot read -- which is the honest position: the person
+    approving is then the whole check, and the dialog says so.
     """
-    if hivpp is None:
-        return False
-    if not getattr(hivpp, "polling_id", None):
-        return False
-    if result_from(hivpp):
-        return False
-    if getattr(hivpp, "payment_status_report", None):
-        return False
-    return True
+    return bool(getattr(hivpp, "vop_id", None)) if hivpp is not None else False
+
+
+def readable_verdict(hivpp):
+    """The verdict where the bank puts one in the field anybody reads.
+
+    Empty at a bank that answers with a payment status report. Not an error --
+    a reason to ask a person rather than to decide for them.
+    """
+    return result_from(hivpp)
 
 
 def poll_pause(hivpp):
@@ -200,22 +214,24 @@ def client_class():
         return parts["base"]
 
 
-def _log_still_checking(hivpp):
-    """The bank never finished checking. Said, so it is not guessed at."""
+def _log_no_vop_id(hivpp):
+    """The bank never handed over a VoP-ID. Said, so it is not guessed at."""
     try:
         import frappe
 
         frappe.log_error(
-            title="Kefiya: the bank did not finish the payee check in time",
+            title="Kefiya: the bank gave no VoP-ID for the payee check",
             message=(
-                "It kept answering with a polling id and no result for"
-                " {0} seconds, so there was nothing to confirm and nothing"
-                " worth parking -- an approval needs the VoP-ID this answer"
-                " does not carry. The order was NOT sent.\n\npolling_id={1}"
-                " wait_for_seconds={2}"
+                "It was asked for {0} seconds and never returned one, so there"
+                " was nothing to release the order with -- the approval"
+                " segment is HKVPA(vop_id=...). The order was NOT sent."
+                "\n\npolling_id={1}\nwait_for_seconds={2}"
+                "\npayment_status_report={3} bytes\nvop_single_result={4}"
             ).format(POLL_LIMIT_SECONDS,
                      getattr(hivpp, "polling_id", None),
-                     getattr(hivpp, "wait_for_seconds", None)))
+                     getattr(hivpp, "wait_for_seconds", None),
+                     len(getattr(hivpp, "payment_status_report", b"") or b""),
+                     getattr(hivpp, "vop_single_result", None)))
     except Exception:
         pass
 
@@ -266,16 +282,16 @@ def _build(parts):
             polling id and "ask again in n seconds". HKVPP carries that
             polling id for exactly this, and the library never sends it.
 
-            Bounded, and honest when it runs out: the caller gets back the
-            answer as it stands, still_checking() is still true, and the
-            order ends unsent with the bank's own words. A parked challenge
-            without a VoP-ID would be a dead end wearing the clothes of one
-            that can be released.
+            Asked until there is a VoP-ID to release with. Bounded, and
+            honest when it runs out: the caller gets the answer as it stands,
+            can_be_approved() is still false, and the order ends unsent with
+            the bank's own words. A parked challenge without a VoP-ID would be
+            a dead end wearing the clothes of one that can be released.
             """
             import time
 
             waited = 0.0
-            while still_checking(hivpp) and waited < POLL_LIMIT_SECONDS:
+            while not can_be_approved(hivpp) and waited < POLL_LIMIT_SECONDS:
                 pause = poll_pause(hivpp)
                 time.sleep(pause)
                 waited += pause
@@ -332,10 +348,20 @@ def _build(parts):
                         # could not go through, so the order falls through to
                         # the bank's own refusal instead of to a button that
                         # cannot work.
-                        if still_checking(hivpp):
-                            _log_still_checking(hivpp)
-                        if not still_checking(hivpp) and (
-                                result_from(hivpp) in ('RVNA', 'RVNM', 'RVMC')
+                        if not can_be_approved(hivpp):
+                            _log_no_vop_id(hivpp)
+                        # Park whenever there is something to release with and
+                        # a reason to. The reason is either a verdict that
+                        # wants looking at, or the bank saying outright that it
+                        # will not release without the confirmation (3945).
+                        #
+                        # Not "only when we could read the verdict": at a bank
+                        # that answers with a payment status report there is
+                        # never a readable verdict, and requiring one meant no
+                        # transfer could ever go out.
+                        if can_be_approved(hivpp) and (
+                                readable_verdict(hivpp) in ('RVNA', 'RVNM',
+                                                            'RVMC')
                                 or demands_confirmation(response, tan_seg)):
                             return NeedVOPResponse(
                                 vop_result=hivpp,
