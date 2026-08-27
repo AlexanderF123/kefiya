@@ -68,6 +68,39 @@ OFFERED_IBAN_PREVIEW = 10
 FINTS_TIMEOUT = (15, 120)
 
 
+def _is_missing_bank_parameters(exc):
+    """Is this the "could not fetch BPD" failure, whatever raised it?
+
+    Matched on the message rather than the class: python-fints raises a plain
+    FinTSClientError for it, the same class it uses for a dozen unrelated
+    things. Narrow on purpose -- everything else must keep propagating.
+    """
+    text = str(exc or "")
+    return "could not fetch BPD" in text
+
+
+def _has_bank_parameters(connection):
+    """Did this connection actually reach the bank's parameter data?
+
+    The BPD is what a dialog is built from. python-fints starts with an empty
+    SegmentSequence and fills it during dialog initialisation, so an empty one
+    means the initialisation never got there.
+
+    Unknown shapes answer True: a library version this cannot read must behave
+    exactly as it did before this guard existed, and that was "always persist".
+    """
+    try:
+        bpd = getattr(connection, "bpd", None)
+        if bpd is None:
+            return True
+        segments = getattr(bpd, "segments", None)
+        if segments is None:
+            return True
+        return bool(segments)
+    except Exception:
+        return True
+
+
 def _apply_connection_timeout(client):
     """Give a FinTS client's HTTP session a timeout it does not bring itself.
 
@@ -564,13 +597,65 @@ class FinTSController:
         self.kefiya_login.stored_dialog_blob = None
         self.kefiya_login.save()
 
+    def _forget_client_state(self):
+        """Drop the stored connection state of this login and its siblings.
+
+        The siblings matter: the state is shared across the logins of one bank
+        access, so leaving theirs in place would hand the same unusable state
+        straight back on the next attempt through any of them.
+        """
+        try:
+            self.kefiya_login.stored_client_blob = None
+            self.kefiya_login.stored_tan_blob = None
+            self.kefiya_login.stored_tan_state_decoupled = None
+            self.kefiya_login.stored_dialog_blob = None
+            self.kefiya_login.save()
+
+            # The siblings share this state -- _seed_client_state_from_sibling
+            # hands the freshest one to whichever login has none. Clearing only
+            # this login would fetch the same unusable state straight back from
+            # the one next door.
+            filters = self._sibling_login_filters()
+            if filters:
+                filters["stored_client_state"] = ("is", "set")
+                for row in frappe.get_all("Kefiya Login", filters=filters,
+                                          fields=["name"],
+                                          limit_page_length=0):
+                    frappe.db.set_value(
+                        "Kefiya Login", row["name"],
+                        {"stored_client_state": None,
+                         "stored_tan_state": None,
+                         "stored_tan_state_decoupled": None,
+                         "stored_dialog_state": None},
+                        update_modified=False)
+
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(
+                title="Kefiya: discarding the unusable client state failed",
+                message=frappe.get_traceback(),
+                reference_doctype="Kefiya Login",
+                reference_name=self.kefiya_login.name,
+            )
+
     def __persist_fints_state(self, tan_state=None, clear:bool=False):
         """Persist the current client/dialog state to the database.
         :param tan_state: An additional TAN state to persist if given.
         :param clear: Reset all the stored states
         :return: None
         """
-        self.kefiya_login.stored_client_blob = self.fints_connection.deconstruct(including_private=True)
+        # A state without bank parameters is worse than no state at all. It is
+        # restored on the next attempt, the dialog it builds has no BPD, and
+        # python-fints answers "could not fetch BPD" -- which persists the same
+        # empty state again. A send that failed once then fails the same way
+        # for good, and the only way out is deleting the field by hand.
+        #
+        # So an empty BPD keeps the last good state rather than overwriting it.
+        # The cost of being wrong here is one extra handshake; the cost of the
+        # other direction is an access nobody can use.
+        if _has_bank_parameters(self.fints_connection):
+            self.kefiya_login.stored_client_blob = \
+                self.fints_connection.deconstruct(including_private=True)
 
         if tan_state and isinstance(tan_state, NeedTANResponse):
             self.kefiya_login.stored_tan_blob = tan_state.get_data()
@@ -1636,13 +1721,39 @@ class FinTSController:
 
         with self.fints_connection:
             account = self._require_fints_account()
-            if scheduled:
-                response = self._send_scheduled_transfer(
-                    account, pain_xml, multiple=multiple,
-                    control_sum=control_sum)
-            else:
-                response = self.fints_connection.sepa_transfer(
-                    account, pain_xml, **kwargs)
+            try:
+                if scheduled:
+                    response = self._send_scheduled_transfer(
+                        account, pain_xml, multiple=multiple,
+                        control_sum=control_sum)
+                else:
+                    response = self.fints_connection.sepa_transfer(
+                        account, pain_xml, **kwargs)
+            except Exception as exc:
+                # A stored state whose dialog cannot be built. The next attempt
+                # would restore the same one and fail identically, so it is
+                # dropped here -- the following attempt starts from a fresh
+                # handshake.
+                #
+                # Dropped, not retried. The segments were already on the wire
+                # when this surfaced, so whether the bank saw the payment is
+                # exactly what nobody knows -- and a second send is the one
+                # mistake that costs real money. The user is told to look
+                # before they send again, the same way the unsigned-order guard
+                # tells them.
+                if not _is_missing_bank_parameters(exc):
+                    raise
+                self._forget_client_state()
+                frappe.throw(_(
+                    "The bank connection for {0} could not be rebuilt from its"
+                    " stored state, so this order was NOT sent as far as this"
+                    " app can tell. The stored state has been discarded and the"
+                    " next attempt will start a fresh connection."
+                    "\n\nBefore sending again, look in your online banking:"
+                    " if the transfer is there after all, cancel this order"
+                    " instead of repeating it."
+                ).format(self.kefiya_login.name),
+                    title=_("Connection could not be rebuilt"))
             vop = self._vop_mismatch(response)
             if vop is not None:
                 # Verification of Payee mismatch: the bank could not confirm the

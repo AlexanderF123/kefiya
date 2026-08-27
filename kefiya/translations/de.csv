@@ -312,3 +312,9 @@ The session is then open: fetch this access once more and the bookings come thro
 "Not attempted -- {0} is waiting for a release, and this bank access holds one dialog at a time.","Nicht versucht — {0} wartet auf eine Freigabe, und dieser Bankzugang hält immer nur einen Dialog offen."
 The worker stopped reporting. Fetch this access again.,Der Hintergrundlauf meldet sich nicht mehr. Diesen Zugang bitte erneut abrufen.
 Release accepted — fetching the {0} accounts that were waiting for it.,"Freigabe angenommen — die {0} Konten, die darauf gewartet haben, werden jetzt abgerufen."
+Connection could not be rebuilt,Verbindung ließ sich nicht wiederherstellen
+"The bank connection for {0} could not be rebuilt from its stored state, so this order was NOT sent as far as this app can tell. The stored state has been discarded and the next attempt will start a fresh connection.
+
+Before sending again, look in your online banking: if the transfer is there after all, cancel this order instead of repeating it.","Die Bankverbindung für {0} ließ sich aus dem gespeicherten Zustand nicht wiederherstellen. Nach allem, was diese App erkennen kann, wurde der Auftrag NICHT gesendet. Der gespeicherte Zustand wurde verworfen, der nächste Versuch baut die Verbindung neu auf.
+
+Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
