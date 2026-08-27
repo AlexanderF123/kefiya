@@ -327,7 +327,6 @@ def _not_attempted(held):
     return {
         "transactions": {"status": "tan_required"},
         "tan_required": True,
-        "not_attempted": True,
         "message": _(
             "Not attempted -- {0} is waiting for a release, and this bank"
             " access holds one dialog at a time."

@@ -22,6 +22,16 @@ import "./controllers/account_capabilities";
 // because the person who sends the order is not the one who saw the
 // invoice.
 import "./controllers/payee_check";
+// What a failed frappe.call actually said. Shared by the fetch and the TAN
+// box, which were one file until the box moved out.
+import "./controllers/call_error";
+// The TAN box. Three callers -- the collective fetch, the outgoing payments
+// and the Kefiya Login form -- and no share in what any of them does
+// otherwise, so it is not a part of any one of them.
+import "./controllers/tan_prompt";
+// One account's fetch result as log lines. A pure function of the server's
+// summary, kept apart from the run that produces it.
+import "./controllers/fetch_log";
 import "./controllers/bank_refresh";
 // Opened from the outgoing-payments page, and from anywhere else that wants
 // to show one transfer without navigating away from what the reader is doing.

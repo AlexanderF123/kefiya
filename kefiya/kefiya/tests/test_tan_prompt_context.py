@@ -168,7 +168,7 @@ class TestEveryPromptShowsIt(unittest.TestCase):
             return handle.read()
 
     def test_the_dialog_title_carries_the_access(self):
-        for name in ("bank_refresh.js", "fints_interactive.js"):
+        for name in ("tan_prompt.js", "fints_interactive.js"):
             source = self._js(name)
             self.assertIn(
                 "account_label", source,
@@ -178,7 +178,7 @@ class TestEveryPromptShowsIt(unittest.TestCase):
         """Both prompts address their fields by index -- fields[0] is the TAN
         mode, fields[1] the medium. An entry inserted before they are built
         would make the wrong field read-only."""
-        for name in ("bank_refresh.js", "fints_interactive.js"):
+        for name in ("tan_prompt.js", "fints_interactive.js"):
             source = self._js(name)
             self.assertIn(
                 "unshift", source,
@@ -190,7 +190,7 @@ class TestEveryPromptShowsIt(unittest.TestCase):
 
     def test_the_account_is_escaped_before_it_reaches_the_dom(self):
         """An account name is user-supplied text going into innerHTML."""
-        for name in ("bank_refresh.js", "fints_interactive.js"):
+        for name in ("tan_prompt.js", "fints_interactive.js"):
             source = self._js(name)
             self.assertIn("frappe.utils.escape_html", source, name)
 
