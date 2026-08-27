@@ -372,3 +372,56 @@ class TestTheReleaseBoxAnswersTheRightDocument(unittest.TestCase):
             source = h.read()
         self.assertNotIn("frappe.ui.Dialog", source)
         self.assertNotIn("send_transfer_tan", source)
+
+
+class TestEveryMoneyPathAsksTheBank(unittest.TestCase):
+    """The last question -- did the bank take it -- was asked on exactly one
+    of the three paths.
+
+    The payee release and the direct debit both ended with
+
+        frappe.log_error("... completed without TAN challenge")
+        return {"status": "submitted"}
+
+    noting that the bank had said something and reporting success anyway.
+    Same file, same question, three different answers -- the third time that
+    shape turned up in this class.
+    """
+
+    def _bodies(self):
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        return {name: inspect.getsource(getattr(FinTSController, name))
+                for name in ("submit_sepa_transfer", "approve_pending_vop",
+                             "submit_sepa_debit")}
+
+    def test_none_of_them_reports_success_without_asking(self):
+        for name, body in self._bodies().items():
+            self.assertIn('return {"status": "submitted"}', body, name)
+            self.assertIn("self._refuse_a_refused_order(response)", body, name)
+            self.assertLess(body.index("self._refuse_a_refused_order(response)"),
+                            body.index('return {"status": "submitted"}'), name)
+
+    def test_the_question_is_asked_in_one_place(self):
+        """It was written out inline in submit_sepa_transfer -- log, throw,
+        advice block -- and nowhere else."""
+        import inspect
+
+        import kefiya.utils.fints_controller as fc
+        source = inspect.getsource(fc)
+        self.assertEqual(source.count('title=_("Refused by the bank")'), 1)
+
+    def test_the_release_also_refuses_an_unsigned_order(self):
+        """It releases a transfer; an unsigned one is not executed, and
+        calling it sent is how an invoice gets believed paid."""
+        self.assertIn("self._refuse_unsigned(",
+                      self._bodies()["approve_pending_vop"])
+
+    def test_the_debit_says_why_it_has_no_unsigned_guard(self):
+        """The guard reads a transfer's shape -- collective, dated, instant --
+        and a debit is none of those. Silence here would read as an
+        oversight; the comment says it is a gap."""
+        body = self._bodies()["submit_sepa_debit"]
+        self.assertNotIn("self._refuse_unsigned(", body)
+        self.assertIn("does not have one yet", body)
