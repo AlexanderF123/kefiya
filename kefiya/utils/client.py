@@ -1527,10 +1527,15 @@ def get_pending_vop(kefiya_login):
         result = json.loads(result) if result else None
     except Exception:
         pass
+    try:
+        payee = json.loads(login.vop_payee or "{}") or {}
+    except Exception:
+        payee = {}
     return {
         "status": "pending",
         "reference": login.vop_reference,
         "vop_result": result,
+        "payee": payee,
     }
 
 

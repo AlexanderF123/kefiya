@@ -316,7 +316,26 @@ Connection could not be rebuilt,Verbindung ließ sich nicht wiederherstellen
 Before sending again, look in your online banking: if the transfer is there after all, cancel this order instead of repeating it.","Die Bankverbindung für {0} ließ sich aus dem gespeicherten Zustand nicht wiederherstellen. Nach allem, was diese App erkennen kann, wurde der Auftrag NICHT gesendet. Der gespeicherte Zustand wurde verworfen, der nächste Versuch baut die Verbindung neu auf.
 
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
-"The bank checked the payee for this order and will not release it until that check is confirmed. The order was NOT sent. Confirming it is a step this app cannot yet take: the FinTS library it uses recognises a payee check that failed, but not one that succeeded and still asks to be confirmed. Send this transfer from your online banking for now.","Die Bank hat den Empfänger für diesen Auftrag geprüft und gibt ihn erst frei, wenn diese Prüfung bestätigt ist. Der Auftrag wurde NICHT gesendet. Diese Bestätigung kann die App noch nicht leisten: die verwendete FinTS-Bibliothek erkennt eine fehlgeschlagene Empfängerprüfung, aber keine erfolgreiche, die trotzdem bestätigt werden will. Bitte diese Überweisung vorerst im Online-Banking auslösen."
 {0}: the release did not arrive in time. Confirm it in your banking app and fetch this access again -- the challenge is still open.,{0}: Die Freigabe ist nicht rechtzeitig eingetroffen. Bitte in der Banking-App bestätigen und diesen Zugang erneut abrufen — die Anfrage ist noch offen.
 Release received — carrying on.,Freigabe eingegangen — es geht weiter.
 the bank refuses this query for this account,die Bank lehnt diese Abfrage für dieses Konto ab
+The bank checked the payee for this order and will not release it until that check is confirmed. The order was NOT sent. Normally this app confirms the check itself and asks you only when the bank could not confirm the name. That this did not happen means its payee confirmation is not working against the installed FinTS library. Send this transfer from your online banking and report this message.,"Die Bank hat den Empfänger für diesen Auftrag geprüft und gibt ihn erst frei, wenn diese Prüfung bestätigt ist. Der Auftrag wurde NICHT gesendet. Normalerweise bestätigt die App die Prüfung selbst und fragt nur nach, wenn die Bank den Namen nicht bestätigen konnte. Dass das hier nicht geschehen ist, heißt: Die Empfängerbestätigung arbeitet mit der installierten FinTS-Bibliothek nicht zusammen. Bitte diese Überweisung im Online-Banking auslösen und diese Meldung melden."
+Payee on the order,Empfänger laut Auftrag
+Name at the Bank,Name bei der Bank
+Bank's Answer,Antwort der Bank
+"Once you release it, this payee is remembered: a later payment to the same name and the same IBAN goes through without asking again.",Mit der Freigabe wird dieser Empfänger gemerkt: Eine spätere Zahlung an denselben Namen und dieselbe IBAN geht ohne erneute Rückfrage durch.
+Kefiya Accepted Payee,Kefiya Bestätigter Empfänger
+Payee Name,Empfängername
+Match Key,Vergleichsschlüssel
+Who decided,Wer entschieden hat
+Approved By,Freigegeben von
+Approved On,Freigegeben am
+Bank Access,Bankzugang
+VoP Payee,VoP-Empfänger
+"The payee name as it stood on the order somebody approved. A different spelling is a different payee here, on purpose.","Der Empfängername, wie er auf dem freigegebenen Auftrag stand. Eine andere Schreibweise gilt hier bewusst als anderer Empfänger."
+The account the money went to.,"Das Konto, auf das das Geld ging."
+"What the bank answered when it checked: RVMC close match, RVNM no match, RVNA could not check.","Was die Bank bei der Prüfung geantwortet hat: RVMC fast gleich, RVNM keine Übereinstimmung, RVNA nicht prüfbar."
+"The name the bank holds for that IBAN, where it named one.","Der Name, den die Bank zu dieser IBAN führt, sofern sie einen genannt hat."
+"IBAN and payee name, normalised. This is what a later order is looked up by; it is unique, so one decision is stored once.","IBAN und Empfängername, vereinheitlicht. Danach wird ein späterer Auftrag gesucht; er ist eindeutig, damit eine Entscheidung genau einmal gespeichert ist."
+The bank access the order went out through.,"Der Bankzugang, über den der Auftrag hinausging."
+"Who the parked order pays, and what the bank answered about them, as JSON. Read back when the reviewer releases the order, so their decision is remembered against the payee the bank was actually asked about.","Wen der zurückgestellte Auftrag bezahlt und was die Bank dazu geantwortet hat, als JSON. Wird bei der Freigabe wieder gelesen, damit die Entscheidung zu genau dem Empfänger gespeichert wird, nach dem die Bank gefragt wurde."

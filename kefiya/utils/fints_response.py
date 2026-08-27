@@ -142,22 +142,26 @@ KNOWN_CODES = {
     # It was a guess -- that the cached bank parameters were too old to
     # advertise VoP -- and reading them settled it: HIVPPS is present, it lists
     # HKIPZ and HKCCS among the orders it covers, and the state was hours old.
-    # The advice sent the user in a circle.
     #
-    # What actually happens: python-fints does send HKVPP and the bank does
+    # What actually happens: python-fints sends HKVPP and the bank does
     # check, but it then asks for an explicit confirmation, and the library
     # only turns a VoP answer into something this app can act on when the
     # check came back not-applicable, no-match or close-match. A bank that
-    # checked successfully and still wants the confirmation falls through --
+    # checked successfully and still wants the confirmation fell through --
     # its own docstring calls that case "seems related to something not
-    # implemented right now" -- and the order stops here.
+    # implemented right now" -- and the order stopped here.
+    #
+    # fints_vop adds that branch, so in the ordinary case this code no longer
+    # reaches a user at all: the confirmation is given, or a reviewer is
+    # asked. Seeing it means the branch is not active -- another library
+    # release, or a shape that moved -- which is what the advice now says.
     "3945": (
         "The bank checked the payee for this order and will not release it"
-        " until that check is confirmed. The order was NOT sent. Confirming it"
-        " is a step this app cannot yet take: the FinTS library it uses"
-        " recognises a payee check that failed, but not one that succeeded and"
-        " still asks to be confirmed. Send this transfer from your online"
-        " banking for now."
+        " until that check is confirmed. The order was NOT sent. Normally this"
+        " app confirms the check itself and asks you only when the bank could"
+        " not confirm the name. That this did not happen means its payee"
+        " confirmation is not working against the installed FinTS library."
+        " Send this transfer from your online banking and report this message."
     ),
     "9010": (
         "The bank could not process the message at all. Nothing was sent."

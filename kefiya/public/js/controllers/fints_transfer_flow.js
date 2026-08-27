@@ -20,7 +20,7 @@ function kefiya_handle_transfer_response(frm, msg) {
     } else if (msg.status === "tan_required") {
         kefiya_prompt_transfer_tan(frm, msg.docname);
     } else if (msg.status === "vop_mismatch") {
-        kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
+        kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result, msg.payee);
     } else {
         frappe.msgprint({
             title: __("Transfer failed"),
@@ -37,7 +37,26 @@ function kefiya_handle_transfer_response(frm, msg) {
  * against the underlying document -- a VoP mismatch is exactly what a payment
  * diversion (redirected invoice) looks like, so it is never waved through.
  */
-function kefiya_prompt_vop_release(frm, kefiya_login, vop_result) {
+function kefiya_vop_payee_block(payee) {
+    /* Who the order pays, in the three lines that decide the question.
+     *
+     * The raw answer is dumped below this as well, because it is what the
+     * bank actually said -- but nobody compares an invoice against a parsed
+     * segment, and this dialog exists to be read.
+     */
+    if (!payee || !payee.name) return "";
+    const row = (label, value) =>
+        "<tr><td style='padding:2px 12px 2px 0;color:#6c7680'>"
+        + frappe.utils.escape_html(label) + "</td><td><b>"
+        + frappe.utils.escape_html(String(value)) + "</b></td></tr>";
+    let rows = row(__("Payee on the order"), payee.name);
+    if (payee.iban) rows += row(__("IBAN"), payee.iban);
+    if (payee.bank_name) rows += row(__("Name at the Bank"), payee.bank_name);
+    if (payee.result) rows += row(__("Bank's Answer"), payee.result);
+    return "<table style='margin:10px 0'>" + rows + "</table>";
+}
+
+function kefiya_prompt_vop_release(frm, kefiya_login, vop_result, payee) {
     let details = "";
     if (vop_result && typeof vop_result === "object") {
         const rows = Object.keys(vop_result).map((key) =>
@@ -63,6 +82,12 @@ function kefiya_prompt_vop_release(frm, kefiya_login, vop_result) {
                     + __("The bank could not confirm that the payee name matches the IBAN. <b>No money has been sent.</b>")
                     + "</div>"
                     + __("Compare the recipient against the invoice before releasing. If the account details were changed recently or came in by email, treat this as a possible fraud attempt and clarify by phone using a known number.")
+                    + kefiya_vop_payee_block(payee)
+                    + ((payee && payee.name && payee.iban)
+                        ? "<div class='text-muted' style='margin-bottom:8px'>"
+                          + __("Once you release it, this payee is remembered: a later payment to the same name and the same IBAN goes through without asking again.")
+                          + "</div>"
+                        : "")
                     + details
             },
             {

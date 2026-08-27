@@ -30,7 +30,10 @@ from .import_bank_transaction import (
 )
 from .auto_reconcile import run_after_import
 from .assign_payment_controller import AssignmentController
+from kefiya.utils import accepted_payee
 from kefiya.utils import fints_vop
+from kefiya.utils import pain_payee
+from kefiya.utils import vop_rule
 from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
 from kefiya.utils.fints_masking import mask_iban
 
@@ -1727,7 +1730,64 @@ class FinTSController:
                 return {"vop": "mismatch"}
         return None
 
-    def _persist_vop_state(self, response, vop_result, payment_reference=None):
+    @staticmethod
+    def _payee_note(payee, vop_result):
+        """The payee and the bank's answer about them, as stored JSON.
+
+        Small on purpose. It exists so approve_pending_vop can file the
+        reviewer's decision against the right payee in a later request, and
+        so the dialog can show them who they are releasing.
+        """
+        name, iban = payee if payee else ("", "")
+        try:
+            return json.dumps({
+                "name": name,
+                "iban": iban,
+                "result": vop_rule.result_from(vop_result),
+                "bank_name": vop_rule.bank_name_from(vop_result),
+            })[:1000]
+        except Exception:
+            return ""
+
+    def _parked_payee(self):
+        """Read that note back. {} where there is none or it is unreadable."""
+        try:
+            return json.loads(self.kefiya_login.vop_payee or "{}") or {}
+        except Exception:
+            return {}
+
+    def _release_vop_without_asking(self, response, payee):
+        """Confirm the payee check ourselves where no human is needed.
+
+        Two cases, and only two: the bank confirmed the match, or a person
+        already approved this exact payee at this exact IBAN. The rule is in
+        vop_rule and says why. Anything else answers None and the order is
+        parked for a reviewer, exactly as before.
+
+        A collective order lands here too, and always answers None: the bank
+        reports a batch in a payment status report rather than in the single
+        result this reads, so there is no per-payment answer to go on. Somebody
+        looks at it -- which is where a batch stood before this existed.
+
+        :return: the bank's next response, or None where a human must look
+        """
+        vop_result = getattr(response, "vop_result", None)
+        result = vop_rule.result_from(vop_result)
+        remembered = bool(payee) and accepted_payee.was_accepted(
+            payee[1], payee[0])
+        if vop_rule.needs_a_human(result, remembered):
+            return None
+
+        # Said out loud, because this is money leaving without anybody being
+        # asked: the reason has to be in the log next to the order.
+        frappe.logger("kefiya").info(
+            "VoP confirmed without asking: login=%s result=%s remembered=%s",
+            self.kefiya_login.name, result or "?", remembered,
+        )
+        return self.fints_connection.approve_vop_response(response)
+
+    def _persist_vop_state(self, response, vop_result, payment_reference=None,
+                           payee=None):
         """Park a Verification-of-Payee challenge for later human release.
 
         NeedVOPResponse is a NeedRetryResponse, so it survives a round trip
@@ -1739,6 +1799,10 @@ class FinTSController:
         self.kefiya_login.stored_vop_dialog_blob = \
             self.fints_connection.pause_dialog()
         self.kefiya_login.vop_reference = payment_reference
+        # Who this order pays, kept beside the challenge: the reviewer's
+        # decision is remembered when they release it, and by then the pain
+        # message this was read out of is long gone.
+        self.kefiya_login.vop_payee = self._payee_note(payee, vop_result)
         try:
             self.kefiya_login.vop_result = json.dumps(vop_result)[:2000]
         except Exception:
@@ -1766,6 +1830,10 @@ class FinTSController:
 
         self._refuse_inside_fetch_session()
 
+        # Read before the state is cleared: this is the payee the reviewer is
+        # about to approve, and clear_vop_state drops it.
+        parked = self._parked_payee()
+
         with self.fints_connection.resume_dialog(dialog_blob):
             challenge = NeedRetryResponse.from_data(blob)
             response = self.fints_connection.approve_vop_response(challenge)
@@ -1775,6 +1843,17 @@ class FinTSController:
             # stale dialog.
             self.kefiya_login.clear_vop_state()
             self.kefiya_login.save()
+
+            # The reviewer has decided. Written down so the next order to the
+            # same payee at the same IBAN goes through without asking them the
+            # same question again -- which is all this remembers: their answer,
+            # for that pair, and nothing wider.
+            if parked.get("iban") and parked.get("name"):
+                accepted_payee.remember(
+                    parked["iban"], parked["name"],
+                    vop_result=parked.get("result"),
+                    bank_name=parked.get("bank_name"),
+                    kefiya_login=self.kefiya_login.name)
 
             if self.is_tan_required_and_requested(response):
                 return {
@@ -1879,18 +1958,35 @@ class FinTSController:
                     title=_("Connection could not be rebuilt"))
             vop = self._vop_mismatch(response)
             if vop is not None:
-                # Verification of Payee mismatch: the bank could not confirm the
-                # payee name matches the IBAN. NEVER auto-approve this -- money is
-                # not sent; a Sachbearbeiter must review/correct the payee name.
-                # Park the challenge so a reviewer can release it deliberately
-                # via approve_pending_vop(); without this the transfer is a dead
-                # end and has to be started over.
-                self._persist_vop_state(response, vop, payment_reference)
-                return {
-                    "status": "vop_mismatch",
-                    "docname": self.kefiya_login.name,
-                    "vop_result": vop,
-                }
+                # The bank wants the payee check confirmed before it releases
+                # the order. Two answers do not need a person -- the bank
+                # confirmed the match, or somebody already approved this exact
+                # payee at this exact IBAN -- and _release_vop_without_asking
+                # is where that is decided; vop_rule says why.
+                #
+                # Everything else is parked. A payee the bank could not
+                # confirm is exactly the signal a diverted-invoice fraud
+                # produces, so money does not move until somebody has compared
+                # it against the document, deliberately, via
+                # approve_pending_vop().
+                payee = pain_payee.the_only_payee(pain_xml)
+                released = self._release_vop_without_asking(response, payee)
+                if released is None:
+                    self._persist_vop_state(response, vop, payment_reference,
+                                            payee=payee)
+                    return {
+                        "status": "vop_mismatch",
+                        "docname": self.kefiya_login.name,
+                        "vop_result": vop,
+                        # Readable, for the person who has to decide: who the
+                        # order pays, what the bank answered, and the name the
+                        # bank holds where it named one. vop_result above is
+                        # the raw segment and stays for the log.
+                        "payee": self._parked_payee(),
+                    }
+                # Confirmed. From here the order takes the ordinary path: the
+                # bank asks for its TAN, or says why it will not.
+                response = released
             if self.is_tan_required_and_requested(response):
                 return {
                     "status": "tan_required",
