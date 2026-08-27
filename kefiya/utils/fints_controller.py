@@ -43,6 +43,40 @@ from kefiya.utils.fints_masking import mask_iban
 #: replay used to end every attempt to use the access.
 PARKED_CHALLENGE_MAX_AGE_HOURS = 24
 
+#: Nobody watches a browser for longer than this, whatever the bank allows.
+DECOUPLED_WAIT_CEILING_SECONDS = 300
+
+
+def decoupled_wait(parameters, fallback_pause, fallback_total):
+    """How long to wait for a release, and how often to ask.
+
+    The bank says both in its TAN parameters: how many times it will answer a
+    status query (decoupled_max_poll_number) and how long to leave between two
+    (wait_before_next_poll). Ignoring them and waiting a flat two minutes meant
+    stopping at 40 % of what this bank actually allows -- 150 polls, two
+    seconds apart, is five minutes.
+
+    Frappe-free and its own function: what it decides is how long somebody
+    stands in front of a spinner, and that should be readable without a bank.
+
+    :return: (seconds between polls, seconds in total)
+    """
+    pause = fallback_pause
+    total = fallback_total
+    try:
+        said_pause = float(getattr(parameters, "wait_before_next_poll", 0) or 0)
+        if said_pause > 0:
+            pause = max(1.0, min(said_pause, 10.0))
+    except Exception:
+        pass
+    try:
+        polls = int(getattr(parameters, "decoupled_max_poll_number", 0) or 0)
+        if polls > 0:
+            total = max(fallback_total, polls * pause)
+    except Exception:
+        pass
+    return pause, min(total, DECOUPLED_WAIT_CEILING_SECONDS)
+
 
 class InitFailedException(Exception):
     pass
@@ -861,38 +895,51 @@ class FinTSController:
 
         return True
 
-    def ask_for_tan(self, response, *, decoupled=None, possible_tan_modes=None, possible_tan_mediums=None):
-        if response:
-            self.__persist_fints_state(response)
-            # A parked challenge is a fact about the outside world: the bank is
-            # now holding a dialog open and waiting. Whether that fact survives
-            # must not depend on the rest of this request finishing -- and it
-            # did. Everything below writes to the transaction and is committed
-            # only when the request returns cleanly, so a bank that stops
-            # answering afterwards (python-fints sends without a timeout, so
-            # that means the worker simply stops) took the parked challenge
-            # down with it. The user then confirmed in the app, the next
-            # attempt found no stored state, opened a fresh dialog and asked
-            # for a fresh release -- the same three steps over and over, with
-            # nothing in the Error Log to show for it.
-            #
-            # Committing here costs a partially finished fetch nothing: the
-            # only thing in flight at this point is the empty draft import,
-            # which the caller removes on this very path.
-            try:
-                frappe.db.commit()
-            except Exception:
-                frappe.log_error(
-                    title="Kefiya: committing the parked TAN challenge failed",
-                    message=frappe.get_traceback(),
-                    reference_doctype="Kefiya Login",
-                    reference_name=self.kefiya_login.name,
-                )
+    def _park_tan_challenge(self, response):
+        """Store the challenge so a later request can finish the release.
 
-        # What the bank actually asks. comdirect sends a photoTAN -- a coloured
-        # mosaic the phone app reads -- and a Sparkasse sends chipTAN-QR the
-        # same way. Without it the prompt asks for a TAN and shows nothing to
-        # scan, which is not a question anybody can answer.
+        Pauses the dialog -- that is what get_data() and pause_dialog() do --
+        so nothing may be sent on this connection afterwards. Which is why the
+        decoupled path publishes its prompt first, waits on the live dialog,
+        and only parks when it has run out of patience.
+
+        A parked challenge is a fact about the outside world: the bank is now
+        holding a dialog open and waiting. Whether that fact survives must not
+        depend on the rest of this request finishing -- and it did. Everything
+        here writes to the transaction and is committed only when the request
+        returns cleanly, so a bank that stops answering afterwards
+        (python-fints sends without a timeout, so that means the worker simply
+        stops) took the parked challenge down with it. The user then confirmed
+        in the app, the next attempt found no stored state, opened a fresh
+        dialog and asked for a fresh release -- the same three steps over and
+        over, with nothing in the Error Log to show for it.
+
+        Committing here costs a partially finished fetch nothing: the only
+        thing in flight at this point is the empty draft import, which the
+        caller removes on this very path.
+        """
+        if not response:
+            return
+        self.__persist_fints_state(response)
+        try:
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(
+                title="Kefiya: committing the parked TAN challenge failed",
+                message=frappe.get_traceback(),
+                reference_doctype="Kefiya Login",
+                reference_name=self.kefiya_login.name,
+            )
+
+    def _publish_tan_prompt(self, response, *, decoupled=None,
+                            possible_tan_modes=None, possible_tan_mediums=None):
+        """Put the question in front of the user. Touches no dialog.
+
+        What the bank actually asks. comdirect sends a photoTAN -- a coloured
+        mosaic the phone app reads -- and a Sparkasse sends chipTAN-QR the same
+        way. Without it the prompt asks for a TAN and shows nothing to scan,
+        which is not a question anybody can answer.
+        """
         challenge = tan_challenge.challenge_of(response)
 
         if response.decoupled if decoupled is None else decoupled:
@@ -905,6 +952,14 @@ class FinTSController:
                 possible_tan_modes=possible_tan_modes,
                 possible_tan_mediums=possible_tan_mediums,
                 challenge=challenge)
+
+    def ask_for_tan(self, response, *, decoupled=None, possible_tan_modes=None, possible_tan_mediums=None):
+        """Park the challenge and ask. The two halves, in that order."""
+        self._park_tan_challenge(response)
+        self._publish_tan_prompt(
+            response, decoupled=decoupled,
+            possible_tan_modes=possible_tan_modes,
+            possible_tan_mediums=possible_tan_mediums)
 
     def __fetch_fints_accounts(self) -> bool:
         """Fetch FinTS Accounts.
@@ -1106,13 +1161,27 @@ class FinTSController:
         # Ask, then wait. A decoupled release is given in the banking app and
         # the bank will tell us when it lands -- so the run does not have to
         # end here and make the user start it again. See _await_release.
+        #
+        # The prompt first, the parking last, and that order is the whole
+        # point. Parking pauses the dialog, and python-fints refuses to send
+        # on a paused one::
+        #
+        #     FinTSDialogStateError: Cannot send() on a paused dialog
+        #
+        # This method used to park before it waited, so the very first poll
+        # raised, _await_release answered None, and the user was told the
+        # release had not arrived in time -- after waiting no time at all.
+        # It never once worked. Three Volksbank accounts went unfetched from
+        # May to August because of it, and every attempt asked for another
+        # release.
         if decoupled:
-            self.ask_for_tan(response, decoupled=True)
+            self._publish_tan_prompt(response, decoupled=True)
             released = self._await_release(response)
             if released is not None:
                 return released
-            # Not released in the time we were willing to wait. The challenge
-            # stays parked exactly as before, and the prompt is already up.
+            # Out of patience. NOW park it, so the release still finds
+            # something to unlock when it arrives; the prompt is already up.
+            self._park_tan_challenge(response)
             raise TanInteractionRequired(_(
                 "{0}: the release did not arrive in time. Confirm it in your"
                 " banking app and fetch this access again -- the challenge is"
@@ -1192,16 +1261,16 @@ class FinTSController:
         """
         import time
 
-        deadline = time.monotonic() + self.DECOUPLED_MAX_WAIT_SECONDS
-        # The bank's own cap, where the parameters can be read. Its count is a
-        # maximum, not a promise -- the deadline above still decides.
-        limit = 1 + int(self.DECOUPLED_MAX_WAIT_SECONDS
-                        / self.DECOUPLED_POLL_SECONDS)
+        pause, total = decoupled_wait(
+            self._decoupled_parameters(),
+            self.DECOUPLED_POLL_SECONDS, self.DECOUPLED_MAX_WAIT_SECONDS)
+        deadline = time.monotonic() + total
+        limit = 1 + int(total / pause)
 
         for _attempt in range(limit):
             if time.monotonic() >= deadline:
                 return None
-            time.sleep(self.DECOUPLED_POLL_SECONDS)
+            time.sleep(pause)
             try:
                 answer = self.fints_connection.send_tan(challenge, "")
             except Exception:
@@ -1224,6 +1293,18 @@ class FinTSController:
             challenge = answer
 
         return None
+
+    def _decoupled_parameters(self):
+        """The bank's own numbers for a decoupled release, or None.
+
+        Never raises: they live behind two lookups into a beta library, and a
+        fetch must not fail because they could not be read.
+        """
+        try:
+            mechanisms = self.fints_connection.get_tan_mechanisms()
+            return mechanisms[self.fints_connection.get_current_tan_mechanism()]
+        except Exception:
+            return None
 
     def _tell_the_browser_it_can_stop_waiting(self):
         """Close the "confirm in your app" box, now that it has been.

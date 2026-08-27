@@ -200,6 +200,42 @@ def client_class():
         return parts["base"]
 
 
+def _log_still_checking(hivpp):
+    """The bank never finished checking. Said, so it is not guessed at."""
+    try:
+        import frappe
+
+        frappe.log_error(
+            title="Kefiya: the bank did not finish the payee check in time",
+            message=(
+                "It kept answering with a polling id and no result for"
+                " {0} seconds, so there was nothing to confirm and nothing"
+                " worth parking -- an approval needs the VoP-ID this answer"
+                " does not carry. The order was NOT sent.\n\npolling_id={1}"
+                " wait_for_seconds={2}"
+            ).format(POLL_LIMIT_SECONDS,
+                     getattr(hivpp, "polling_id", None),
+                     getattr(hivpp, "wait_for_seconds", None)))
+    except Exception:
+        pass
+
+
+def _log_poll_failure():
+    """Why the follow-up stopped, in the Error Log. Never raises."""
+    try:
+        import frappe
+
+        frappe.log_error(
+            title="Kefiya: asking the bank for the payee result failed",
+            message=(
+                "The payee check was still running and the follow-up query"
+                " (HKVPP with the polling id) did not get through. The order"
+                " was NOT sent.\n\n{0}"
+            ).format(frappe.get_traceback()))
+    except Exception:
+        pass
+
+
 def _note(why):
     """Say once, in the Error Log, that transfers lose the added branch."""
     import frappe
@@ -250,7 +286,11 @@ def _build(parts):
                     nxt = again.find_segment_first(HIVPP1)
                 except Exception:
                     # The bank would not answer the follow-up. Whatever the
-                    # reason, this order is not going out on a guess.
+                    # reason, this order is not going out on a guess -- but it
+                    # is said out loud. This used to break silently, and the
+                    # order then ended with "the payee confirmation is not
+                    # working", which is a cause nobody had established.
+                    _log_poll_failure()
                     break
                 if nxt is None:
                     break
@@ -292,6 +332,8 @@ def _build(parts):
                         # could not go through, so the order falls through to
                         # the bank's own refusal instead of to a button that
                         # cannot work.
+                        if still_checking(hivpp):
+                            _log_still_checking(hivpp)
                         if not still_checking(hivpp) and (
                                 result_from(hivpp) in ('RVNA', 'RVNM', 'RVMC')
                                 or demands_confirmation(response, tan_seg)):
