@@ -237,82 +237,138 @@ class TestADecoupledReleaseOnTheTransferPath(unittest.TestCase):
 
     _await_release was reachable from exactly one place -- the statement
     fetch. A transfer that met a decoupled challenge parked it and answered
-    "tan_required", and the browser then opened a box with a MANDATORY TAN
-    field for a procedure that produces no code. Nothing polled afterwards,
-    so when the banking app reported an error there was no request in flight
-    to report it to: the user saw nothing at all.
+    "tan_required", and nothing polled afterwards: when the banking app
+    reported an error there was no request in flight to report it to, and the
+    user saw nothing at all.
     """
 
-    def test_the_transfer_waits_for_the_release(self):
+    def _controller(self):
+        from kefiya.utils.fints_controller import FinTSController
+        return FinTSController
+
+    def test_every_money_path_settles_its_tan_the_same_way(self):
+        """Three call sites, one shape. There were three different answers to
+        one question in this file, and the debit still had the old one."""
         import inspect
 
-        from kefiya.utils.fints_controller import FinTSController
-        source = inspect.getsource(FinTSController.submit_sepa_transfer)
-        self.assertIn("self._settle_decoupled(response)", source)
-        self.assertLess(source.index("self._settle_decoupled(response)"),
-                        source.index("is_tan_required_and_requested(response)"))
+        source = inspect.getsource(self._controller())
+        self.assertEqual(source.count("response, pending = self._settle_tan(response)"), 3)
+        self.assertEqual(source.count('"status": "tan_required"'), 1,
+                         "The result is built in one place, not at each site.")
 
-    def test_the_release_after_a_payee_approval_waits_too(self):
+    def test_it_answers_a_pair_like_the_payee_check_does(self):
+        """The same shape _confirm_or_park_vop uses for the same kind of
+        question. It was a single channel where None meant two different
+        things and non-None meant two others."""
         import inspect
 
-        from kefiya.utils.fints_controller import FinTSController
-        self.assertIn("self._settle_decoupled(response)",
-                      inspect.getsource(FinTSController.approve_pending_vop))
+        body = inspect.getsource(self._controller()._settle_tan)
+        self.assertIn("return response, None", body)
+        self.assertIn("return released, None", body)
+        self.assertIn("return None, {", body)
 
-    def test_one_place_knows_how_a_decoupled_release_is_done(self):
-        """Prompt, wait on the live dialog, park only when it runs out --
-        written once, used by the fetch and by both money paths."""
+    def test_a_decoupled_challenge_is_waited_out_before_it_is_parked(self):
         import inspect
 
-        from kefiya.utils.fints_controller import FinTSController
-        body = inspect.getsource(FinTSController._settle_decoupled)
+        body = inspect.getsource(self._controller()._settle_tan)
         self.assertIn("self._publish_tan_prompt(response, decoupled=True)", body)
-        self.assertIn("self._await_release(response)", body)
-        self.assertIn("self._park_tan_challenge(response)", body)
         self.assertLess(body.index("self._await_release(response)"),
                         body.index("self._park_tan_challenge(response)"))
 
     def test_an_ordinary_tan_is_left_alone(self):
-        """Only a decoupled challenge is waited out. A typed TAN is answered
+        """Only a decoupled challenge is waited out; a typed TAN is answered
         by a person in a later request, as it always was."""
         import inspect
 
-        from kefiya.utils.fints_controller import FinTSController
-        body = inspect.getsource(FinTSController._settle_decoupled)
+        body = inspect.getsource(self._controller()._settle_tan)
         self.assertIn('getattr(response, "decoupled", False)', body)
-        self.assertIn("return None", body)
-
-    def test_the_browser_is_told_which_kind_it_is(self):
-        """Without this the box cannot know whether to offer a field."""
-        import inspect
-
-        from kefiya.utils.fints_controller import FinTSController
-        self.assertIn('"decoupled": bool(getattr(response, "decoupled", False))',
-                      inspect.getsource(FinTSController.submit_sepa_transfer))
+        self.assertIn("self.ask_for_tan(response)", body)
 
 
 class TestTheBankIsAskedNotAssumed(unittest.TestCase):
-    """send_transfer_tan returned {"status": "submitted"} whenever building
-    the controller did not raise -- it never read the answer -- while its own
-    docstring promised that a money movement is never reported on a guess."""
+    """Both endpoints that answer a parked challenge built a controller and
+    called it success if that did not raise. Neither looked at the answer, so
+    a refused order got the same green "authorised and submitted" as an
+    accepted one."""
 
-    def test_the_answer_is_read(self):
+    def test_the_answer_is_read_where_the_tan_is_answered(self):
+        """Once, in the controller -- so send_transfer_tan and
+        resolve_tan_interaction both inherit it and neither has to reach into
+        the connection for it."""
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        resume = inspect.getsource(
+            FinTSController._resume_and_answer_the_parked_tan)
+        self.assertIn("self._refuse_a_refused_order()", resume)
+
+        check = inspect.getsource(FinTSController._refuse_a_refused_order)
+        self.assertIn("fints_response.verdict_of(", check)
+        self.assertIn("fints_response.refused(verdict)", check)
+        self.assertIn("frappe.throw", check)
+        self.assertIn("NOT", check)
+
+    def test_the_api_does_not_reach_into_the_controller(self):
+        """It read controller.fints_connection.init_tan_response through two
+        defensive getattrs -- the API layer knowing the controller's
+        internals, with the defaults hiding an invariant nobody stated."""
         import inspect
 
         from kefiya.utils import client
         source = inspect.getsource(client.send_transfer_tan)
-        self.assertIn("init_tan_response", source)
-        self.assertIn("fints_response.verdict_of(answer)", source)
+        self.assertNotIn("init_tan_response", source)
+        self.assertNotIn("fints_connection", source)
 
-    def test_a_refusal_is_not_a_submission(self):
+
+class TestTheReleaseBoxAnswersTheRightDocument(unittest.TestCase):
+    """The box resolved with the form it was shown on. That is the login only
+    on the Kefiya Login screen; a transfer passes its own docname as the UI
+    scope, so the box answered against a KEF-TRF-... name -- and the account
+    context, looked up the same way, came back empty, which is why it named
+    no bank and no account on the one screen where money moves."""
+
+    def test_the_payload_carries_the_login(self):
         import inspect
 
-        from kefiya.utils import client
-        source = inspect.getsource(client.send_transfer_tan)
-        self.assertIn("fints_response.refused(verdict)", source)
-        self.assertLess(source.index("fints_response.refused(verdict)"),
-                        source.index('return {"status": "submitted"'))
-        refusal = source[source.index("fints_response.refused(verdict)"):
-                         source.index('return {"status": "submitted"')]
-        self.assertIn('"status": "error"', refusal)
-        self.assertIn("NOT sent", refusal)
+        from kefiya.utils.fints_interactive import FinTSInteractive
+        source = inspect.getsource(FinTSInteractive.request_tan_prompt)
+        self.assertIn('"fints_login": self.login_name()', source)
+
+    def test_the_context_is_looked_up_by_the_login(self):
+        import inspect
+
+        from kefiya.utils.fints_interactive import FinTSInteractive
+        source = inspect.getsource(FinTSInteractive)
+        self.assertIn('"Kefiya Login", self.login_name()', source)
+        self.assertNotIn('"Kefiya Login", self.docname', source)
+
+    def test_the_controller_says_which_login_it_is(self):
+        import inspect
+
+        from kefiya.utils.fints_controller import FinTSController
+        self.assertIn("self.interactive.fints_login = self.kefiya_login.name",
+                      inspect.getsource(FinTSController.__init__))
+
+    def test_both_boxes_resolve_with_it(self):
+        import os
+
+        base = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        for name in ("fints_interactive.js", "tan_prompt.js"):
+            with open(os.path.join(base, "public", "js", "controllers", name),
+                      encoding="utf-8") as handle:
+                self.assertIn("data.fints_login ||", handle.read(), name)
+
+    def test_the_transfer_screen_opens_no_second_box(self):
+        """Two boxes for one question, and only one of them could ever be
+        right: the other had a mandatory TAN field for procedures that
+        produce no code."""
+        import os
+
+        base = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        with open(os.path.join(base, "public", "js", "controllers",
+                               "fints_transfer_flow.js"), encoding="utf-8") as h:
+            source = h.read()
+        self.assertNotIn("frappe.ui.Dialog", source)
+        self.assertNotIn("send_transfer_tan", source)

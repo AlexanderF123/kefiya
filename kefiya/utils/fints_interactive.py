@@ -27,11 +27,29 @@ class FinTSInteractive:
         else:
             self.docname = configuration["docname"]
             self.enabled = configuration["enabled"]
+        # Which Kefiya Login this is about, as opposed to which form the user
+        # is looking at. They are the same thing on the Kefiya Login form and
+        # nowhere else: a transfer passes its own docname as the UI scope, so
+        # everything that read the login out of `docname` was reading a
+        # KEF-TRF-... name. The account context came back empty (the box named
+        # no bank and no account, on the one screen where money moves), and a
+        # box that tried to answer resolved against a document that is not a
+        # login at all.
+        self.fints_login = None
         self.progress = 0
         # Resolved on the first prompt, not here: a controller that never asks
         # for a TAN -- the scheduled run, most of the time -- should not pay a
         # lookup for a dialog it will not open.
         self._account_context_cache = None
+
+    def login_name(self):
+        """The Kefiya Login this run belongs to.
+
+        Falls back to the UI scope, which is the same name on the Kefiya Login
+        form -- so a caller that never sets the login behaves exactly as
+        before.
+        """
+        return self.fints_login or self.docname
 
     def set_interactive_mode(self, enable):
         """Turn on/off interactive mode.
@@ -117,7 +135,7 @@ class FinTSInteractive:
         context = {}
         try:
             bank_account, iban = frappe.db.get_value(
-                "Kefiya Login", self.docname,
+                "Kefiya Login", self.login_name(),
                 ["bank_account", "account_iban"]) or (None, None)
 
             bank = account_name = None
@@ -129,7 +147,7 @@ class FinTSInteractive:
                 # point at an account record that carries none.
                 iban = iban or account_iban
 
-            parts = [p for p in (bank, account_name or self.docname) if p]
+            parts = [p for p in (bank, account_name or self.login_name()) if p]
             context = {
                 "bank": bank,
                 "account_name": account_name,
@@ -170,6 +188,11 @@ class FinTSInteractive:
         if self.enabled:
             params = {
                         "docname": self.docname,
+                        # The login to answer against, which is NOT the form
+                        # the user is looking at whenever money is moving.
+                        # Every box resolves with this; without it a transfer's
+                        # box answered against a KEF-TRF-... name.
+                        "fints_login": self.login_name(),
                         "possible_tan_modes": possible_tan_modes,
                         "possible_tan_mediums": possible_tan_mediums,
                     }

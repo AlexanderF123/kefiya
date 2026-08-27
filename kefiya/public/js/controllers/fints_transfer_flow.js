@@ -2,12 +2,16 @@
 // For license information, please see license.txt
 
 /**
- * Shared outgoing-transfer flow: bank response handling, Verification-of-Payee
- * release and the TAN prompt.
+ * Shared outgoing-transfer flow: what to do with the bank's answer.
  *
  * Used by both entry points -- a transfer raised from a Payment Request and a
  * free-entry Kefiya Transfer -- so the money-moving dialogs stay identical
  * rather than drifting apart in two copies.
+ *
+ * It opens no TAN box. The server publishes one before it answers, and that
+ * box shows the bank's challenge picture and closes itself when a decoupled
+ * release lands. A second one here was a mandatory TAN field over the top of
+ * it, for procedures that produce no code to type.
  */
 function kefiya_handle_transfer_response(frm, msg) {
     if (!msg) {
@@ -18,7 +22,17 @@ function kefiya_handle_transfer_response(frm, msg) {
         frappe.show_alert({ message: __("Transfer submitted."), indicator: "green" });
         frm.reload_doc();
     } else if (msg.status === "tan_required") {
-        kefiya_prompt_transfer_tan(frm, msg.docname, msg.decoupled);
+        // Nothing to open. The server published the release box before it
+        // answered -- the same box the collective fetch uses, which shows the
+        // bank's own challenge picture and closes itself when the release
+        // lands. This file used to build a SECOND box on top of it, with a
+        // mandatory TAN field even for a decoupled procedure that produces no
+        // code. Two boxes for one question, and only one of them could ever
+        // be right.
+        frappe.show_alert({
+            message: __("The bank asks for a release."),
+            indicator: "orange"
+        }, 8);
     } else if (msg.status === "vop_mismatch") {
         kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
     } else {
@@ -54,71 +68,3 @@ function kefiya_prompt_vop_release(frm, kefiya_login, answer) {
     });
 }
 
-function kefiya_prompt_transfer_tan(frm, kefiya_login, decoupled) {
-    /* A decoupled procedure -- pushTAN, SecureGo, S-pushTAN -- produces no
-     * code to type. The field was mandatory here regardless, so a Sparkasse
-     * transfer ended in a box demanding something that does not exist.
-     *
-     * The server now waits for the release itself, so this box is only what
-     * is left when that wait ran out: confirm in the app, then press the
-     * button. Nothing to type, and nothing pretending there is.
-     */
-    const fields = decoupled
-        ? [{
-            fieldtype: "HTML",
-            options: "<div class='alert alert-info'>"
-                + __("Confirm the transfer in your banking app. There is no TAN to type for this procedure. Press below once you have confirmed.")
-                + "</div>"
-        }]
-        : [{
-            fieldname: "tan",
-            fieldtype: "Data",
-            label: __("TAN"),
-            reqd: 1,
-            description: __("Enter the TAN from your bank's app/device.")
-        }];
-
-    const d = new frappe.ui.Dialog({
-        title: decoupled
-            ? __("Confirm the transfer in your banking app")
-            : __("Enter TAN to authorise the transfer"),
-        fields: fields,
-        primary_action_label: decoupled
-            ? __("I have confirmed it")
-            : __("Confirm transfer"),
-        primary_action: function (values) {
-            d.hide();
-            frappe.call({
-                method: "kefiya.utils.client.send_transfer_tan",
-                args: {
-                    kefiya_login: kefiya_login,
-                    tan: decoupled ? "" : values.tan,
-                    user_scope: frm.docname
-                },
-                freeze: true,
-                freeze_message: decoupled
-                    ? __("Asking the bank …") : __("Sending TAN..."),
-                callback: function (r) {
-                    if (r.message && r.message.status === "submitted") {
-                        frappe.show_alert({
-                            message: __("Transfer authorised and submitted."),
-                            indicator: "green"
-                        });
-                        frm.reload_doc();
-                    } else if (r.message && r.message.status === "tan_required") {
-                        kefiya_prompt_transfer_tan(frm, kefiya_login,
-                                                   r.message.decoupled);
-                    } else {
-                        frappe.msgprint({
-                            title: __("Not sent"),
-                            indicator: "red",
-                            message: (r.message && r.message.message)
-                                || __("The bank gave no reason. Check your online banking before sending again.")
-                        });
-                    }
-                }
-            });
-        }
-    });
-    d.show();
-}
