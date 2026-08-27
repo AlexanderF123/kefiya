@@ -655,6 +655,17 @@ frappe.provide("kefiya");
     // apart once already.
     kefiya.focus_tan_field = focusTanField;
 
+    // Set when the user has answered a TAN box during a run: the release is
+    // given, so the accounts the bank held back can be fetched -- and nothing
+    // else was going to do it.
+    //
+    // Three steps used to stand between the release and the bookings: confirm
+    // in the banking app, click OK in the box (which only opens the session --
+    // resolve_tan_interaction builds a controller and stops), then find the
+    // "fetch the unfinished accesses again" link. Two of those three are
+    // invisible, and 24 accounts sat unfetched behind them.
+    var resumeWanted = false;
+
     function bindRealtime() {
         if (kefiya._bank_refresh_realtime) return;
         kefiya._bank_refresh_realtime = true;
@@ -663,8 +674,33 @@ frappe.provide("kefiya");
         // which the run needs the user.
         frappe.realtime.on("fints_tan_interaction_required", function (data) {
             if (!run || !run.busy) return;
-            tanPrompt(data);
+            tanPrompt(data, function () {
+                resumeWanted = true;
+                // Not now: the worker still holds the access, and a second
+                // dialog on it is the very damage the run is built to avoid.
+                // The end of the run picks this up.
+                maybeResume();
+            });
         });
+    }
+
+    // Fetch what the bank held back, once the run that hit the release has
+    // finished. Guarded three ways: only after a release was actually given,
+    // only when no run is going, and only once -- a second release inside the
+    // resumed run sets the flag again on its own.
+    function maybeResume() {
+        if (!resumeWanted) return;
+        if (run && run.busy) return;
+        resumeWanted = false;
+        var again = unfinished();
+        if (!again.length) return;
+        var opts = (run && run.options) || {};
+        frappe.show_alert({
+            message: __("Release accepted — fetching the {0} accounts that"
+                        + " were waiting for it.", [again.length]),
+            indicator: "blue"
+        }, 7);
+        kefiya.bank_refresh(Object.assign({}, opts, { only: again }));
     }
 
     // One account's outcome, whoever fetched it. The worker and the
@@ -960,6 +996,10 @@ frappe.provide("kefiya");
                     if (options.onDone) {
                         try { options.onDone(summary); } catch (ignoredC) {}
                     }
+                    // A release given while this run was going: the accounts
+                    // the bank held back are fetched now, without the user
+                    // having to find a link for it.
+                    maybeResume();
                     return summary;
                 });
             });
@@ -968,6 +1008,7 @@ frappe.provide("kefiya");
             unmuteErrors();
             cleanupBackdrops();
             release();
+            maybeResume();
             frappe.msgprint(__("The account fetch was aborted.") + " "
                 + errText(r));
             return null;
