@@ -452,20 +452,37 @@ class FinTSController:
             # on success clear stored tan state
             self.__persist_fints_state()
 
-    def _refuse_a_refused_order(self):
-        """Stop where the bank turned the order down after the release."""
-        verdict = fints_response.verdict_of(
-            getattr(self.fints_connection, "init_tan_response", None))
+    def _refuse_a_refused_order(self, response=None):
+        """Stop where the bank turned the order down. Answers the verdict.
+
+        The last question on every money path, and it was asked on exactly
+        one of them. submit_sepa_transfer read the answer; the payee release
+        and the direct debit both ended with
+
+            frappe.log_error("... completed without TAN challenge")
+            return {"status": "submitted"}
+
+        -- noting that the bank had said something, and reporting success
+        anyway. Same file, same question, three different answers.
+
+        :param response: what the bank last said; the answer to the TAN when
+            omitted, which is where this is called from after a release
+        :return: the verdict, for a caller that also wants the unsigned guard
+        """
+        if response is None:
+            response = getattr(
+                self.fints_connection, "init_tan_response", None)
+        verdict = fints_response.verdict_of(response)
         if not fints_response.refused(verdict):
-            return
+            return verdict
         frappe.log_error(
-            title="Kefiya: the bank refused the order after the release",
+            title="Kefiya: the bank refused the order",
             message="login={0}\n{1}".format(
                 self.kefiya_login.name, fints_response.as_text(verdict)),
         )
         frappe.throw(
-            _("The bank refused this order after the release. It was NOT"
-              " sent.\n\n{0}").format(fints_response.as_text(verdict))
+            _("The bank refused this order. It was NOT sent.\n\n{0}").format(
+                fints_response.as_text(verdict))
             + _advice_block(verdict),
             title=_("Refused by the bank"),
         )
@@ -1855,12 +1872,17 @@ class FinTSController:
             if pending is not None:
                 return pending
 
-            frappe.log_error(
-                title="Kefiya SEPA debit completed without TAN challenge",
-                message="login={0}: the bank did not request a TAN".format(
-                    self.kefiya_login.name
-                ),
-            )
+            # A refusal is a refusal, whatever the order was. This path
+            # logged that the bank had said something and reported success.
+            #
+            # NOT the unsigned guard: it works out which capability applies
+            # from a transfer's shape (single or collective, dated, instant),
+            # and a direct debit is none of those. Asking it here would ask
+            # the wrong question of the stored capabilities, and a wrong
+            # refusal on a debit run is its own kind of damage. Worth having
+            # its own guard; it does not have one yet, and pretending
+            # otherwise would be worse than saying so.
+            self._refuse_a_refused_order(response)
             return {"status": "submitted"}
 
     def _vop_answer(self, response, pain_xml=None):
@@ -2031,12 +2053,13 @@ class FinTSController:
             if pending is not None:
                 return pending
 
-            frappe.log_error(
-                title="Kefiya SEPA transfer approved via VoP without TAN",
-                message="login={0}: the bank did not request a TAN after the "
-                        "Verification-of-Payee approval".format(
-                            self.kefiya_login.name),
-            )
+            # The same two questions the ordinary send asks. This path had
+            # neither: it logged "the bank did not request a TAN" and reported
+            # success -- for the release of an order the bank had just been
+            # asked to reconsider, which is the last place to guess.
+            verdict = self._refuse_a_refused_order(response)
+            self._refuse_unsigned(False, False, bool(cint(instant_payment)),
+                                  verdict=verdict)
             return {"status": "submitted"}
 
     def submit_sepa_transfer(self, pain_xml, instant_payment=False,
@@ -2143,20 +2166,7 @@ class FinTSController:
             # and "TAN?" and read everything else as success, so a bank that
             # refused an order in plain words produced "the bank did not
             # request a TAN" in the log and "Unbekannter Fehler" on screen.
-            verdict = fints_response.verdict_of(response)
-            if fints_response.refused(verdict):
-                frappe.log_error(
-                    title="Kefiya: the bank refused the transfer",
-                    message="login={0}\n{1}".format(
-                        self.kefiya_login.name,
-                        fints_response.as_text(verdict)),
-                )
-                frappe.throw(
-                    _("The bank refused this order. It was NOT sent."
-                      "\n\n{0}").format(fints_response.as_text(verdict))
-                    + _advice_block(verdict),
-                    title=_("Refused by the bank"),
-                )
+            verdict = self._refuse_a_refused_order(response)
 
             # The dialog ended without a TAN and without a refusal. That is
             # either a bank that asks for no signature, or an order that was

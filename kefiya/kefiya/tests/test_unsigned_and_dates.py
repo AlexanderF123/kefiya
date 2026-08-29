@@ -76,19 +76,31 @@ class TestTheSignatureNumberIsActuallyRead(unittest.TestCase):
 
 class TestTheBankIsAskedBeforeAnythingIsConcluded(unittest.TestCase):
     """A refusal explains the missing TAN: an order the bank turned down is
-    not an order it wants signed."""
+    not an order it wants signed.
+
+    The question moved into _refuse_a_refused_order, because it was written
+    out here and asked NOWHERE else -- the payee release and the direct debit
+    both logged that the bank had said something and reported success anyway.
+    """
 
     @staticmethod
     def _send():
         body = _source("utils", "fints_controller.py")
         return body.split("def submit_sepa_transfer(")[1].split(
-            "\n    def _refuse_unsigned(")[0]
+            "\n    def ")[0]
+
+    @staticmethod
+    def _asking():
+        body = _source("utils", "fints_controller.py")
+        return body.split("def _refuse_a_refused_order(")[1].split(
+            "\n    def ")[0]
 
     def test_the_response_is_read_at_all(self):
-        self.assertIn("fints_response.verdict_of(response)", self._send())
+        self.assertIn("fints_response.verdict_of(response)", self._asking())
+        self.assertIn("self._refuse_a_refused_order(response)", self._send())
 
     def test_a_refusal_stops_the_send_with_the_banks_words(self):
-        body = self._send()
+        body = self._asking()
         self.assertIn("fints_response.refused(verdict)", body)
         refusal = body.split("fints_response.refused(verdict)")[1]
         self.assertIn("frappe.throw", refusal)
@@ -98,7 +110,7 @@ class TestTheBankIsAskedBeforeAnythingIsConcluded(unittest.TestCase):
         """Otherwise a refused order is reported as a missing signature,
         which sends the reader to the wrong bank department."""
         body = self._send()
-        self.assertLess(body.index("fints_response.refused(verdict)"),
+        self.assertLess(body.index("self._refuse_a_refused_order(response)"),
                         body.index("self._refuse_unsigned("))
 
     def test_the_signature_refusal_carries_what_the_bank_said(self):
