@@ -1,11 +1,12 @@
 # coding=utf-8
 from __future__ import unicode_literals
 
-import hashlib
 import re
 import frappe
 from frappe import _
 from frappe.utils import now_datetime, getdate, add_days, cint
+
+from kefiya.utils import booking_fingerprint
 
 # Fallback look-back window when a Kefiya Login has no explicit
 # allowed_sync_days_in_past configured.
@@ -109,6 +110,30 @@ class ImportBankTransaction:
         self.kefiya_login = kefiya_login
         self.interactive = interactive
 
+    def _identify(self, date, amount, iban, name, posting_text, purpose):
+        """This booking's fingerprint, and whether it is already imported.
+
+        One reader for both formats, which is the point: MT940 and CAMT
+        describe the same booking with different words, and the old hash
+        took three of its five fields from exactly the words that differ. A
+        booking fetched by both routes was written twice.
+
+        Looked up under every form it may already be filed under, written
+        under the new one. Without the lookup on the old forms this fix
+        would re-import the entire history on the next fetch -- which is a
+        far larger version of the problem it exists to solve.
+
+        :return: (fingerprint to write, True if this booking is already here)
+        """
+        forms = booking_fingerprint.known_forms(
+            bank_account=self.kefiya_login.bank_account,
+            date=date, amount=amount, iban=iban, name=name,
+            posting_text=posting_text, purpose=purpose)
+
+        already_here = bool(frappe.db.exists(
+            "Bank Transaction", {"reference_number": ["in", forms]}))
+        return forms[0], already_here
+
     def kefiya_import(self, fints_transaction):
         self.interactive.progress = 0
 
@@ -167,13 +192,15 @@ class ImportBankTransaction:
 
                 applicant_bin = None  # CAMT does not include BIN
 
-                # Unique hash
-                uniquestr = "{0},{1},{2},{3},{4}".format(
-                    date, amount, applicant_name, posting_text, purpose
-                )
-                transaction_id = hashlib.md5(uniquestr.encode()).hexdigest()
-
-                if frappe.db.exists('Bank Transaction', {'reference_number': transaction_id}):
+                # Which booking this is, and whether it is already here.
+                # Looked up under the new fingerprint AND the two the old
+                # code wrote, so nothing already imported comes back. See
+                # booking_fingerprint for what changed and why.
+                transaction_id, already_here = self._identify(
+                    date=date, amount=amount, iban=applicant_iban,
+                    name=applicant_name, posting_text=posting_text,
+                    purpose=purpose)
+                if already_here:
                     continue
 
                 # Payment type
@@ -294,20 +321,11 @@ class ImportBankTransaction:
                 paid_to = None
                 paid_from = None
 
-                uniquestr = "{0},{1},{2},{3},{4}".format(
-                    date,
-                    amount,
-                    original_applicant_name,
-                    posting_text,
-                    purpose
-                )
-
-                transaction_id = hashlib.md5(uniquestr.encode()).hexdigest()
-                if frappe.db.exists(
-                    'Bank Transaction', {
-                        'reference_number': transaction_id
-                    }
-                ):
+                transaction_id, already_here = self._identify(
+                    date=date, amount=amount, iban=applicant_iban,
+                    name=original_applicant_name, posting_text=posting_text,
+                    purpose=purpose)
+                if already_here:
                     continue
 
                 if status == 'c':
