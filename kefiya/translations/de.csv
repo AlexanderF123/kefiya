@@ -346,3 +346,4 @@ The bank checked the payee for this order and will not release it until that che
 {0}","Die Bank hat diesen Auftrag nach der Freigabe abgelehnt. Er wurde NICHT gesendet.
 
 {0}"
+"This transfer has gone to the bank. Its date cannot be changed here -- recall it with your bank if it must not be executed as it stands.","Dieser Auftrag ist bei der Bank. Sein Datum kann hier nicht mehr geändert werden — bitte bei der Bank widerrufen, wenn er so nicht ausgeführt werden soll."

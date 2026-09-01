@@ -234,6 +234,40 @@ def _accounts_that_cannot_pay():
     return refused
 
 
+def _currency_of(account):
+    """The currency of a ledger Account, or None. Never raises.
+
+    None is a usable answer: the browser formats in the company's default
+    currency when it is not told otherwise, and being told nothing beats
+    being told wrong.
+    """
+    if not account:
+        return None
+    try:
+        return frappe.get_cached_value("Account", account, "account_currency")
+    except Exception:
+        return None
+
+
+@frappe.whitelist()
+def account_standing_for(bank_account):
+    """account_standing() for a caller that came in over the wire.
+
+    Separate from the function itself, and deliberately: the gate belongs to
+    the endpoint, not to the reader. transfer_sources() calls the reader for
+    every login get_list already let the user see -- putting the check inside
+    would re-ask a question already answered, per row, and would break the
+    whole list over one account rather than omit it.
+    """
+    if not bank_account:
+        return {}
+    # What this answers is how much money is on a named account. An endpoint
+    # any logged-in user can call has to say no itself.
+    frappe.has_permission("Bank Account", ptype="read", doc=bank_account,
+                          throw=True)
+    return account_standing(bank_account)
+
+
 def account_standing(bank_account):
     """What is on the account and what the bank lets it go below.
 
@@ -255,9 +289,19 @@ def account_standing(bank_account):
     :return: {"balance", "credit_line", "available", "as_of", "currency"} with
         balance None where nothing was ever fetched
     """
+    if not bank_account:
+        return {}
+
     meta = frappe.get_meta("Bank Account")
+    # "account", not "account_currency". A Bank Account has no currency of its
+    # own -- it names the ledger Account it books to, and the currency is that
+    # Account's. Asking Bank Account for account_currency was answered here by
+    # has_field(), which quietly dropped the field and left every standing
+    # without a currency; asked from the browser the same way, the server
+    # refused it outright, which is the "Feld in der Abfrage nicht erlaubt:
+    # account_currency" that came up on opening a transfer.
     wanted = [f for f in ("custom_account_balance", "custom_credit_line",
-                          "account_currency", "last_integration_date")
+                          "account", "last_integration_date")
               if meta.has_field(f)]
     if not wanted:
         return {}
@@ -288,7 +332,7 @@ def account_standing(bank_account):
     standing = {
         "balance": balance,
         "credit_line": line,
-        "currency": row.get("account_currency"),
+        "currency": _currency_of(row.get("account")),
         "as_of": row.get("last_integration_date"),
     }
     if balance is not None:

@@ -16,6 +16,7 @@ class KefiyaLogin(Document):
         self.stored_dialog_blob = None
         self.stored_tan_blob = None
         self.stored_tan_state_decoupled = None
+        self.stored_vop_id_blob = None
         self.clear_vop_state()
         self.iban_list = None
         self.account_iban = None
@@ -54,6 +55,27 @@ class KefiyaLogin(Document):
     @stored_vop_blob.setter
     def stored_vop_blob(self, value: bytes):
         self.stored_vop_state = self.conv_blob_to_encrypted_string(value)
+
+    @property
+    def stored_vop_id_blob(self):
+        """The VoP-ID the parked TAN challenge has to be released with.
+
+        Kept apart from the challenge because python-fints throws it away:
+        NeedTANResponse.get_data() serialises the command and the TAN request
+        and nothing else, so a challenge that goes into stored_tan_state with
+        a VoP-ID comes back out without one. The approval segment
+        HKVPA(vop_id=...) is then never sent and the bank answers 3945,
+        "Freigabe ohne VOP-Bestaetigung nicht moeglich" -- which is the error
+        every Volksbank transfer ended on.
+
+        Same shape as the workaround one field up for `decoupled`, which the
+        library drops for the same reason.
+        """
+        return self.read_crypted_string_to_blob(self.stored_vop_id_state)
+
+    @stored_vop_id_blob.setter
+    def stored_vop_id_blob(self, value: bytes):
+        self.stored_vop_id_state = self.conv_blob_to_encrypted_string(value)
 
     @property
     def stored_vop_dialog_blob(self):

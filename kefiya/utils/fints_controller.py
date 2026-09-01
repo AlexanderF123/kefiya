@@ -43,39 +43,15 @@ from kefiya.utils.fints_masking import mask_iban
 #: replay used to end every attempt to use the access.
 PARKED_CHALLENGE_MAX_AGE_HOURS = 24
 
-#: Nobody watches a browser for longer than this, whatever the bank allows.
-DECOUPLED_WAIT_CEILING_SECONDS = 300
-
-
-def decoupled_wait(parameters, fallback_pause, fallback_total):
-    """How long to wait for a release, and how often to ask.
-
-    The bank says both in its TAN parameters: how many times it will answer a
-    status query (decoupled_max_poll_number) and how long to leave between two
-    (wait_before_next_poll). Ignoring them and waiting a flat two minutes meant
-    stopping at 40 % of what this bank actually allows -- 150 polls, two
-    seconds apart, is five minutes.
-
-    Frappe-free and its own function: what it decides is how long somebody
-    stands in front of a spinner, and that should be readable without a bank.
-
-    :return: (seconds between polls, seconds in total)
-    """
-    pause = fallback_pause
-    total = fallback_total
-    try:
-        said_pause = float(getattr(parameters, "wait_before_next_poll", 0) or 0)
-        if said_pause > 0:
-            pause = max(1.0, min(said_pause, 10.0))
-    except Exception:
-        pass
-    try:
-        polls = int(getattr(parameters, "decoupled_max_poll_number", 0) or 0)
-        if polls > 0:
-            total = max(fallback_total, polls * pause)
-    except Exception:
-        pass
-    return pause, min(total, DECOUPLED_WAIT_CEILING_SECONDS)
+# How long to wait for a release, and how much of a background job may go on
+# waiting. Frappe-free and its own module; imported back under the old names
+# so every existing caller and test is unaffected.
+from kefiya.utils.decoupled_budget import (  # noqa: F401
+    DECOUPLED_WAIT_CEILING_SECONDS,
+    JOB_BUDGET_RESERVE_SECONDS,
+    decoupled_wait,
+    job_budget_seconds,
+)
 
 
 class InitFailedException(Exception):
@@ -430,6 +406,10 @@ class FinTSController:
             # requests (like pushTAN 2.0) cannot be handled without this
             tan_request.decoupled = \
                 self.kefiya_login.stored_tan_state_decoupled
+            # Nor is the VoP-ID, and without it the TAN goes out without the
+            # payee approval the bank is waiting for.
+            fints_vop.carry_vop_id(
+                tan_request, self.kefiya_login.stored_vop_id_blob)
             self.fints_connection.init_tan_response = \
                 self.fints_connection.send_tan(tan_request, tan)
 
@@ -706,6 +686,7 @@ class FinTSController:
         """
         self.kefiya_login.stored_tan_blob = None
         self.kefiya_login.stored_tan_state_decoupled = None
+        self.kefiya_login.stored_vop_id_blob = None
         self.kefiya_login.stored_dialog_blob = None
         self.kefiya_login.save()
 
@@ -720,6 +701,7 @@ class FinTSController:
             self.kefiya_login.stored_client_blob = None
             self.kefiya_login.stored_tan_blob = None
             self.kefiya_login.stored_tan_state_decoupled = None
+            self.kefiya_login.stored_vop_id_blob = None
             self.kefiya_login.stored_dialog_blob = None
             self.kefiya_login.save()
 
@@ -772,10 +754,19 @@ class FinTSController:
         if tan_state and isinstance(tan_state, NeedTANResponse):
             self.kefiya_login.stored_tan_blob = tan_state.get_data()
             self.kefiya_login.stored_tan_state_decoupled = tan_state.decoupled
+            # And the VoP-ID, for the same reason `decoupled` is carried by
+            # hand one line up: get_data() serialises the command and the TAN
+            # request only. A challenge parked with a payee check comes back
+            # without one, the approval segment HKVPA(vop_id=...) is then not
+            # sent with the TAN, and the bank refuses -- 3945, "Freigabe ohne
+            # VOP-Bestaetigung nicht moeglich". Which is what every Volksbank
+            # transfer ended on.
+            self.kefiya_login.stored_vop_id_blob = fints_vop.vop_id_of(tan_state)
             self.kefiya_login.stored_dialog_blob = self.fints_connection.pause_dialog()
         else:
             self.kefiya_login.stored_tan_blob = None
             self.kefiya_login.stored_tan_state_decoupled = None
+            self.kefiya_login.stored_vop_id_blob = None
             self.kefiya_login.stored_dialog_blob = None
 
         self.kefiya_login.save()
@@ -1350,9 +1341,23 @@ class FinTSController:
         """
         import time
 
+        # Nobody is watching, so nobody is going to reach for a phone. The
+        # scheduled import runs at six in the morning with no browser
+        # attached: waiting five minutes for a release cannot produce one, it
+        # can only spend the job's whole allowance and be killed mid-sleep --
+        # which is exactly what it did, every morning. Park the challenge and
+        # let the run end tidily; the user releases it when they next fetch
+        # the access by hand.
+        if not self.interactive.enabled:
+            return None
+
         pause, total = decoupled_wait(
             self._decoupled_parameters(),
-            self.DECOUPLED_POLL_SECONDS, self.DECOUPLED_MAX_WAIT_SECONDS)
+            self.DECOUPLED_POLL_SECONDS, self.DECOUPLED_MAX_WAIT_SECONDS,
+            budget=job_budget_seconds())
+        if total < pause:
+            # No room left to ask even once.
+            return None
         deadline = time.monotonic() + total
         limit = 1 + int(total / pause)
 

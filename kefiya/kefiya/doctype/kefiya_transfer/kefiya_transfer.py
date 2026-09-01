@@ -251,6 +251,41 @@ class KefiyaTransfer(Document):
             if not row.end_to_end_id:
                 row.end_to_end_id = "{0}-{1}".format(self.name, row.idx)[:35]
 
+    def on_update_after_submit(self):
+        """The few things an approved order may still be told.
+
+        execution_date is one of them, and it had to become one. An order
+        approved for a day that has since passed could not be sent -- the bank
+        cannot execute in the past, and requested_execution_date() refuses it
+        with "change the date, or set it to be held here". Neither was
+        possible: the field was locked by the submit. The order sat there
+        unsendable and uneditable, and the only way out was to cancel and
+        re-enter it.
+
+        What stays locked is what the approval was about: the amounts, the
+        recipients, the paying account. A date says WHEN the approved payment
+        happens, not what it is.
+        """
+        # "Scheduled at Bank" belongs here as much as "Sent": the bank is
+        # holding that order until its date, so the date is no longer ours to
+        # move. Changing it here would only make this document disagree with
+        # what the bank will actually do.
+        if self.status in ("Sent", "Scheduled at Bank"):
+            frappe.throw(_(
+                "This transfer has gone to the bank. Its date cannot be"
+                " changed here -- recall it with your bank if it must not be"
+                " executed as it stands."))
+
+        # A date that is not in the future is not something a bank can be
+        # asked to hold -- it is ours to hold. The same silent correction
+        # validate() makes on a draft, made here for the same reason: the
+        # outcome the user wants is "pay it", and an error at this point would
+        # leave the order exactly as stuck as it was.
+        if self.execution_date and not cint(self.manage_due_date) \
+                and getdate(self.execution_date) <= now_datetime().date():
+            self.manage_due_date = 1
+            self.db_set("manage_due_date", 1, update_modified=False)
+
     @frappe.whitelist()
     def set_hold(self, on_hold):
         """Hold an approved order back, or release it again.

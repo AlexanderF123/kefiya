@@ -250,27 +250,40 @@ function kefiya_describe_paying_account(frm) {
  * difference between a fact and a guess.
  */
 function kefiya_show_account_standing(frm, bank_account) {
-	frappe.db.get_value("Bank Account", bank_account,
-		["custom_account_balance", "custom_credit_line", "account_currency",
-			"last_integration_date"]).then(function (r) {
+	// account_kind.account_standing, not a query of our own. This asked
+	// "Bank Account" for account_currency -- a field it does not have; a Bank
+	// Account names the ledger Account it books to and the currency belongs
+	// to that. The server refuses a field that is not on the doctype, so
+	// opening any transfer produced
+	//
+	//     Feld in der Abfrage nicht erlaubt: account_currency
+	//
+	// before the form had finished loading. The same figures already have one
+	// reader on the server, which resolves the currency properly and applies
+	// the "a zero nobody fetched is not a balance" rule; a second reader here
+	// was a second thing to keep right, and it was not right.
+	frappe.call({
+		method: "kefiya.utils.account_kind.account_standing_for",
+		args: { bank_account: bank_account },
+	}).then(function (r) {
 		const a = (r && r.message) || {};
-		const balance = a.custom_account_balance;
+		const balance = a.balance;
 		if (balance === null || balance === undefined) {
 			frm.dashboard.clear_headline();
 			return;
 		}
-		const line = a.custom_credit_line || 0;
+		const line = a.credit_line || 0;
 		const money = function (v) {
-			return format_currency(v || 0, a.account_currency || undefined);
+			return format_currency(v || 0, a.currency || undefined);
 		};
 		let text = __("Balance {0}", [money(balance)]);
 		if (line) {
 			text += " · " + __("overdraft {0}", [money(line)])
 				+ " · " + __("available {0}", [money(balance + line)]);
 		}
-		if (a.last_integration_date) {
+		if (a.as_of) {
 			text += " · " + __("as at {0}",
-				[frappe.datetime.str_to_user(a.last_integration_date)]);
+				[frappe.datetime.str_to_user(a.as_of)]);
 		}
 		frm.dashboard.add_comment(text, balance < 0 ? "orange" : "blue", true);
 	});
