@@ -68,6 +68,7 @@ from frappe.utils import cint
 from kefiya.utils.duplicate_rule import (
     BY_ACCOUNT, BY_PAYEE, UNDECIDED, fingerprint, pick_home,
 )
+from kefiya.utils import rerun_rule
 
 #: How many documents are deleted between commits. Small enough that an
 #: interruption leaves a finished prefix rather than a rolled-back hour.
@@ -259,6 +260,139 @@ def delete_duplicates(created_from, created_to, confirm=None,
     return {"deleted": deleted, "failed": failed,
             "remaining": len(answer["delete"]) - deleted,
             "reasons": answer["reasons"]}
+
+
+def plan_reruns(created_from, created_to, only_account=None,
+                seconds_apart=rerun_rule.SECONDS_APART):
+    """The same booking twice on ONE account: what a second pass wrote.
+
+    The case the module above declines, and it declines it correctly on the
+    evidence it uses -- the two rows are identical in every field it reads.
+    The field it does not read is ``creation``, and on this run that is what
+    separates a file read twice from a booking the source listed twice. See
+    rerun_rule.
+
+    Reads only. Returns the surplus rows AND the ones it will not touch, so
+    the pairs nobody can decide are a list somebody looks at rather than a
+    silence.
+
+    :return: {"delete", "review", "groups", "reasons", "skipped", "read"}
+    """
+    rows = frappe.get_all(
+        "Bank Transaction",
+        filters={"creation": [">=", created_from], "docstatus": 0},
+        fields=["name", "bank_account", "date", "withdrawal", "deposit",
+                "description", "bank_party_name", "bank_party_iban",
+                "allocated_amount", "status", "docstatus", "creation"],
+        limit_page_length=0)
+    rows = [r for r in rows if str(r["creation"]) < str(created_to)]
+
+    groups = {}
+    skipped = 0
+    for row in rows:
+        if not _untouched(row):
+            skipped += 1
+            continue
+        if only_account and row["bank_account"] != only_account:
+            continue
+        groups.setdefault(rerun_rule.identity(row), []).append(row)
+
+    doomed = []
+    review = []
+    reasons = {rerun_rule.FROM_A_RERUN: 0, rerun_rule.SAME_PASS: 0,
+               rerun_rule.UNDECIDED: 0}
+    multiple = 0
+    for copies in groups.values():
+        if len(copies) < 2:
+            continue
+        multiple += 1
+        surplus, why = rerun_rule.surplus_of(copies, seconds_apart)
+        reasons[why] += 1
+        if surplus:
+            doomed.extend(row["name"] for row in surplus)
+        else:
+            # Left alone, and named. A duplicate this rule cannot decide is
+            # still a duplicate somebody has to look at -- and an accountant
+            # who is told "3,000 were removed" and nothing else has no way
+            # to know what is left.
+            review.append({
+                "konto": copies[0]["bank_account"],
+                "datum": str(copies[0]["date"]),
+                "eingang": copies[0]["deposit"],
+                "ausgang": copies[0]["withdrawal"],
+                "zahler": copies[0]["bank_party_name"],
+                "zweck": (copies[0]["description"] or "")[:120],
+                "zeilen": [row["name"] for row in copies],
+                "grund": why,
+            })
+
+    return {"delete": doomed, "review": review, "groups": multiple,
+            "reasons": reasons, "skipped": skipped, "read": len(rows)}
+
+
+@frappe.whitelist()
+def plan_rerun_duplicates(created_from, created_to, only_account=None):
+    """The plan, as JSON, without deleting anything."""
+    _may_repair()
+    answer = plan_reruns(created_from, created_to, only_account)
+    answer["delete_count"] = len(answer["delete"])
+    answer["review_count"] = len(answer["review"])
+    answer["delete"] = answer["delete"][:20]
+    answer["review"] = answer["review"][:50]
+    return answer
+
+
+@frappe.whitelist()
+def delete_rerun_duplicates(created_from, created_to, confirm=None,
+                            only_account=None, limit=None):
+    """Delete the later copy of each booking a second pass wrote.
+
+    Every promise the deletion above makes, kept here too:
+
+        it never deletes the last copy -- the earliest row always stays
+        it never touches a submitted or cancelled document
+        it never touches a row that has been reconciled or allocated
+        it only looks at the window it is given, and it plans before it acts
+        it confirms by COUNT, so a stale plan deletes nothing
+        it deletes softly, so a wrong rule can be undone
+
+    :return: {"deleted", "failed", "remaining", "reasons", "review_count"}
+    """
+    _may_repair()
+
+    answer = plan_reruns(created_from, created_to, only_account)
+    doomed = answer["delete"]
+    if cint(confirm) != len(doomed):
+        frappe.throw(_(
+            "The plan names {0} documents, the confirmation says {1}."
+            " Nothing was deleted -- run the plan again and confirm the"
+            " number it reports."
+        ).format(len(doomed), cint(confirm)))
+
+    if limit:
+        doomed = doomed[:cint(limit)]
+
+    frappe.logger("kefiya").info(
+        "Kefiya repair: deleting %s re-run copies from the %s run,"
+        " requested by %s", len(doomed), created_from, frappe.session.user)
+
+    deleted = 0
+    failed = []
+    for index, name in enumerate(doomed, 1):
+        try:
+            frappe.delete_doc("Bank Transaction", name,
+                              ignore_permissions=False)
+            deleted += 1
+        except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+            failed.append({"name": name, "reason": str(exc)[:200]})
+        if index % BATCH == 0:
+            frappe.db.commit()  # noqa: DAR101 -- a finished prefix, not a lock
+    frappe.db.commit()
+
+    return {"deleted": deleted, "failed": failed,
+            "remaining": len(answer["delete"]) - deleted,
+            "reasons": answer["reasons"],
+            "review_count": len(answer["review"])}
 
 
 def _may_repair():
