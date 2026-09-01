@@ -119,7 +119,8 @@ def _pieces():
 
     needed = ("_find_vop_format_for_segment", "_need_twostep_tan_for_segment",
               "_get_tan_segment", "is_challenge_structured",
-              "_send_pay_with_possible_retry", "send_tan", "_get_dialog")
+              "_send_pay_with_possible_retry", "send_tan", "_get_dialog",
+              "_process_response")
     for name in needed:
         if not hasattr(FinTS3PinTanClient, name):
             return None
@@ -362,6 +363,22 @@ def _log_no_vop_id(hivpp, trail=None):
         pass
 
 
+def what_the_bank_said(connection):
+    """The last response codes a connection heard, as readable lines.
+
+    python-fints replaces the bank's words with its own sentence and that
+    sentence is often about something else. This is the record kept
+    alongside. Never raises; answers a note saying so when there is nothing.
+    """
+    said = getattr(connection, "last_said", None)
+    if not said:
+        return "(nothing recorded -- this connection keeps no record)"
+    try:
+        return "\n".join("  {0} {1}".format(code, text) for code, text in said)
+    except Exception:
+        return "(the record could not be read)"
+
+
 def _log_poll_failure():
     """Why the follow-up stopped, in the Error Log. Never raises."""
     try:
@@ -402,6 +419,40 @@ def _build(parts):
 
     class VopAwarePinTanClient(base):
         """A client that can also be told "confirm the payee first"."""
+
+        #: What the bank last said, so a failure can quote it.
+        last_said = ()
+
+        def _process_response(self, dialog, segment, response):
+            """Remember the bank's words, then let the library decide.
+
+            Changes nothing. It exists because python-fints throws away what
+            the bank actually said and puts its own sentence in its place --
+            and that sentence is wrong outside the one case it was written
+            for::
+
+                if response.code == '9010':
+                    raise FinTSClientError("Error during dialog initialization,
+                        could not fetch BPD. Please check that you passed the
+                        correct bank identifier to the HBCI URL ...")
+
+            The check is unconditional, so a 9010 answering a TAN status query
+            mid-dialog -- which is what the Sparkasse sent, and what stopped
+            KEF-TRF-2026-00007 -- is reported as a wrong bank URL. The URL was
+            right. Nobody could have got from that message to the cause, and
+            the whole run had to be reconstructed from the outside.
+
+            So every response is noted here first, and the caller quotes them
+            when something fails. Guarded: a client that cannot remember what
+            it heard must still work exactly as before.
+            """
+            try:
+                said = (str(getattr(response, "code", "")),
+                        str(getattr(response, "text", "")))
+                self.last_said = (self.last_said + (said,))[-12:]
+            except Exception:
+                pass
+            return super()._process_response(dialog, segment, response)
 
         def send_tan(self, challenge, tan):
             """Answer the TAN -- and keep saying the payee was confirmed.

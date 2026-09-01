@@ -347,3 +347,4 @@ The bank checked the payee for this order and will not release it until that che
 
 {0}"
 "This transfer has gone to the bank. Its date cannot be changed here -- recall it with your bank if it must not be executed as it stands.","Dieser Auftrag ist bei der Bank. Sein Datum kann hier nicht mehr geändert werden — bitte bei der Bank widerrufen, wenn er so nicht ausgeführt werden soll."
+"{0}: the bank is waiting for the release in your banking app, but this could not be noted down here, so the release cannot be answered. Look in your online banking before sending again -- the order may have reached the bank.","{0}: Die Bank wartet auf die Freigabe in Ihrer Banking-App, aber der Vorgang konnte hier nicht festgehalten werden — die Freigabe kann deshalb nicht beantwortet werden. Bitte vor einem erneuten Senden im Online-Banking nachsehen: Der Auftrag kann die Bank erreicht haben."
