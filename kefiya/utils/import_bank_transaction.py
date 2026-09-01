@@ -110,32 +110,72 @@ class ImportBankTransaction:
         self.kefiya_login = kefiya_login
         self.interactive = interactive
 
+    def _start_batch(self):
+        """Begin counting fingerprints for one run.
+
+        Two tallies, and they must not be the same one:
+
+            _held    how many of each kind the database held BEFORE this run.
+                     Read once per kind and then remembered, so the rows this
+                     run writes do not inflate it.
+            _seen    how many of each kind the BANK has delivered so far in
+                     this run.
+        """
+        self._held = {}
+        self._seen = {}
+
     def _identify(self, date, amount, iban, name, posting_text, purpose):
-        """This booking's fingerprint, and whether it is already imported.
+        """This booking's fingerprint, and whether it still has to be written.
 
         One reader for both formats, which is the point: MT940 and CAMT
-        describe the same booking with different words, and the old hash
-        took three of its five fields from exactly the words that differ. A
-        booking fetched by both routes was written twice.
+        describe the same booking with different words, and the old hash took
+        three of its five fields from exactly the words that differ. A booking
+        fetched by both routes was written twice.
 
         Looked up under every form it may already be filed under, written
-        under the new one. Without the lookup on the old forms this fix
-        would re-import the entire history on the next fetch -- which is a
-        far larger version of the problem it exists to solve.
+        under the new one. Without the lookup on the old forms this would
+        re-import the entire history on the next fetch -- a far larger version
+        of the problem it exists to solve.
 
-        :return: (fingerprint to write, True if this booking is already here)
+        AND IT COUNTS. That is the other half, and it is the half that loses
+        money rather than duplicating it.
+
+        A fingerprint identifies a KIND of booking, not one row, and a bank
+        really does send the same kind several times in one day. Measured
+        against the bank's own statement, on one account, on one day::
+
+            02.04.2025    Bank: 13 x -200,00 EUR    System: 4
+
+        Nine standing-order payments simply gone -- because the old check
+        asked "does one like this exist?" and every answer after the first was
+        yes. On that account that is roughly 1.800 EUR a month over eleven
+        months, and to an accountant it looks exactly like tenants who did not
+        pay. It is the same fingerprint that produces duplicates, read from
+        the other side.
+
+        So the question is HOW MANY, not whether. The bank has sent the k-th
+        copy of this kind; the database held m before this run began; the k-th
+        copy is written when k > m. Re-fetching a period stays idempotent
+        (every k <= m, nothing is written) and genuine repeats survive.
+
+        :return: (fingerprint to write, True if this copy is already covered)
         """
         forms = booking_fingerprint.known_forms(
             bank_account=self.kefiya_login.bank_account,
             date=date, amount=amount, iban=iban, name=name,
             posting_text=posting_text, purpose=purpose)
+        key = forms[0]
 
-        already_here = bool(frappe.db.exists(
-            "Bank Transaction", {"reference_number": ["in", forms]}))
-        return forms[0], already_here
+        if key not in self._held:
+            self._held[key] = frappe.db.count(
+                "Bank Transaction", {"reference_number": ["in", forms]})
+
+        self._seen[key] = self._seen.get(key, 0) + 1
+        return key, self._seen[key] <= self._held[key]
 
     def kefiya_import(self, fints_transaction):
         self.interactive.progress = 0
+        self._start_batch()
 
         # CAMT returns a list inside a list → flatten it
         flat_transactions = []
@@ -252,6 +292,7 @@ class ImportBankTransaction:
     def old_kefiya_import(self, fints_transaction):
         # F841 total_items = len(fints_transaction)
         self.interactive.progress = 0
+        self._start_batch()
         total_transactions = len(fints_transaction)
 
         for idx, t in enumerate(fints_transaction):
