@@ -44,11 +44,14 @@ from kefiya.utils.fints_tan_session import TanSession
 #: replay used to end every attempt to use the access.
 PARKED_CHALLENGE_MAX_AGE_HOURS = 24
 
-class InitFailedException(Exception):
-    pass
-
-class TanInteractionRequired(InitFailedException):
-    pass
+# Weitergereicht, nicht neu definiert: fints_tan_session braucht dieselben
+# beiden Ausnahmen, und dieses Modul importiert fints_tan_session -- also
+# wohnen sie in fints_errors. Die Namen bleiben hier sichtbar, weil client.py
+# sie an drei Stellen von hier holt.
+from kefiya.utils.fints_errors import (  # noqa: F401
+    InitFailedException,
+    TanInteractionRequired,
+)
 
 
 #: How many of the bank's IBANs an "account not found" message lists before it

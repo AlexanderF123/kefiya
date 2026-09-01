@@ -31,16 +31,21 @@ Umzug bringt, ist die Kohaesion und die Datei -- kein Aufrufer aendert sich,
 keine Zeile Verhalten.
 """
 
-import time  # noqa: F401 -- _await_release importiert es lokal
+import time
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime
+
+from fints.client import NeedTANResponse, NeedRetryResponse
 
 from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import tan_challenge
 from kefiya.utils.decoupled_budget import decoupled_wait, job_budget_seconds
+from kefiya.utils.fints_errors import (
+    InitFailedException,
+    TanInteractionRequired,
+)
 
 
 class TanSession:
@@ -237,8 +242,6 @@ class TanSession:
 
         :return: the resumed response, or None if it did not arrive in time
         """
-        import time
-
         # Nobody is watching, so nobody is going to reach for a phone. The
         # scheduled import runs at six in the morning with no browser
         # attached: waiting five minutes for a release cannot produce one, it
