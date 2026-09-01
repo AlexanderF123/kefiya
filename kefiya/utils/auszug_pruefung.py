@@ -214,22 +214,67 @@ def vergleiche(blaetter_eines_kontos, bewegung_zwischen, ausser=()):
     return abweichungen
 
 
+def abschnitte(blaetter_eines_kontos):
+    """Die Laeufe, in denen die Kette haelt.
+
+    Ein Bruch macht nicht den ganzen Auszug unbrauchbar, sondern teilt ihn.
+    Was vor dem Bruch liegt und was danach, ist jeweils fuer sich schluessig
+    und kann fuer seinen eigenen Zeitraum entscheiden.
+
+    Der Anlass ist nicht theoretisch: der Auszug des groessten Kontos
+    (33080697, 56.463 Buchungen, 2004 bis 2026) hat genau einen Bruch, und
+    zwar zwischen einem Fragment vom Dezember 2004 und dem Jahr 2005. Wer
+    daraufhin den ganzen Auszug verwirft, wirft einundzwanzig lueckenlose
+    Jahre weg, um ein Fragment von 93 Zeilen.
+
+    :return: Liste von Listen, jede ein Lauf ohne Bruch
+    """
+    if not blaetter_eines_kontos:
+        return []
+    laeufe = [[blaetter_eines_kontos[0]]]
+    for vorher, jetzt in zip(blaetter_eines_kontos, blaetter_eines_kontos[1:]):
+        if abs(jetzt.anfang - vorher.ende) > CENT:
+            laeufe.append([jetzt])
+        else:
+            laeufe[-1].append(jetzt)
+    return laeufe
+
+
 def urteil(blaetter_eines_kontos, bewegung_zwischen):
     """Alle drei Fragen, in der einen Reihenfolge, die sie zulassen.
 
-    :return: {"kette", "summenprobe", "blind", "abweichungen", "brauchbar"}
-        ``brauchbar`` sagt, ob der Auszug ueberhaupt als Schiedsrichter
-        taugt: eine gebrochene Kette macht ihn unbrauchbar, einzelne
-        durchgefallene Blaetter nur teilweise blind.
+    Geurteilt wird abschnittsweise: jeder Lauf ohne Bruch entscheidet fuer
+    seinen eigenen Zeitraum, und wo die Kette bricht, schweigt das Urteil
+    ueber die Bruchstelle -- aber nicht ueber den Rest.
+
+    :return: {"kette", "summenprobe", "blind", "abweichungen", "brauchbar",
+              "spricht_fuer"}
+        ``spricht_fuer`` nennt die Zeitraeume, ueber die dieser Auszug
+        ueberhaupt etwas sagen kann. Ohne diese Angabe liest sich ein leeres
+        ``abweichungen`` wie ein Freispruch, obwohl es auch heissen kann,
+        dass gar nicht geprueft wurde.
     """
     brueche = kette(blaetter_eines_kontos)
     daneben = summenprobe(blaetter_eines_kontos)
     blind = blinde_jahre(daneben)
+
+    abweichungen = []
+    spricht_fuer = []
+    for lauf in abschnitte(blaetter_eines_kontos):
+        beurteilbar = [b for b in lauf
+                       if b.anfang_tag[:4] not in blind
+                       and b.ende_tag[:4] not in blind]
+        if not beurteilbar:
+            continue
+        spricht_fuer.append((beurteilbar[0].anfang_tag,
+                             beurteilbar[-1].ende_tag))
+        abweichungen.extend(vergleiche(lauf, bewegung_zwischen, ausser=blind))
+
     return {
         "kette": brueche,
         "summenprobe": daneben,
         "blind": sorted(blind),
-        "brauchbar": not brueche,
-        "abweichungen": vergleiche(blaetter_eines_kontos, bewegung_zwischen,
-                                   ausser=blind) if not brueche else [],
+        "brauchbar": bool(spricht_fuer),
+        "spricht_fuer": spricht_fuer,
+        "abweichungen": abweichungen,
     }

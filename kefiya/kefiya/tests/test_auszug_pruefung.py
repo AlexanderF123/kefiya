@@ -30,9 +30,9 @@ import os
 import unittest
 from decimal import Decimal
 
-from kefiya.utils.auszug_pruefung import (VORZEICHEN, blaetter, blinde_jahre,
-                                          kette, summenprobe, urteil,
-                                          vergleiche)
+from kefiya.utils.auszug_pruefung import (VORZEICHEN, abschnitte, blaetter,
+                                          blinde_jahre, kette, summenprobe,
+                                          urteil, vergleiche)
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -58,6 +58,15 @@ ZWEI_BLAETTER = (
     ":62F:C251230EUR1100,00\n"
     "-\n"
 )
+
+
+#: Derselbe Auszug, aber das zweite Blatt steht 750,00 hoeher -- Anfangs- UND
+#: Schlusssaldo verschoben. Damit bricht die Kette, und nur sie: das Blatt
+#: geht in sich weiter auf. Wer nur :60F: verschiebt, bricht auch die
+#: Summenprobe und prueft dann zwei Dinge auf einmal.
+KETTE_GEBROCHEN = (ZWEI_BLAETTER
+                   .replace(":60F:C241230EUR1150,00", ":60F:C241230EUR1900,00")
+                   .replace(":62F:C251230EUR1100,00", ":62F:C251230EUR1850,00"))
 
 
 def _ein_blatt(zeilen, anfang="C231230EUR1000,00", ende="C241230EUR1000,00"):
@@ -213,20 +222,49 @@ class TestFrageDreiBankGegenSystem(unittest.TestCase):
 
 class TestDasUrteil(unittest.TestCase):
 
-    def test_eine_gebrochene_kette_macht_den_auszug_unbrauchbar(self):
-        """Kein Urteil ueber die Buchhaltung, solange der Massstab kaputt
-        ist. Sonst steht am Ende eine Zahl, die niemand halten kann."""
-        kaputt = ZWEI_BLAETTER.replace(":60F:C241230EUR1150,00",
-                                       ":60F:C241230EUR1900,00")
+    def test_ein_bruch_teilt_den_auszug_statt_ihn_zu_verwerfen(self):
+        """Der Anlass steht in abschnitte(): der Auszug des groessten Kontos
+        hat genau einen Bruch, zwischen einem Fragment von 2004 und dem Jahr
+        2005. Wer daraufhin alles verwirft, wirft 21 lueckenlose Jahre weg.
+        """
+        gelesen = blaetter(KETTE_GEBROCHEN)
+        self.assertEqual(len(abschnitte(gelesen)), 2)
+        self.assertEqual(summenprobe(gelesen), [],
+                         "Diese Vorlage bricht nur die Kette.")
 
-        def niemals(a, b):
-            raise AssertionError("darf bei gebrochener Kette nicht gefragt"
-                                 " werden")
+        gefaellt = urteil(gelesen, lambda a, b: Decimal("150.00")
+                          if a == "2023-12-30" else Decimal("-50.00"))
+        self.assertTrue(gefaellt["brauchbar"])
+        self.assertEqual(len(gefaellt["kette"]), 1)
+        # Beide Abschnitte sprechen -- jeder fuer seinen eigenen Zeitraum.
+        self.assertEqual(gefaellt["spricht_fuer"],
+                         [("2023-12-30", "2024-12-30"),
+                          ("2024-12-30", "2025-12-30")])
+        self.assertEqual(gefaellt["abweichungen"], [])
 
-        gefaellt = urteil(blaetter(kaputt), niemals)
+    def test_der_bruch_selbst_wird_nicht_ueberbrueckt(self):
+        """Ueber die Sprungstelle hinweg wird nichts verrechnet: das zweite
+        Blatt beginnt mit dem Saldo, den es nennt, nicht mit dem, der
+        vorher stand."""
+        gefaellt = urteil(blaetter(KETTE_GEBROCHEN),
+                          lambda a, b: Decimal("150.00")
+                          if a == "2023-12-30" else Decimal("-50.00"))
+        # Der Sprung von 750,00 taucht als Bruch auf und NICHT als
+        # Abweichung der Buchhaltung -- die hat damit nichts zu tun.
+        self.assertEqual(gefaellt["kette"][0].fehlt, Decimal("750.00"))
+        self.assertEqual(gefaellt["abweichungen"], [])
+
+    def test_ohne_beurteilbaren_abschnitt_schweigt_das_urteil(self):
+        """Ein leeres "abweichungen" heisst nicht Freispruch. spricht_fuer
+        sagt, ob ueberhaupt geprueft wurde."""
+        ohne = ZWEI_BLAETTER.replace(
+            ":61:2401050105D100,00NMSCNONREF\n:86:020?00AUFTRAG\n", "")
+        ohne = ohne.replace(
+            ":61:2501030103D50,00NMSCNONREF\n:86:020?00AUFTRAG\n", "")
+        gefaellt = urteil(blaetter(ohne), lambda a, b: Decimal("0.00"))
+        self.assertEqual(gefaellt["spricht_fuer"], [])
         self.assertFalse(gefaellt["brauchbar"])
         self.assertEqual(gefaellt["abweichungen"], [])
-        self.assertEqual(len(gefaellt["kette"]), 1)
 
     def test_ein_sauberer_auszug_urteilt(self):
         gefaellt = urteil(blaetter(ZWEI_BLAETTER),
@@ -237,6 +275,14 @@ class TestDasUrteil(unittest.TestCase):
         self.assertEqual(gefaellt["summenprobe"], [])
         self.assertEqual(gefaellt["blind"], [])
         self.assertEqual(gefaellt["abweichungen"], [])
+        self.assertEqual(gefaellt["spricht_fuer"],
+                         [("2023-12-30", "2025-12-30")])
+
+    def test_ein_lueckenloser_auszug_ist_ein_abschnitt(self):
+        self.assertEqual(len(abschnitte(blaetter(ZWEI_BLAETTER))), 1)
+
+    def test_ohne_blaetter_kein_abschnitt(self):
+        self.assertEqual(abschnitte([]), [])
 
 
 class TestDerImportVerwirftKeinStornoMehr(unittest.TestCase):

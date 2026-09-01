@@ -104,6 +104,11 @@ def pruefe(file_url, bank_account=None):
                                             for b in gefaellt["summenprobe"]],
             "blinde_jahre": gefaellt["blind"],
             "auszug_brauchbar": gefaellt["brauchbar"],
+            # Ohne diese Angabe liest sich ein leeres "abweichungen" wie ein
+            # Freispruch, obwohl es auch heissen kann, dass ueber diesen
+            # Zeitraum gar nicht geurteilt wurde.
+            "spricht_fuer": [{"von": a, "bis": b}
+                             for a, b in gefaellt["spricht_fuer"]],
             "abweichungen": [_lesbar_abweichung(a)
                              for a in gefaellt["abweichungen"]],
             "stimmt": gefaellt["brauchbar"] and not gefaellt["abweichungen"],
