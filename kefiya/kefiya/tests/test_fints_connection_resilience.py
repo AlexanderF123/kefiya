@@ -185,7 +185,7 @@ class TestParkedChallengeIsCommitted(unittest.TestCase):
     def test_it_is_written_before_it_is_committed(self):
         source = self._source()
         self.assertLess(
-            source.index("__persist_fints_state(response)"),
+            source.index("_persist_fints_state(response)"),
             source.index("frappe.db.commit()"),
         )
 

@@ -151,11 +151,21 @@ class TestDerImportZaehltWirklich(unittest.TestCase):
     def test_beide_importer_eroeffnen_den_zaehlstand(self):
         """Ohne Eröffnung trägt ein Lauf den Zählstand des vorigen."""
         quelle = _quelle()
-        self.assertEqual(quelle.count("self._start_batch()"), 2)
         for signatur in ("def kefiya_import(self, fints_transaction):",
                          "def old_kefiya_import(self, fints_transaction):"):
             kopf = quelle.split(signatur)[1][:400]
             self.assertIn("self._start_batch()", kopf, signatur)
+
+    def test_das_objekt_ist_nie_ohne_zaehlstand(self):
+        """_identify liefe sonst auf einen AttributeError.
+
+        Heute unerreichbar, weil beide Importer eroeffnen -- aber ein
+        Zustand, den ein Objekt gar nicht erst annehmen kann, ist besser
+        als einer, den zwei Aufrufer vermeiden muessen.
+        """
+        quelle = _quelle()
+        init = quelle.split("def __init__(self, kefiya_login, interactive")[1]
+        self.assertIn("self._start_batch()", init.split("\n    def ")[0])
 
 
 if __name__ == "__main__":

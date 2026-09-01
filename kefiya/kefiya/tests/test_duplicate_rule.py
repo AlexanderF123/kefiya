@@ -192,8 +192,14 @@ class TestTheDeletionCannotRunAway(unittest.TestCase):
 
     def test_deleting_needs_the_count_the_plan_reported(self):
         """Not a checkbox. A count that no longer matches means the data
-        moved under the plan."""
-        body = _repair_source().split("def delete_duplicates(")[1]
+        moved under the plan.
+
+        Read from _carry_out, which is where the machinery lives now: both
+        repairs used to carry their own thirty-line copy of it, differing in
+        three lines, in a path whose job is to destroy documents.
+        """
+        body = _repair_source().split("def _carry_out(")[1].split(
+            "\n@frappe.whitelist()")[0]
         self.assertIn("cint(confirm) != len(doomed)", body)
         self.assertIn("frappe.throw", body)
 
@@ -212,14 +218,14 @@ class TestTheDeletionCannotRunAway(unittest.TestCase):
         """The source files of this run are gone. A permanent delete would
         make a wrong rule unrecoverable, so Frappe's Deleted Document archive
         is deliberately left to do its job."""
-        body = _repair_source().split("def delete_duplicates(")[1]
+        body = _repair_source().split("def _carry_out(")[1]
         code = "\n".join(line for line in body.splitlines()
                          if not line.lstrip().startswith("#"))
         self.assertIn("frappe.delete_doc(", code)
         self.assertNotIn("delete_permanently", code)
 
     def test_the_run_is_written_to_the_log_before_it_starts(self):
-        body = _repair_source().split("def delete_duplicates(")[1]
+        body = _repair_source().split("def _carry_out(")[1]
         self.assertIn('frappe.logger("kefiya").info', body)
         self.assertLess(body.index('frappe.logger("kefiya").info'),
                         body.index("frappe.delete_doc"))

@@ -26,9 +26,9 @@ notice.
 import unittest
 from datetime import date as Date
 
-from kefiya.utils.booking_fingerprint import (as_day, as_money, canonical,
-                                              known_forms, legacy_camt,
-                                              legacy_mt940, tidy)
+from kefiya.utils.booking_fingerprint import (FORMS, as_day, as_money,
+                                              canonical, known_forms, legacy,
+                                              tidy)
 
 
 class TestTidying(unittest.TestCase):
@@ -139,15 +139,24 @@ class TestTheOldHashesAreStillRecognised(unittest.TestCase):
     an old booking means the next fetch does not recognise it and imports the
     whole history again."""
 
-    def test_both_old_forms_are_offered(self):
+    def test_the_old_form_is_offered(self):
+        """Und es ist EINE, nicht zwei.
+
+        Vorher standen hier zwei Altformen, legacy_camt und legacy_mt940 --
+        zwei Namen fuer denselben Rumpf. Der Test prueft sie mit assertIn
+        einzeln ab, was trivial bestand, weil es derselbe Wert war. Ueber
+        die zweite Form sagte er nichts. Die ANZAHL ist die Zusicherung,
+        auf der die ganze Zusage dieses Moduls ruht.
+        """
         forms = known_forms(
             bank_account="Konto", date="2026-03-30", amount=222.39,
             iban="DE1", name="EHTW Service GmbH",
             posting_text="UEBERWEISUNG", purpose="RNR 26/0719")
-        self.assertIn(legacy_camt("2026-03-30", 222.39, "EHTW Service GmbH",
-                                  "UEBERWEISUNG", "RNR 26/0719"), forms)
-        self.assertIn(legacy_mt940("2026-03-30", 222.39, "EHTW Service GmbH",
-                                   "UEBERWEISUNG", "RNR 26/0719"), forms)
+        self.assertEqual(len(forms), FORMS)
+        self.assertEqual(len(set(forms)), FORMS,
+                         "zwei Formen, die denselben Hash liefern, sind eine")
+        self.assertIn(legacy("2026-03-30", 222.39, "EHTW Service GmbH",
+                             "UEBERWEISUNG", "RNR 26/0719"), forms)
 
     def test_the_new_one_is_written(self):
         """First in the list, and that is the one the caller stores."""
@@ -162,10 +171,11 @@ class TestTheOldHashesAreStillRecognised(unittest.TestCase):
         import hashlib
         expected = hashlib.md5(
             "2026-03-30,222.39,N,P,Z".encode()).hexdigest()
-        self.assertEqual(legacy_camt("2026-03-30", 222.39, "N", "P", "Z"),
+        self.assertEqual(legacy("2026-03-30", 222.39, "N", "P", "Z"),
                          expected)
 
-    def test_identical_forms_are_not_repeated(self):
+    def test_the_new_form_and_the_old_one_differ(self):
+        """Sonst waere die Suche unter beiden eine Suche unter einer."""
         forms = known_forms(
             bank_account="K", date="d", amount=1, iban="i", name="n",
             posting_text="p", purpose="z")

@@ -40,7 +40,7 @@ left is normalised before it is hashed.
 WHAT MUST NOT HAPPEN when this changes, and the reason for legacy_forms():
 a new hash for an old booking means the next fetch does not recognise it and
 imports it again -- turning a fix for 57 duplicates into thousands. Every
-booking is therefore looked up under the new hash AND under both old ones,
+booking is therefore looked up under the new hash AND under the old one,
 and only written under the new.
 
 No frappe import: this decides whether a payment is entered twice or not at
@@ -120,8 +120,16 @@ def canonical(bank_account, date, amount, iban, name, purpose):
     ])
 
 
-def legacy_camt(date, amount, name, posting_text, purpose):
-    """The hash kefiya_import wrote before this module existed.
+def legacy(date, amount, name, posting_text, purpose):
+    """The hash both importers wrote before this module existed.
+
+    ONE function, not two. Both of them built the same string with the same
+    format -- they differed only in which parser they took the five values
+    from, and that difference lives at the call site, not here. Shipping it
+    as legacy_camt() and legacy_mt940() made known_forms() hash the same
+    input twice and dedupe the result, so it advertised three forms and
+    produced two, and the test that was supposed to prove both were offered
+    compared a value with itself.
 
     Reproduced exactly, formatting included: what it produced is in the
     database, and a booking is only recognised again if this matches to the
@@ -131,10 +139,11 @@ def legacy_camt(date, amount, name, posting_text, purpose):
         date, amount, name, posting_text, purpose))
 
 
-def legacy_mt940(date, amount, name, posting_text, purpose):
-    """The hash old_kefiya_import wrote. Same shape, different sources."""
-    return _hash_raw("{0},{1},{2},{3},{4}".format(
-        date, amount, name, posting_text, purpose))
+#: How many hashes a booking can be filed under: the current one and the one
+#: the old importers wrote. Asserted rather than described, because the whole
+#: promise of this module -- that a fix does not re-import the history -- is
+#: the claim that this list is complete.
+FORMS = 2
 
 
 def known_forms(bank_account, date, amount, iban, name, posting_text,
@@ -143,18 +152,12 @@ def known_forms(bank_account, date, amount, iban, name, posting_text,
 
     New first, because that is the one that will match from now on.
 
-    :return: list of hex digests, without repeats
+    :return: FORMS hex digests
     """
-    forms = [
+    return [
         canonical(bank_account, date, amount, iban, name, purpose),
-        legacy_camt(date, amount, name, posting_text, purpose),
-        legacy_mt940(date, amount, name, posting_text, purpose),
+        legacy(date, amount, name, posting_text, purpose),
     ]
-    seen = []
-    for form in forms:
-        if form not in seen:
-            seen.append(form)
-    return seen
 
 
 def _hash(parts):

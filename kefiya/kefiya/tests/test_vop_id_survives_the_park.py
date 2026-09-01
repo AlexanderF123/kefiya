@@ -119,7 +119,7 @@ def _send_tan_code():
     a search of the whole method finds the very text it was written to get
     rid of.
     """
-    method = _source("utils", "fints_vop.py").split(
+    method = _source("utils", "fints_vop_client.py").split(
         "def send_tan(self, challenge, tan):")[1]
     return method.split('"""', 2)[2]
 
@@ -142,7 +142,7 @@ class TestBothEndsAreWired(unittest.TestCase):
     def test_every_place_that_forgets_a_challenge_forgets_the_id(self):
         """Or a stale approval rides onto an unrelated later challenge.
 
-        Three places drop a parked challenge: __persist_fints_state with no
+        Three places drop a parked challenge: _persist_fints_state with no
         challenge to park, __discard_parked_challenge, and
         _forget_client_state. Counted rather than sampled, because the one
         that gets missed is the one nobody wrote an assertion for.
@@ -158,7 +158,8 @@ class TestBothEndsAreWired(unittest.TestCase):
         self.assertGreaterEqual(forgets, 3)
 
     def test_resuming_puts_the_id_back_before_the_tan_is_sent(self):
-        body = _source("utils", "fints_controller.py")
+        # Die TAN-Strecke wohnt seit ihrer Herausloesung in fints_tan_session.
+        body = _source("utils", "fints_tan_session.py")
         resume = body.split("def _resume_and_answer_the_parked_tan")[1][:1600]
         self.assertIn(
             "fints_vop.carry_vop_id(\n                tan_request,"

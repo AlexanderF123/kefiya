@@ -57,8 +57,25 @@ def _body(source, signature, docstring_quotes=2):
     return method.split('"""', docstring_quotes)[docstring_quotes]
 
 
+def _text_der_meldung(quelltext):
+    """Die aneinandergehaengten Stringliterale eines Codeausschnitts.
+
+    Was der Nutzer liest, steht im Quelltext als Folge von Teilstrings mit
+    Zeilenumbruechen dazwischen. Ein Vergleich gegen den Quelltext prueft
+    die Formatierung mit; dieser hier prueft den Satz.
+    """
+    import re
+    return "".join(re.findall(r'"((?:[^"\\\\]|\\\\.)*)"', quelltext))
+
+
+#: Die TAN-Strecke wohnt seit ihrer Herausloesung in fints_tan_session.py.
+#: Die Tests hier fragen nach dem Verhalten der Strecke, nicht danach, in
+#: welcher Datei sie steht -- deshalb eine Konstante statt neun Literale.
+TAN_STRECKE = ("utils", "fints_tan_session.py")
+
+
 def _settle_tan():
-    source = _source("utils", "fints_controller.py")
+    source = _source(*TAN_STRECKE)
     body = _body(source, "def _settle_tan(self, response):")
     return body.split("\n    def ")[0]
 
@@ -78,13 +95,35 @@ class TestParkingComesFirst(unittest.TestCase):
         body = _settle_tan()
         self.assertIn("if not self._park_tan_challenge(response):", body)
         guard = body.split("if not self._park_tan_challenge(response):")[1]
-        self.assertIn("raise InitFailedException", guard[:400])
+        self.assertIn("self._cannot_note_the_challenge()", guard[:200])
+
+    def test_every_caller_answers_the_same_way(self):
+        """Three call sites used to give three answers to one situation: one
+        raised with its own message, one carried on and raised something
+        generic, one ignored it. The last was ask_for_tan -- the path where a
+        TAN is typed, so a failed park meant six digits that unlock nothing.
+        """
+        # Ueber BEIDE Dateien: zwei Aufrufer stehen in der TAN-Strecke, der
+        # dritte im Abrufweg des Controllers. Die Zusicherung gilt dem
+        # Aufrufer, nicht der Datei.
+        source = _source(*TAN_STRECKE) + _source("utils", "fints_controller.py")
+        pruefungen = source.count("if not self._park_tan_challenge(response):")
+        antworten = source.count("self._cannot_note_the_challenge()")
+        self.assertEqual(pruefungen, 3)
+        self.assertEqual(antworten, 3, "jede Pruefung braucht ihre Antwort")
+        self.assertNotIn("        self._park_tan_challenge(response)\n", source,
+                         "ein Aufrufer prueft den Rueckgabewert nicht")
 
     def test_the_warning_names_the_real_risk(self):
         """The order may already be with the bank. Saying "failed" and
         nothing else is how a payment gets sent twice."""
-        body = _settle_tan()
-        self.assertIn("the order may have reached the", body)
+        meldung = _body(_source(*TAN_STRECKE),
+                        "def _cannot_note_the_challenge(self):")
+        # Die Meldung ist im Quelltext ueber mehrere Zeilen umbrochen und in
+        # Teilstrings zerlegt. Verglichen wird der Satz, den der Nutzer
+        # liest, nicht die Formatierung, in der er im Code steht.
+        satz = _text_der_meldung(meldung.split("\n    def ")[0])
+        self.assertIn("an order may have reached the bank", satz)
 
     def test_the_transfer_path_does_not_poll(self):
         body = _settle_tan()
@@ -102,7 +141,7 @@ class TestParkingComesFirst(unittest.TestCase):
 class TestParkingReportsItself(unittest.TestCase):
 
     def test_it_answers_whether_it_worked(self):
-        source = _source("utils", "fints_controller.py")
+        source = _source(*TAN_STRECKE)
         body = _body(source, "def _park_tan_challenge(self, response):")
         body = body.split("\n    def ")[0]
         self.assertIn("return False", body)
@@ -111,10 +150,10 @@ class TestParkingReportsItself(unittest.TestCase):
     def test_writing_it_down_cannot_take_the_request_down(self):
         """The one thing this method exists to guarantee was the thing that
         got lost, because persisting sat outside the guard."""
-        source = _source("utils", "fints_controller.py")
+        source = _source(*TAN_STRECKE)
         body = _body(source, "def _park_tan_challenge(self, response):")
         body = body.split("\n    def ")[0]
-        persisted = body.index("self.__persist_fints_state(response)")
+        persisted = body.index("self._persist_fints_state(response)")
         guarded = body.index("try:")
         self.assertLess(guarded, persisted,
                         "persisting must sit inside the try, not before it")
@@ -127,7 +166,7 @@ class TestTheBankGetsQuoted(unittest.TestCase):
     sentence is regularly about something else."""
 
     def test_the_client_remembers_what_it_heard(self):
-        source = _source("utils", "fints_vop.py")
+        source = _source("utils", "fints_vop_client.py")
         body = _body(
             source,
             "def _process_response(self, dialog, segment, response):")
@@ -136,7 +175,7 @@ class TestTheBankGetsQuoted(unittest.TestCase):
 
     def test_it_changes_nothing(self):
         """A note-taker that alters the flow is not a note-taker."""
-        source = _source("utils", "fints_vop.py")
+        source = _source("utils", "fints_vop_client.py")
         body = _body(
             source,
             "def _process_response(self, dialog, segment, response):")
@@ -146,21 +185,21 @@ class TestTheBankGetsQuoted(unittest.TestCase):
 
     def test_the_piece_check_covers_it(self):
         """Or the override lands on a library that has moved."""
-        source = _source("utils", "fints_vop.py")
+        source = _source("utils", "fints_vop_client.py")
         needed = source.split("needed = (")[1].split(")")[0]
         self.assertIn('"_process_response"', needed)
 
     def test_the_failure_log_quotes_it(self):
-        source = _source("utils", "fints_controller.py")
+        source = _source(*TAN_STRECKE)
         body = _body(source, "def _await_release(self, challenge):")
-        self.assertIn("fints_vop.what_the_bank_said(self.fints_connection)",
+        self.assertIn("fints_vop_client.what_the_bank_said(self.fints_connection)",
                       body)
 
 
 class TestWhatTheBankSaid(unittest.TestCase):
 
     def test_it_reads_the_record(self):
-        from kefiya.utils.fints_vop import what_the_bank_said
+        from kefiya.utils.fints_vop_client import what_the_bank_said
 
         class Connection:
             last_said = (("3040", "Es liegen weitere Informationen vor."),
@@ -171,7 +210,7 @@ class TestWhatTheBankSaid(unittest.TestCase):
         self.assertIn("Verarbeitung nicht moeglich.", said)
 
     def test_an_empty_record_says_so_rather_than_lying(self):
-        from kefiya.utils.fints_vop import what_the_bank_said
+        from kefiya.utils.fints_vop_client import what_the_bank_said
 
         class Connection:
             last_said = ()
@@ -180,7 +219,7 @@ class TestWhatTheBankSaid(unittest.TestCase):
         self.assertIn("nothing recorded", what_the_bank_said(object()))
 
     def test_it_never_raises(self):
-        from kefiya.utils.fints_vop import what_the_bank_said
+        from kefiya.utils.fints_vop_client import what_the_bank_said
 
         class Connection:
             last_said = "not a sequence of pairs"

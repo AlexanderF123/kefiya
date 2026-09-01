@@ -51,12 +51,27 @@ UNDECIDED = "undecided"
 def identity(row):
     """What makes two rows on one account the same booking.
 
-    Stricter than duplicate_rule.fingerprint, and for a reason: that one
-    compares rows ACROSS accounts, where the account is what differs. Here
-    the account is part of the identity, and so is the whole purpose line
-    rather than its first eighty characters -- this rule deletes rows that
-    sit side by side, and two neighbours that differ only in their eighty-
-    first character are two bookings.
+    Drei Module beantworten diese eine Frage, und jedes fuer eine andere
+    Lage. Damit niemand sie verwechselt, hier nebeneinander:
+
+        duplicate_rule.fingerprint   ueber Konten hinweg -- das Konto ist
+                                     das, was sich unterscheidet, also
+                                     gehoert es NICHT hinein
+        rerun_rule.identity          auf einem Konto -- das Konto gehoert
+                                     hinein, und der ganze Verwendungszweck
+                                     statt seiner ersten achtzig Zeichen:
+                                     diese Regel loescht Zeilen, die
+                                     nebeneinander stehen, und zwei
+                                     Nachbarn, die sich im einundachtzigsten
+                                     Zeichen unterscheiden, sind zwei
+                                     Buchungen
+        booking_fingerprint.canonical  beim Import, gegen die Bank -- ohne
+                                     die formatabhaengigen Felder, dafuer
+                                     mit IBAN statt Name
+
+    Die drei sind nicht zusammenzulegen: Was eine Buchung ausmacht, haengt
+    daran, wogegen verglichen wird. Was sie brauchen, ist ein gemeinsames
+    Vokabular, und das ist dieser Absatz.
     """
     return (
         row.get("bank_account"),
