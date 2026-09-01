@@ -30,6 +30,7 @@ import unittest
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
                                     DEFAULT_POLL_SECONDS, POLL_LIMIT_SECONDS,
                                     _codes_in, _poll_note,
+                                    touchdown_in,
                                     can_be_approved, demands_confirmation,
                                     poll_pause, readable_verdict)
 from kefiya.utils.vop_rule import result_from
@@ -215,6 +216,22 @@ class TestWhatMakesAnAnswerReleasable(unittest.TestCase):
         self.assertNotIn("still_checking", source)
 
 
+class Response:
+    """The shape python-fints answers with: responses(ref, code=None)."""
+
+    def __init__(self, lines, explode=False, by_code=False):
+        self._lines = lines
+        self._explode = explode
+        self._by_code = by_code
+
+    def responses(self, ref, code=None):
+        if self._explode:
+            raise RuntimeError("a response this cannot read")
+        if code is None:
+            return self._lines
+        return [line for line in self._lines if line.code == code]
+
+
 class Segment:
     """An HIVPP1 as the poll loop sees it."""
 
@@ -258,20 +275,67 @@ class TestTheLogSaysWhatActuallyHappened(unittest.TestCase):
         self.assertIsInstance(_poll_note(0, 0.0, object()), str)
 
     def test_response_codes_are_readable(self):
-        class Response:
-            def responses(self):
-                return [Line("3010"), Line("9999")]
-
-        said = _codes_in(Response())
+        """responses() takes the segment the codes answer. Calling it
+        without one raises, which would have made this line read
+        "unreadable" every single time."""
+        said = _codes_in(Response([Line("3010"), Line("9999")]), object())
         self.assertIn("3010", said)
         self.assertIn("9999", said)
 
     def test_an_unreadable_response_says_so_rather_than_raising(self):
-        class Response:
-            def responses(self):
-                raise RuntimeError("nope")
+        self.assertIn("unreadable",
+                      _codes_in(Response([], explode=True), object()))
 
-        self.assertIn("unreadable", _codes_in(Response()))
+    def test_the_note_carries_the_scroll_reference(self):
+        self.assertIn("aufsetzpunkt='staticscrollref'",
+                      _poll_note(1, 2.0, Segment(), "staticscrollref"))
+
+
+class TestTheBankSaidThereIsMore(unittest.TestCase):
+    """3040 carries an Aufsetzpunkt and HKVPP has a field for it.
+
+    The Volksbank answers the order with
+
+        3040 Es liegen weitere Informationen vor. (['staticscrollref'])
+        3945 Freigabe ohne VOP-Bestaetigung nicht moeglich.
+
+    and the follow-up was sending the polling id alone. The bank said "ask
+    again with this reference" and was asked again without it.
+    """
+
+    def test_the_reference_is_read_off_the_answer(self):
+        said = Line("3040")
+        said.parameters = ["staticscrollref"]
+        self.assertEqual(
+            touchdown_in(Response([said], by_code=True), object()),
+            "staticscrollref")
+
+    def test_a_3040_without_a_parameter_is_not_a_reference(self):
+        said = Line("3040")
+        said.parameters = []
+        self.assertIsNone(touchdown_in(Response([said], by_code=True),
+                                       object()))
+
+    def test_no_3040_at_all(self):
+        self.assertIsNone(touchdown_in(Response([], by_code=True), object()))
+
+    def test_it_never_raises(self):
+        self.assertIsNone(
+            touchdown_in(Response([], explode=True), object()))
+        self.assertIsNone(touchdown_in(None, object()))
+
+    def test_the_follow_up_sends_it(self):
+        """Asserted as the keyword with its value, which no comment has."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        loop = source.split("def _await_vop_result(")[1]
+        self.assertIn("aufsetzpunkt=scroll)", loop)
+        # And it is refreshed from each answer, or the second ask repeats
+        # the first one's reference for as long as the loop runs.
+        self.assertIn("scroll = touchdown_in(again, query) or scroll", loop)
 
 
 class TestTheCeilingIsNotThirty(unittest.TestCase):

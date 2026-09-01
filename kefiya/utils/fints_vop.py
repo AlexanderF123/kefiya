@@ -275,18 +275,50 @@ def client_class():
         return parts["base"]
 
 
-def _codes_in(response):
-    """The bank's response codes and words, for a log line. Never raises."""
+def _codes_in(response, asked):
+    """The bank's response codes and words, for a log line. Never raises.
+
+    ``asked`` is the segment the codes answer -- responses() takes the
+    segment it refers to, and calling it without one raises rather than
+    returning everything, which would have made this log line read
+    "unreadable" every single time.
+    """
     try:
         said = ["{0} {1}".format(getattr(r, "code", "?"),
                                  getattr(r, "text", ""))
-                for r in response.responses()]
+                for r in response.responses(asked)]
     except Exception:
         return "(response codes unreadable)"
     return "; ".join(said) if said else "(no response codes)"
 
 
-def _poll_note(step, waited, hivpp):
+def touchdown_in(response, asked):
+    """The Aufsetzpunkt the bank attached to this answer, or None.
+
+    3040 means "es liegen weitere Informationen vor" and carries a scroll
+    reference as its first parameter -- python-fints uses exactly this to
+    fetch the rest of a statement. The Volksbank sends it with the payee
+    check::
+
+        3040 Es liegen weitere Informationen vor. (['staticscrollref'])
+        3945 Freigabe ohne VOP-Bestaetigung nicht moeglich.
+
+    HKVPP has a field for it (aufsetzpunkt) and the follow-up was not
+    sending one: the bank said "there is more, ask again with this" and was
+    asked again without it. Never raises -- a missing scroll reference means
+    the follow-up goes as it did before.
+    """
+    try:
+        for said in response.responses(asked, "3040"):
+            parameters = getattr(said, "parameters", None)
+            if parameters:
+                return parameters[0]
+    except Exception:
+        return None
+    return None
+
+
+def _poll_note(step, waited, hivpp, scroll=None):
     """One line about one answer to the payee check.
 
     The point of the trail: "asked for 30 seconds and got nothing" was said
@@ -295,14 +327,15 @@ def _poll_note(step, waited, hivpp):
     """
     return (
         "  ask {0} after {1:.0f}s: vop_id={2} result={3!r} polling_id={4}"
-        " report={5} bytes wait={6}"
+        " report={5} bytes wait={6} aufsetzpunkt={7!r}"
     ).format(
         step, waited,
         "yes" if getattr(hivpp, "vop_id", None) else "no",
         result_from(hivpp),
         getattr(hivpp, "polling_id", None),
         len(getattr(hivpp, "payment_status_report", b"") or b""),
-        getattr(hivpp, "wait_for_seconds", None))
+        getattr(hivpp, "wait_for_seconds", None),
+        scroll)
 
 
 def _log_no_vop_id(hivpp, trail=None):
@@ -439,12 +472,29 @@ def _build(parts):
                 resume_func = getattr(self, challenge.resume_method)
                 return resume_func(challenge.command_seg, response)
 
-        def _await_vop_result(self, dialog, vop_standard, hivpp):
+        def _await_vop_result(self, dialog, vop_standard, hivpp,
+                              response=None, asked=None):
             """Keep asking until the bank has finished checking the payee.
 
             The check is asynchronous at some banks: the first answer is a
             polling id and "ask again in n seconds". HKVPP carries that
             polling id for exactly this, and the library never sends it.
+
+            It also carries an Aufsetzpunkt, and that one matters just as
+            much here. The Volksbank answers the order with::
+
+                3040 Es liegen weitere Informationen vor. (['staticscrollref'])
+                3945 Freigabe ohne VOP-Bestaetigung nicht moeglich.
+
+            3040 is the bank saying "there is more, ask again with this
+            reference" -- python-fints uses exactly this code and parameter
+            to fetch the rest of a statement. The follow-up here was sending
+            the polling id and nothing else, so the bank was asked again
+            without the reference it had just handed over.
+
+            :param response: the answer the order came back in, for the first
+                scroll reference
+            :param asked: the HKVPP segment that answer refers to
 
             Asked until there is a VoP-ID to release with. Bounded, and
             honest when it runs out: the caller gets the answer as it stands,
@@ -455,15 +505,19 @@ def _build(parts):
             import time
 
             waited = 0.0
-            self.vop_poll_trail = [_poll_note(0, 0.0, hivpp)]
+            scroll = touchdown_in(response, asked) if response is not None \
+                else None
+            self.vop_poll_trail = [_poll_note(0, 0.0, hivpp, scroll)]
             while not can_be_approved(hivpp) and waited < POLL_LIMIT_SECONDS:
                 pause = poll_pause(hivpp)
                 time.sleep(pause)
                 waited += pause
+                query = HKVPP1(
+                    supported_reports=PSRD1(psrd=[vop_standard]),
+                    polling_id=hivpp.polling_id,
+                    aufsetzpunkt=scroll)
                 try:
-                    again = dialog.send(HKVPP1(
-                        supported_reports=PSRD1(psrd=[vop_standard]),
-                        polling_id=hivpp.polling_id))
+                    again = dialog.send(query)
                     nxt = again.find_segment_first(HIVPP1)
                 except Exception:
                     # The bank would not answer the follow-up. Whatever the
@@ -476,6 +530,7 @@ def _build(parts):
                         " through".format(len(self.vop_poll_trail), waited))
                     _log_poll_failure()
                     break
+                scroll = touchdown_in(again, query) or scroll
                 if nxt is None:
                     # The bank answered, but with no payee-check segment in
                     # it. Worth its own line: it is a different thing from a
@@ -487,11 +542,12 @@ def _build(parts):
                         "  ask {0} after {1:.0f}s: answered, but with no HIVPP"
                         " segment -- {2}".format(
                             len(self.vop_poll_trail), waited,
-                            _codes_in(again)))
+                            _codes_in(again, query)))
                     break
                 hivpp = nxt
                 self.vop_poll_trail.append(
-                    _poll_note(len(self.vop_poll_trail), waited, hivpp))
+                    _poll_note(len(self.vop_poll_trail), waited, hivpp,
+                               scroll))
             return hivpp
 
         def _send_pay_with_possible_retry(self, dialog, command_seg,
@@ -514,7 +570,9 @@ def _build(parts):
                         # first answer is often only "still checking, ask
                         # again", and everything below needs a result.
                         hivpp = self._await_vop_result(
-                            dialog, vop_standard, hivpp)
+                            dialog, vop_standard, hivpp,
+                            response=response,
+                            asked=vop_seg[0] if vop_seg else None)
 
                         # Not applicable, no match, close match -- the
                         # library's own three, unchanged.
