@@ -58,10 +58,11 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "The day the money is to leave the account. Today means now.",
+   "description": "The day the money is to move. Changeable after approval as long as the order has not gone to the bank -- a date that has passed would otherwise leave the order unsendable and uneditable at the same time.",
    "fieldname": "execution_date",
    "fieldtype": "Date",
-   "label": "Execution Date"
+   "label": "Execution Date",
+   "allow_on_submit": 1
   },
   {
    "allow_on_submit": 1,

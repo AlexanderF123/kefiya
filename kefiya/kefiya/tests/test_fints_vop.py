@@ -28,7 +28,9 @@ import os
 import unittest
 
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
-                                    DEFAULT_POLL_SECONDS,
+                                    DEFAULT_POLL_SECONDS, POLL_LIMIT_SECONDS,
+                                    _codes_in, _poll_note,
+                                    touchdown_in,
                                     can_be_approved, demands_confirmation,
                                     poll_pause, readable_verdict)
 from kefiya.utils.vop_rule import result_from
@@ -90,12 +92,12 @@ class TestACopyKnowsWhatItIsACopyOf(unittest.TestCase):
             return handle.read()
 
     def test_it_names_the_release_it_was_taken_from(self):
-        self.assertIn('KNOWN_GOOD = "5.0.0b1"', self._source())
+        self.assertIn('KNOWN_GOOD = ("5.0.0b1", "5.0.0")', self._source())
 
     def test_another_release_gets_the_library_method(self):
         """A stale copy of a payment path is worse than a missing feature."""
         source = self._source()
-        self.assertIn("if installed_version() != KNOWN_GOOD:", source)
+        self.assertIn("if installed_version() not in KNOWN_GOOD:", source)
         self.assertIn('return parts["base"]', source)
 
     def test_a_moved_library_shape_gets_the_library_method_too(self):
@@ -212,3 +214,133 @@ class TestWhatMakesAnAnswerReleasable(unittest.TestCase):
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn("still_checking", source)
+
+
+class Response:
+    """The shape python-fints answers with: responses(ref, code=None)."""
+
+    def __init__(self, lines, explode=False, by_code=False):
+        self._lines = lines
+        self._explode = explode
+        self._by_code = by_code
+
+    def responses(self, ref, code=None):
+        if self._explode:
+            raise RuntimeError("a response this cannot read")
+        if code is None:
+            return self._lines
+        return [line for line in self._lines if line.code == code]
+
+
+class Segment:
+    """An HIVPP1 as the poll loop sees it."""
+
+    def __init__(self, vop_id=None, result=None, polling_id=None,
+                 report=b"", wait=None):
+        self.vop_id = vop_id
+        self.polling_id = polling_id
+        self.payment_status_report = report
+        self.wait_for_seconds = wait
+        self.vop_single_result = type("EVPE", (), {"result": result})()
+
+
+class TestTheLogSaysWhatActuallyHappened(unittest.TestCase):
+    """"Asked for 30 seconds and got nothing" was said whether the bank had
+    been asked fifteen times or once.
+
+    Those are different faults with different fixes, and the log could not
+    tell them apart -- the loop breaks out silently when an answer carries no
+    HIVPP segment, and then reported the ceiling as if it had been reached.
+    The trail is what makes the next attempt diagnosable.
+    """
+
+    def test_a_note_names_the_step_and_what_came_back(self):
+        note = _poll_note(3, 6.0, Segment(vop_id=None, result=None,
+                                          polling_id=b"pid", wait=2))
+        self.assertIn("ask 3", note)
+        self.assertIn("after 6s", note)
+        self.assertIn("vop_id=no", note)
+        self.assertIn("pid", note)
+
+    def test_a_note_says_when_the_id_finally_arrived(self):
+        self.assertIn("vop_id=yes", _poll_note(1, 2.0, Segment(vop_id=b"x")))
+
+    def test_a_note_reports_the_report_size(self):
+        """The verdict lives in the payment status report at this bank, and
+        its size is the only readable thing about it."""
+        self.assertIn("report=9 bytes",
+                      _poll_note(0, 0.0, Segment(report=b"123456789")))
+
+    def test_a_note_never_raises_on_a_segment_it_cannot_read(self):
+        self.assertIsInstance(_poll_note(0, 0.0, object()), str)
+
+    def test_response_codes_are_readable(self):
+        """responses() takes the segment the codes answer. Calling it
+        without one raises, which would have made this line read
+        "unreadable" every single time."""
+        said = _codes_in(Response([Line("3010"), Line("9999")]), object())
+        self.assertIn("3010", said)
+        self.assertIn("9999", said)
+
+    def test_an_unreadable_response_says_so_rather_than_raising(self):
+        self.assertIn("unreadable",
+                      _codes_in(Response([], explode=True), object()))
+
+    def test_the_note_carries_the_scroll_reference(self):
+        self.assertIn("aufsetzpunkt='staticscrollref'",
+                      _poll_note(1, 2.0, Segment(), "staticscrollref"))
+
+
+class TestTheBankSaidThereIsMore(unittest.TestCase):
+    """3040 carries an Aufsetzpunkt and HKVPP has a field for it.
+
+    The Volksbank answers the order with
+
+        3040 Es liegen weitere Informationen vor. (['staticscrollref'])
+        3945 Freigabe ohne VOP-Bestaetigung nicht moeglich.
+
+    and the follow-up was sending the polling id alone. The bank said "ask
+    again with this reference" and was asked again without it.
+    """
+
+    def test_the_reference_is_read_off_the_answer(self):
+        said = Line("3040")
+        said.parameters = ["staticscrollref"]
+        self.assertEqual(
+            touchdown_in(Response([said], by_code=True), object()),
+            "staticscrollref")
+
+    def test_a_3040_without_a_parameter_is_not_a_reference(self):
+        said = Line("3040")
+        said.parameters = []
+        self.assertIsNone(touchdown_in(Response([said], by_code=True),
+                                       object()))
+
+    def test_no_3040_at_all(self):
+        self.assertIsNone(touchdown_in(Response([], by_code=True), object()))
+
+    def test_it_never_raises(self):
+        self.assertIsNone(
+            touchdown_in(Response([], explode=True), object()))
+        self.assertIsNone(touchdown_in(None, object()))
+
+    def test_the_follow_up_sends_it(self):
+        """Asserted as the keyword with its value, which no comment has."""
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        loop = source.split("def _await_vop_result(")[1]
+        self.assertIn("aufsetzpunkt=scroll)", loop)
+        # And it is refreshed from each answer, or the second ask repeats
+        # the first one's reference for as long as the loop runs.
+        self.assertIn("scroll = touchdown_in(again, query) or scroll", loop)
+
+
+class TestTheCeilingIsNotThirty(unittest.TestCase):
+    """Thirty was a guess, and at two seconds a poll it gave the bank fifteen
+    chances to finish a check that runs against a foreign institution."""
+
+    def test_it_is_a_minute(self):
+        self.assertEqual(POLL_LIMIT_SECONDS, 60)

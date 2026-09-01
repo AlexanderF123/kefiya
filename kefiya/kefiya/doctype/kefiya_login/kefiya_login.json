@@ -45,6 +45,7 @@
   "stored_tan_state",
   "stored_vop_state",
   "stored_vop_dialog_state",
+  "stored_vop_id_state",
   "vop_reference",
   "vop_result"
  ],
@@ -273,6 +274,12 @@
    "fieldname": "stored_vop_dialog_state",
    "fieldtype": "Long Text",
    "label": "Stored VoP Dialog State"
+  },
+  {
+   "description": "The VoP-ID of the payee check the parked TAN challenge belongs to. python-fints does not serialise it with the challenge, so without this the approval segment goes missing the moment the challenge is parked and the bank refuses to release the order.",
+   "fieldname": "stored_vop_id_state",
+   "fieldtype": "Long Text",
+   "label": "Stored VoP-ID"
   },
   {
    "fieldname": "vop_reference",

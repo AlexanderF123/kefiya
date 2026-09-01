@@ -595,3 +595,12 @@ msgstr "Die Nummer, unter der die Bank den Terminauftrag führt. Auf sie bezieht
 
 msgid "Ticked, the payment waits here and is presented for release on its execution date. Unticked, it is handed to the bank straight away and the BANK holds it until the date (FinTS HKCSE) -- it then cannot be changed here any more, only at the bank."
 msgstr "Angehakt wartet die Zahlung hier und wird am Ausführungstag zur Freigabe vorgelegt. Nicht angehakt geht sie sofort an die Bank, und die BANK hält sie bis zum Termin (FinTS HKCSE) — danach ist sie hier nicht mehr änderbar, nur noch bei der Bank."
+
+msgid "The day the money is to move. Changeable after approval as long as the order has not gone to the bank -- a date that has passed would otherwise leave the order unsendable and uneditable at the same time."
+msgstr "Der Tag, an dem das Geld fließen soll. Nach der Freigabe noch änderbar, solange der Auftrag nicht bei der Bank ist — ein abgelaufenes Datum ließe den Auftrag sonst gleichzeitig unsendbar und unveränderbar zurück."
+
+msgid "The VoP-ID of the payee check the parked TAN challenge belongs to. python-fints does not serialise it with the challenge, so without this the approval segment goes missing the moment the challenge is parked and the bank refuses to release the order."
+msgstr "Die VoP-ID der Empfängerprüfung, zu der die geparkte TAN-Anforderung gehört. python-fints speichert sie nicht mit der Anforderung; ohne dieses Feld fehlt das Freigabesegment, sobald die Anforderung geparkt wird, und die Bank gibt den Auftrag nicht frei."
+
+msgid "Stored VoP-ID"
+msgstr "Gespeicherte VoP-ID"

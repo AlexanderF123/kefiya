@@ -43,39 +43,15 @@ from kefiya.utils.fints_masking import mask_iban
 #: replay used to end every attempt to use the access.
 PARKED_CHALLENGE_MAX_AGE_HOURS = 24
 
-#: Nobody watches a browser for longer than this, whatever the bank allows.
-DECOUPLED_WAIT_CEILING_SECONDS = 300
-
-
-def decoupled_wait(parameters, fallback_pause, fallback_total):
-    """How long to wait for a release, and how often to ask.
-
-    The bank says both in its TAN parameters: how many times it will answer a
-    status query (decoupled_max_poll_number) and how long to leave between two
-    (wait_before_next_poll). Ignoring them and waiting a flat two minutes meant
-    stopping at 40 % of what this bank actually allows -- 150 polls, two
-    seconds apart, is five minutes.
-
-    Frappe-free and its own function: what it decides is how long somebody
-    stands in front of a spinner, and that should be readable without a bank.
-
-    :return: (seconds between polls, seconds in total)
-    """
-    pause = fallback_pause
-    total = fallback_total
-    try:
-        said_pause = float(getattr(parameters, "wait_before_next_poll", 0) or 0)
-        if said_pause > 0:
-            pause = max(1.0, min(said_pause, 10.0))
-    except Exception:
-        pass
-    try:
-        polls = int(getattr(parameters, "decoupled_max_poll_number", 0) or 0)
-        if polls > 0:
-            total = max(fallback_total, polls * pause)
-    except Exception:
-        pass
-    return pause, min(total, DECOUPLED_WAIT_CEILING_SECONDS)
+# How long to wait for a release, and how much of a background job may go on
+# waiting. Frappe-free and its own module; imported back under the old names
+# so every existing caller and test is unaffected.
+from kefiya.utils.decoupled_budget import (  # noqa: F401
+    DECOUPLED_WAIT_CEILING_SECONDS,
+    JOB_BUDGET_RESERVE_SECONDS,
+    decoupled_wait,
+    job_budget_seconds,
+)
 
 
 class InitFailedException(Exception):
@@ -430,6 +406,10 @@ class FinTSController:
             # requests (like pushTAN 2.0) cannot be handled without this
             tan_request.decoupled = \
                 self.kefiya_login.stored_tan_state_decoupled
+            # Nor is the VoP-ID, and without it the TAN goes out without the
+            # payee approval the bank is waiting for.
+            fints_vop.carry_vop_id(
+                tan_request, self.kefiya_login.stored_vop_id_blob)
             self.fints_connection.init_tan_response = \
                 self.fints_connection.send_tan(tan_request, tan)
 
@@ -706,6 +686,7 @@ class FinTSController:
         """
         self.kefiya_login.stored_tan_blob = None
         self.kefiya_login.stored_tan_state_decoupled = None
+        self.kefiya_login.stored_vop_id_blob = None
         self.kefiya_login.stored_dialog_blob = None
         self.kefiya_login.save()
 
@@ -720,6 +701,7 @@ class FinTSController:
             self.kefiya_login.stored_client_blob = None
             self.kefiya_login.stored_tan_blob = None
             self.kefiya_login.stored_tan_state_decoupled = None
+            self.kefiya_login.stored_vop_id_blob = None
             self.kefiya_login.stored_dialog_blob = None
             self.kefiya_login.save()
 
@@ -772,10 +754,19 @@ class FinTSController:
         if tan_state and isinstance(tan_state, NeedTANResponse):
             self.kefiya_login.stored_tan_blob = tan_state.get_data()
             self.kefiya_login.stored_tan_state_decoupled = tan_state.decoupled
+            # And the VoP-ID, for the same reason `decoupled` is carried by
+            # hand one line up: get_data() serialises the command and the TAN
+            # request only. A challenge parked with a payee check comes back
+            # without one, the approval segment HKVPA(vop_id=...) is then not
+            # sent with the TAN, and the bank refuses -- 3945, "Freigabe ohne
+            # VOP-Bestaetigung nicht moeglich". Which is what every Volksbank
+            # transfer ended on.
+            self.kefiya_login.stored_vop_id_blob = fints_vop.vop_id_of(tan_state)
             self.kefiya_login.stored_dialog_blob = self.fints_connection.pause_dialog()
         else:
             self.kefiya_login.stored_tan_blob = None
             self.kefiya_login.stored_tan_state_decoupled = None
+            self.kefiya_login.stored_vop_id_blob = None
             self.kefiya_login.stored_dialog_blob = None
 
         self.kefiya_login.save()
@@ -967,19 +958,33 @@ class FinTSController:
         Committing here costs a partially finished fetch nothing: the only
         thing in flight at this point is the empty draft import, which the
         caller removes on this very path.
+
+        :return: True when the challenge is on disk and committed
         """
         if not response:
-            return
-        self.__persist_fints_state(response)
+            return False
+        # Writing it down must not be what takes the request down. It did:
+        # pausing the dialog threw after a failed status query, the exception
+        # came out of here, the whole send failed, and the transaction rolled
+        # back -- so the one thing this method exists to guarantee was the
+        # thing that got lost. The caller now decides what an unparked
+        # challenge means; here it is only reported.
         try:
+            self.__persist_fints_state(response)
             frappe.db.commit()
         except Exception:
             frappe.log_error(
-                title="Kefiya: committing the parked TAN challenge failed",
-                message=frappe.get_traceback(),
+                title="Kefiya: the TAN challenge could not be parked",
+                message=(
+                    "The bank is holding a dialog open and waiting for a"
+                    " release, and this could not be written down -- so the"
+                    " release will have nothing to unlock.\n\n{0}"
+                ).format(frappe.get_traceback()),
                 reference_doctype="Kefiya Login",
                 reference_name=self.kefiya_login.name,
             )
+            return False
+        return True
 
     def _publish_tan_prompt(self, response, *, decoupled=None,
                             possible_tan_modes=None, possible_tan_mediums=None):
@@ -1311,13 +1316,37 @@ class FinTSController:
             return response, None
 
         if bool(getattr(response, "decoupled", False)):
+            # Park it, then ask. NOT poll-then-park, which is what this did
+            # and what cost the user the order.
+            #
+            # Measured, on KEF-TRF-2026-00007: the order reached the
+            # Sparkasse, the bank asked for the release in the app, and the
+            # first status query came back 9010 -- which python-fints reports
+            # as "could not fetch BPD", a sentence about something else
+            # entirely. The attempt to park afterwards then went down with
+            # the broken dialog, the request failed, and the transaction
+            # rolled back. Nothing was written. The user confirmed in the
+            # app, and the release had nothing to unlock, because the
+            # challenge it belonged to existed nowhere.
+            #
+            # And the polling itself is gone from this path. It never
+            # belonged here: python-fints documents the decoupled release as
+            # pause the dialog, store it, and resume it in a LATER request --
+            # which is exactly what resolve_tan_interaction does, and what
+            # the box in front of the user already drives with its OK button.
+            # Polling in this request instead meant sending a status query on
+            # the dialog that had just sent the order, and that is what the
+            # bank refused. The fetch path keeps its poll: there it saves a
+            # user from giving one release per account, and there it works.
+            if not self._park_tan_challenge(response):
+                raise InitFailedException(_(
+                    "{0}: the bank is waiting for the release in your banking"
+                    " app, but this could not be noted down here, so the"
+                    " release cannot be answered. Look in your online banking"
+                    " before sending again -- the order may have reached the"
+                    " bank."
+                ).format(self.kefiya_login.name))
             self._publish_tan_prompt(response, decoupled=True)
-            released = self._await_release(response)
-            if released is not None:
-                return released, None
-            # Out of patience. Park it, so the release still finds something
-            # to unlock; the box is already up.
-            self._park_tan_challenge(response)
         else:
             self.ask_for_tan(response)
 
@@ -1350,9 +1379,23 @@ class FinTSController:
         """
         import time
 
+        # Nobody is watching, so nobody is going to reach for a phone. The
+        # scheduled import runs at six in the morning with no browser
+        # attached: waiting five minutes for a release cannot produce one, it
+        # can only spend the job's whole allowance and be killed mid-sleep --
+        # which is exactly what it did, every morning. Park the challenge and
+        # let the run end tidily; the user releases it when they next fetch
+        # the access by hand.
+        if not self.interactive.enabled:
+            return None
+
         pause, total = decoupled_wait(
             self._decoupled_parameters(),
-            self.DECOUPLED_POLL_SECONDS, self.DECOUPLED_MAX_WAIT_SECONDS)
+            self.DECOUPLED_POLL_SECONDS, self.DECOUPLED_MAX_WAIT_SECONDS,
+            budget=job_budget_seconds())
+        if total < pause:
+            # No room left to ask even once.
+            return None
         deadline = time.monotonic() + total
         limit = 1 + int(total / pause)
 
@@ -1363,9 +1406,17 @@ class FinTSController:
             try:
                 answer = self.fints_connection.send_tan(challenge, "")
             except Exception:
+                # With the bank's own words. python-fints puts its own
+                # sentence in their place and that sentence is regularly
+                # about something else -- a 9010 answering a status query is
+                # reported as "could not fetch BPD ... check the bank
+                # identifier", which sent the search in the wrong direction
+                # for a day.
                 frappe.log_error(
                     title="Kefiya: asking whether the release arrived failed",
-                    message=frappe.get_traceback(),
+                    message="What the bank said:\n{0}\n\n{1}".format(
+                        fints_vop.what_the_bank_said(self.fints_connection),
+                        frappe.get_traceback()),
                     reference_doctype="Kefiya Login",
                     reference_name=self.kefiya_login.name,
                 )
