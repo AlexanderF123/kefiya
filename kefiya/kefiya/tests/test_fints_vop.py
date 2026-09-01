@@ -29,10 +29,10 @@ import unittest
 
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
                                     DEFAULT_POLL_SECONDS, POLL_LIMIT_SECONDS,
-                                    _codes_in, _poll_note,
-                                    touchdown_in,
                                     can_be_approved, demands_confirmation,
                                     poll_pause, readable_verdict)
+from kefiya.utils.fints_vop_client import (_codes_in, _poll_note,
+                                           touchdown_in)
 from kefiya.utils.vop_rule import result_from
 
 
@@ -87,7 +87,7 @@ class TestACopyKnowsWhatItIsACopyOf(unittest.TestCase):
     def _source(self):
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+                os.path.abspath(__file__)))), "utils", "fints_vop_client.py")
         with open(path, encoding="utf-8") as handle:
             return handle.read()
 
@@ -198,7 +198,7 @@ class TestWhatMakesAnAnswerReleasable(unittest.TestCase):
     def test_the_copy_waits_for_a_vop_id_before_it_decides(self):
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+                os.path.abspath(__file__)))), "utils", "fints_vop_client.py")
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
         self.assertIn("hivpp = self._await_vop_result(", source)
@@ -210,7 +210,7 @@ class TestWhatMakesAnAnswerReleasable(unittest.TestCase):
         nothing could ever be parked at a bank that sends a report."""
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+                os.path.abspath(__file__)))), "utils", "fints_vop_client.py")
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn("still_checking", source)
@@ -328,7 +328,7 @@ class TestTheBankSaidThereIsMore(unittest.TestCase):
         """Asserted as the keyword with its value, which no comment has."""
         path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "utils", "fints_vop.py")
+                os.path.abspath(__file__)))), "utils", "fints_vop_client.py")
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
         loop = source.split("def _await_vop_result(")[1]

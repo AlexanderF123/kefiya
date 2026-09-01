@@ -135,7 +135,7 @@ class TestNothingSwallowsTheChallengeOnTheWay(unittest.TestCase):
     to poll on."""
 
     def test_the_controller_passes_it_to_both_kinds_of_prompt(self):
-        source = _source(os.path.join("utils", "fints_controller.py"))
+        source = _source(os.path.join("utils", "fints_tan_session.py"))
         body = source.split("def _publish_tan_prompt(")[1].split("\n    def ")[0]
         self.assertIn("tan_challenge.challenge_of(response)", body)
         self.assertEqual(body.count("challenge=challenge"), 2,

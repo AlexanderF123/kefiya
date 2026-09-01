@@ -52,7 +52,7 @@ class TestAnEmptyBpdIsNeverPersisted(unittest.TestCase):
         self.py = _read("utils", "fints_controller.py")
 
     def test_the_guard_stands_before_the_write(self):
-        body = _block(self.py, "__persist_fints_state")
+        body = _block(self.py, "_persist_fints_state")
         self.assertIn("_has_bank_parameters(self.fints_connection)", body)
         self.assertLess(
             body.index("_has_bank_parameters"),

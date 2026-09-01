@@ -109,9 +109,13 @@ class ImportBankTransaction:
         self.bank_transactions = []
         self.kefiya_login = kefiya_login
         self.interactive = interactive
+        # Hier UND in _start_batch: ein Objekt darf nicht in einem Zustand
+        # existieren, in dem _identify auf einen AttributeError laeuft.
+        # _start_batch setzt sie je Lauf zurueck, es legt sie nicht an.
+        self._start_batch()
 
     def _start_batch(self):
-        """Begin counting fingerprints for one run.
+        """Reset the fingerprint tallies for one run.
 
         Two tallies, and they must not be the same one:
 

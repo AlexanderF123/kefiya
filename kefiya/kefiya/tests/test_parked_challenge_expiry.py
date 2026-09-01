@@ -90,7 +90,7 @@ class TestParkedChallengeExpiry(unittest.TestCase):
         instance = controller(login)
 
         with patch.object(
-            FinTSController, "_FinTSController__persist_fints_state"
+            FinTSController, "_persist_fints_state"
         ) as persist:
             instance._FinTSController__discard_parked_challenge()
 
@@ -151,7 +151,7 @@ class TestHowLongToWaitForARelease(unittest.TestCase):
     at 40 % of what this bank allows -- 150 polls two seconds apart."""
 
     def test_the_banks_numbers_win(self):
-        from kefiya.utils.fints_controller import decoupled_wait
+        from kefiya.utils.decoupled_budget import decoupled_wait
 
         class Parameters:
             wait_before_next_poll = 2
@@ -162,7 +162,7 @@ class TestHowLongToWaitForARelease(unittest.TestCase):
         self.assertEqual(total, 300)
 
     def test_without_them_the_old_behaviour_stands(self):
-        from kefiya.utils.fints_controller import decoupled_wait
+        from kefiya.utils.decoupled_budget import decoupled_wait
 
         self.assertEqual(decoupled_wait(None, 2, 120), (2, 120))
         self.assertEqual(decoupled_wait(object(), 2, 120), (2, 120))
@@ -170,7 +170,7 @@ class TestHowLongToWaitForARelease(unittest.TestCase):
     def test_a_bank_that_asks_for_less_does_not_shorten_it(self):
         """Its count is a maximum, not a promise. Somebody may still be
         reaching for their phone."""
-        from kefiya.utils.fints_controller import decoupled_wait
+        from kefiya.utils.decoupled_budget import decoupled_wait
 
         class Parameters:
             wait_before_next_poll = 2
@@ -179,7 +179,7 @@ class TestHowLongToWaitForARelease(unittest.TestCase):
         self.assertEqual(decoupled_wait(Parameters(), 2, 120)[1], 120)
 
     def test_nobody_waits_longer_than_the_ceiling(self):
-        from kefiya.utils.fints_controller import (
+        from kefiya.utils.decoupled_budget import (
             DECOUPLED_WAIT_CEILING_SECONDS, decoupled_wait)
 
         class Parameters:
@@ -190,7 +190,7 @@ class TestHowLongToWaitForARelease(unittest.TestCase):
                          DECOUPLED_WAIT_CEILING_SECONDS)
 
     def test_nonsense_parameters_do_not_make_a_busy_loop(self):
-        from kefiya.utils.fints_controller import decoupled_wait
+        from kefiya.utils.decoupled_budget import decoupled_wait
 
         class Parameters:
             wait_before_next_poll = 0

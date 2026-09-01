@@ -8,7 +8,7 @@ and was killed at the job timeout inside its own sleep::
 
     rq.timeouts.JobTimeoutException: Task exceeded maximum timeout value
         (300 seconds)
-      File "kefiya/utils/fints_controller.py", line 1273, in _await_release
+      File "kefiya/utils/fints_tan_session.py", line 1273, in _await_release
         time.sleep(pause)
 
 Nothing had gone wrong with the bank. At six in the morning there is no
@@ -120,7 +120,7 @@ def _source(*parts):
 
 def _await_release_code():
     """The body of _await_release, docstring stripped."""
-    method = _source("utils", "fints_controller.py").split(
+    method = _source("utils", "fints_tan_session.py").split(
         "def _await_release(self, challenge):")[1]
     return method.split('"""', 2)[2]
 

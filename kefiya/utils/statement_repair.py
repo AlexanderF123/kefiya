@@ -123,20 +123,30 @@ def _untouched(row):
             and (row.get("status") or "Pending") in ("Pending", "Unreconciled"))
 
 
-def plan(created_from, created_to, only_account=None):
-    """What would be deleted, and why. Reads only.
+#: Everything either planner reads. One list, because a field that only one
+#: of them fetches is a field the other silently treats as absent.
+GELESENE_FELDER = [
+    "name", "bank_account", "date", "withdrawal", "deposit", "description",
+    "bank_party_name", "bank_party_iban", "docstatus", "allocated_amount",
+    "status", "creation",
+]
 
-    :param created_from: start of the import run, e.g. "2026-05-21"
-    :param created_to: end, exclusive
-    :return: {"delete": [names], "kept", "groups", "reasons", "skipped"}
+
+def _grouped(created_from, created_to, only_account, identity):
+    """The untouched drafts of one import run, grouped by identity.
+
+    Both planners need exactly this and used to carry their own copy of it --
+    same query, same window filter, same _untouched skip, same only_account
+    check, differing in one field list and one grouping key. The two copies
+    had already drifted: one fetched bank_party_iban and the other did not.
+
+    :param identity: what makes two rows the same booking, as a callable
+    :return: (rows read, {identity: [rows]}, how many were skipped)
     """
-    filters = {"creation": [">=", created_from], "docstatus": 0}
     rows = frappe.get_all(
-        "Bank Transaction", filters=filters,
-        fields=["name", "bank_account", "date", "withdrawal", "deposit",
-                "description", "bank_party_name", "docstatus",
-                "allocated_amount", "status", "creation"],
-        limit_page_length=0)
+        "Bank Transaction",
+        filters={"creation": [">=", created_from], "docstatus": 0},
+        fields=GELESENE_FELDER, limit_page_length=0)
     rows = [r for r in rows if str(r["creation"]) < str(created_to)]
 
     groups = {}
@@ -147,7 +157,19 @@ def plan(created_from, created_to, only_account=None):
             continue
         if only_account and row["bank_account"] != only_account:
             continue
-        groups.setdefault(fingerprint(row), []).append(row)
+        groups.setdefault(identity(row), []).append(row)
+    return rows, groups, skipped
+
+
+def plan(created_from, created_to, only_account=None):
+    """What would be deleted, and why. Reads only.
+
+    :param created_from: start of the import run, e.g. "2026-05-21"
+    :param created_to: end, exclusive
+    :return: {"delete": [names], "kept", "groups", "reasons", "skipped"}
+    """
+    rows, groups, skipped = _grouped(
+        created_from, created_to, only_account, fingerprint)
 
     by_payee, by_account = real_history()
 
@@ -203,26 +225,30 @@ def plan_duplicates(created_from, created_to, only_account=None):
     return answer
 
 
-@frappe.whitelist()
-def delete_duplicates(created_from, created_to, confirm=None,
-                      only_account=None, limit=None):
-    """Delete the surplus copies the plan names.
+def _carry_out(answer, created_from, confirm, limit, was):
+    """Delete what a plan named. The only place that deletes anything.
 
-    ``confirm`` has to carry the exact number the plan reported. Not a
-    checkbox: a count that no longer matches means the data moved under the
-    plan, and deleting thousands of documents against a stale plan is the one
-    mistake this whole module exists to avoid.
+    Both repairs -- the same booking under several accounts, and the same
+    booking twice on one -- used to carry their own copy of this: thirty
+    lines each, differing in which planner they called, the wording of one
+    log line, and one extra key in the result. Everything that makes the
+    deletion safe existed twice, character for character, in a path whose
+    whole job is to destroy documents. A correction to one would have missed
+    the other in silence.
 
-    Reversible: every deleted row is kept as a Deleted Document with its
-    full JSON, because the source files of this run no longer exist and a
-    rule that turns out to be wrong has to be undoable.
+    The promises, and they hold for every caller:
 
-    :param limit: stop after this many, so a first run can be small
-    :return: {"deleted", "failed": [{"name", "reason"}], "remaining"}
+        it never deletes the last copy -- the planner decides that
+        it never touches a submitted or cancelled document
+        it never touches a row that has been reconciled or allocated
+        it confirms by COUNT, so a stale plan deletes nothing
+        it deletes softly, so a wrong rule can be undone
+        it commits in blocks, so an interruption leaves a finished prefix
+
+    :param answer: what a planner returned
+    :param was: what is being removed, for the log line
+    :return: {"deleted", "failed", "remaining", "reasons"}
     """
-    _may_repair()
-
-    answer = plan(created_from, created_to, only_account)
     doomed = answer["delete"]
     if cint(confirm) != len(doomed):
         frappe.throw(_(
@@ -235,9 +261,8 @@ def delete_duplicates(created_from, created_to, confirm=None,
         doomed = doomed[:cint(limit)]
 
     frappe.logger("kefiya").info(
-        "Kefiya repair: deleting %s duplicate bank transactions from the"
-        " %s run, requested by %s", len(doomed), created_from,
-        frappe.session.user)
+        "Kefiya repair: deleting %s %s from the %s run, requested by %s",
+        len(doomed), was, created_from, frappe.session.user)
 
     deleted = 0
     failed = []
@@ -246,8 +271,7 @@ def delete_duplicates(created_from, created_to, confirm=None,
             # Not delete_permanently. Frappe keeps a Deleted Document with
             # the full JSON of every row it removes, and that archive is the
             # only way back here: the source files of this run are gone, so a
-            # permanent delete would make a wrong rule unrecoverable. 38,000
-            # archive rows are a cheap price for being able to undo.
+            # permanent delete would make a wrong rule unrecoverable.
             frappe.delete_doc("Bank Transaction", name,
                               ignore_permissions=False)
             deleted += 1
@@ -260,6 +284,16 @@ def delete_duplicates(created_from, created_to, confirm=None,
     return {"deleted": deleted, "failed": failed,
             "remaining": len(answer["delete"]) - deleted,
             "reasons": answer["reasons"]}
+
+
+@frappe.whitelist()
+def delete_duplicates(created_from, created_to, confirm=None,
+                      only_account=None, limit=None):
+    """Delete the copies that sit on the wrong account. See _carry_out."""
+    _may_repair()
+    return _carry_out(
+        plan(created_from, created_to, only_account),
+        created_from, confirm, limit, "duplicate bank transactions")
 
 
 def plan_reruns(created_from, created_to, only_account=None,
@@ -278,24 +312,8 @@ def plan_reruns(created_from, created_to, only_account=None,
 
     :return: {"delete", "review", "groups", "reasons", "skipped", "read"}
     """
-    rows = frappe.get_all(
-        "Bank Transaction",
-        filters={"creation": [">=", created_from], "docstatus": 0},
-        fields=["name", "bank_account", "date", "withdrawal", "deposit",
-                "description", "bank_party_name", "bank_party_iban",
-                "allocated_amount", "status", "docstatus", "creation"],
-        limit_page_length=0)
-    rows = [r for r in rows if str(r["creation"]) < str(created_to)]
-
-    groups = {}
-    skipped = 0
-    for row in rows:
-        if not _untouched(row):
-            skipped += 1
-            continue
-        if only_account and row["bank_account"] != only_account:
-            continue
-        groups.setdefault(rerun_rule.identity(row), []).append(row)
+    rows, groups, skipped = _grouped(
+        created_from, created_to, only_account, rerun_rule.identity)
 
     doomed = []
     review = []
@@ -347,52 +365,16 @@ def delete_rerun_duplicates(created_from, created_to, confirm=None,
                             only_account=None, limit=None):
     """Delete the later copy of each booking a second pass wrote.
 
-    Every promise the deletion above makes, kept here too:
-
-        it never deletes the last copy -- the earliest row always stays
-        it never touches a submitted or cancelled document
-        it never touches a row that has been reconciled or allocated
-        it only looks at the window it is given, and it plans before it acts
-        it confirms by COUNT, so a stale plan deletes nothing
-        it deletes softly, so a wrong rule can be undone
-
-    :return: {"deleted", "failed", "remaining", "reasons", "review_count"}
+    See _carry_out for the promises. The one thing this adds is the count of
+    pairs it deliberately did NOT decide -- an accountant told "2,508 were
+    removed" and nothing else has no way to know what is left.
     """
     _may_repair()
-
     answer = plan_reruns(created_from, created_to, only_account)
-    doomed = answer["delete"]
-    if cint(confirm) != len(doomed):
-        frappe.throw(_(
-            "The plan names {0} documents, the confirmation says {1}."
-            " Nothing was deleted -- run the plan again and confirm the"
-            " number it reports."
-        ).format(len(doomed), cint(confirm)))
-
-    if limit:
-        doomed = doomed[:cint(limit)]
-
-    frappe.logger("kefiya").info(
-        "Kefiya repair: deleting %s re-run copies from the %s run,"
-        " requested by %s", len(doomed), created_from, frappe.session.user)
-
-    deleted = 0
-    failed = []
-    for index, name in enumerate(doomed, 1):
-        try:
-            frappe.delete_doc("Bank Transaction", name,
-                              ignore_permissions=False)
-            deleted += 1
-        except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
-            failed.append({"name": name, "reason": str(exc)[:200]})
-        if index % BATCH == 0:
-            frappe.db.commit()  # noqa: DAR101 -- a finished prefix, not a lock
-    frappe.db.commit()
-
-    return {"deleted": deleted, "failed": failed,
-            "remaining": len(answer["delete"]) - deleted,
-            "reasons": answer["reasons"],
-            "review_count": len(answer["review"])}
+    result = _carry_out(answer, created_from, confirm, limit,
+                        "re-run copies")
+    result["review_count"] = len(answer["review"])
+    return result
 
 
 def _may_repair():
