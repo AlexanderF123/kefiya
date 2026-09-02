@@ -62,18 +62,14 @@ def _konto_zur_nummer(nummer):
     return [zeile[0] for zeile in passend]
 
 
-@frappe.whitelist()
-def pruefe(file_url, bank_account=None):
-    """Einen angehaengten Kontoauszug gegen das System halten.
+def urteile(file_url, bank_account=None):
+    """Die Blaetter einer .sta-Datei, je Konto, mit dem Bank Account dazu.
 
-    :param file_url: die .sta-Datei, wie sie im Dateimanager liegt
-    :param bank_account: nur noetig, wenn die Kontonummer aus dem Auszug
-        auf mehr als ein Bank Account passt
-    :return: je Konto das Urteil aus auszug_pruefung.urteil, plus die
-        Zahlen, die man beim Lesen sofort sehen will
+    Das Stueck, das pruefe() und das Neueinlesen teilen: die Datei lesen,
+    die Blaetter dem Konto zuordnen, das sie nennen.
+
+    :return: Liste von (kontonummer, bank_account, blaetter)
     """
-    _darf_pruefen()
-
     from kefiya.utils.statement_import import file_content
     text = file_content(file_url)
     if isinstance(text, bytes):
@@ -88,9 +84,24 @@ def pruefe(file_url, bank_account=None):
                        " account line and :60F:/:62F: balances.")
                      .format(file_url))
 
+    return [(nummer, bank_account or _eindeutig(nummer), gelesen)
+            for nummer, gelesen in sorted(nach_konto.items())]
+
+
+@frappe.whitelist()
+def pruefe(file_url, bank_account=None):
+    """Einen angehaengten Kontoauszug gegen das System halten.
+
+    :param file_url: die .sta-Datei, wie sie im Dateimanager liegt
+    :param bank_account: nur noetig, wenn die Kontonummer aus dem Auszug
+        auf mehr als ein Bank Account passt
+    :return: je Konto das Urteil aus auszug_pruefung.urteil, plus die
+        Zahlen, die man beim Lesen sofort sehen will
+    """
+    _darf_pruefen()
+
     ergebnis = []
-    for nummer, gelesen in sorted(nach_konto.items()):
-        konto = bank_account or _eindeutig(nummer)
+    for nummer, konto, gelesen in urteile(file_url, bank_account):
         gefaellt = auszug_pruefung.urteil(gelesen, bewegung_im_system(konto))
         ergebnis.append({
             "kontonummer": nummer,
@@ -106,8 +117,9 @@ def pruefe(file_url, bank_account=None):
             "auszug_brauchbar": gefaellt["brauchbar"],
             # Ohne diese Angabe liest sich ein leeres "abweichungen" wie ein
             # Freispruch, obwohl es auch heissen kann, dass ueber diesen
-            # Zeitraum gar nicht geurteilt wurde.
-            "spricht_fuer": [{"von": a, "bis": b}
+            # Zeitraum gar nicht geurteilt wurde. "nach", nicht "von": der
+            # Zeitraum beginnt HINTER diesem Tag, siehe auszug_pruefung.fenster.
+            "spricht_fuer": [{"nach": a, "bis": b}
                              for a, b in gefaellt["spricht_fuer"]],
             "abweichungen": [_lesbar_abweichung(a)
                              for a in gefaellt["abweichungen"]],

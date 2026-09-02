@@ -355,3 +355,24 @@ Still waiting for the release,Warte noch auf die Freigabe
 Confirm the release in your banking app. This box closes by itself once the bank reports the release; you do not need to press anything here.,"Bestätigen Sie die Freigabe in Ihrer Banking-App. Dieses Fenster schließt sich von selbst, sobald die Bank die Freigabe meldet; Sie müssen hier nichts drücken."
 Released in the banking app. Transfer submitted.,In der Banking-App freigegeben. Überweisung übermittelt.
 The bank has not reported the release. Check your online banking before sending again.,"Die Bank hat die Freigabe nicht gemeldet. Prüfen Sie Ihr Online-Banking, bevor Sie erneut senden."
+Rebuild from statement,Aus dem Kontoauszug neu aufbauen
+The statement cannot rebuild this account.,Dieser Kontoauszug kann das Konto nicht neu aufbauen.
+The two readers disagree on these sheets:,Die beiden Leser sind sich auf diesen Blättern nicht einig:
+Period (after – until),Zeitraum (nach – bis)
+In the system,Im System
+Kept (money attached),Bleibt (Geld zugeordnet)
+Replaced,Ersetzt
+From the statement,Aus dem Auszug
+Deviating before the rebuild:,Abweichend vor dem Neuaufbau:
+The account already matches the bank.,Das Konto stimmt bereits mit der Bank überein.
+Rebuild now,Jetzt neu aufbauen
+Rebuilt. The account now matches the bank.,Neu aufgebaut. Das Konto stimmt jetzt mit der Bank überein.
+"Rebuilt, but the account still deviates. See the report on the document.","Neu aufgebaut, aber das Konto weicht noch ab. Siehe den Bericht am Dokument."
+Replace the bookings of the listed periods with the statement? Bookings with money attached are kept.,Die Buchungen der genannten Zeiträume durch den Kontoauszug ersetzen? Buchungen mit zugeordnetem Geld bleiben stehen.
+Rebuilding in the background. You will be told when it is done.,"Der Neuaufbau läuft im Hintergrund. Sie erfahren, wenn er fertig ist."
+Only an MT940 statement (.sta) can rebuild an account: it is the format that carries the bank's balances.,"Nur ein MT940-Kontoauszug (.sta) kann ein Konto neu aufbauen: er ist das Format, das die Salden der Bank trägt."
+The statement cannot rebuild this account: see the plan. Nothing was changed.,Dieser Kontoauszug kann das Konto nicht neu aufbauen: siehe den Plan. Nichts wurde verändert.
+"{0}: skipped, the statement does not speak for it.","{0}: übersprungen, der Auszug spricht nicht dafür."
+{0}: {1} bookings replaced by {2} from the statement. {3},{0}: {1} Buchungen ersetzt durch {2} aus dem Auszug. {3}
+The account now matches the bank.,Das Konto stimmt jetzt mit der Bank überein.
+{0} periods still deviate.,{0} Zeiträume weichen noch ab.

@@ -17,7 +17,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from kefiya.utils import statement_import
+from kefiya.utils import auszug_einlesen, statement_import
 
 
 class KefiyaBankStatementImport(Document):
@@ -74,6 +74,26 @@ class KefiyaBankStatementImport(Document):
 			).format(summary.get("created") or 0))
 
 		return statement_import.without_entries(summary)
+
+	@frappe.whitelist()
+	def plan_rebuild(self, file_url, bank_account=None):
+		"""What rebuilding the account from this statement would do.
+
+		Not an import: an import adds what is missing and keeps what is
+		there. A rebuild replaces the account's bookings for the period the
+		statement speaks for, and says beforehand how many go and how many
+		come -- see auszug_einlesen.
+		"""
+		frappe.has_permission(
+			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
+		return auszug_einlesen.plan(file_url, bank_account or self.bank_account)
+
+	@frappe.whitelist()
+	def start_rebuild(self, file_url, bank_account=None):
+		frappe.has_permission(
+			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
+		return auszug_einlesen.start(
+			file_url, bank_account or self.bank_account, docname=self.name)
 
 	def update_status(self, status):
 		self.db_set('status', status)

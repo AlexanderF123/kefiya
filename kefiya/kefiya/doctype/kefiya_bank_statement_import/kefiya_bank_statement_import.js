@@ -66,9 +66,62 @@ kefiya.show_import_plan = function (plan) {
 	});
 };
 
+// What rebuilding an account from its statement would do -- and, after a
+// confirmation, does. Shown per account and per period, because the number
+// that matters is not the total but "how many bookings go, how many come,
+// and does the bank agree afterwards".
+kefiya.show_rebuild_plan = function (plan, onConfirm) {
+	const esc = frappe.utils.escape_html;
+	const money = (v) => format_currency(v);
+	const konten = (plan.konten || []).map((k) => {
+		const fenster = (k.fenster || []).map((f) =>
+			`<tr><td>${esc(f.nach)} – ${esc(f.bis)}</td>`
+			+ `<td class="text-right">${f.im_system}</td>`
+			+ `<td class="text-right">${f.geschuetzt}</td>`
+			+ `<td class="text-right">${f.zu_ersetzen}</td>`
+			+ `<td class="text-right">${f.einzulesen}</td></tr>`).join("");
+		const vorher = (k.vorher || []).map((a) =>
+			`<li>${esc(a.nach)} – ${esc(a.bis)}: Bank ${money(a.bank)},`
+			+ ` System ${money(a.system)}</li>`).join("");
+		const uneinig = (k.zweitleser_uneinig || []).map((a) =>
+			`<li>${esc(a.nach)} – ${esc(a.bis)}: ${money(a.fehlt)}</li>`).join("");
+		return `<h5>${esc(k.bank_account)}</h5>
+			${k.einlesbar ? "" : `<p class="text-danger">${__("The statement cannot rebuild this account.")}</p>`}
+			${uneinig ? `<p class="text-danger">${__("The two readers disagree on these sheets:")}</p><ul>${uneinig}</ul>` : ""}
+			<table class="table table-bordered">
+				<thead><tr><th>${__("Period (after – until)")}</th>
+				<th class="text-right">${__("In the system")}</th>
+				<th class="text-right">${__("Kept (money attached)")}</th>
+				<th class="text-right">${__("Replaced")}</th>
+				<th class="text-right">${__("From the statement")}</th></tr></thead>
+				<tbody>${fenster}</tbody>
+			</table>
+			${vorher ? `<p>${__("Deviating before the rebuild:")}</p><ul>${vorher}</ul>`
+				: `<p>${__("The account already matches the bank.")}</p>`}`;
+	}).join("");
+
+	const d = new frappe.ui.Dialog({
+		title: __("Rebuild from statement"),
+		size: "large",
+		fields: [{ fieldtype: "HTML", fieldname: "plan", options: konten }],
+		primary_action_label: plan.einlesbar ? __("Rebuild now") : null,
+		primary_action: plan.einlesbar ? () => { d.hide(); onConfirm(); } : null,
+	});
+	d.show();
+};
+
 frappe.ui.form.on("Kefiya Bank Statement Import", {
 	setup(frm){
 		frappe.realtime.on('update_import_status', function(data) {
+			frm.reload_doc();
+		});
+		frappe.realtime.on('kefiya_auszug_eingelesen', function(data) {
+			frappe.show_alert({
+				message: data.alles_stimmt
+					? __("Rebuilt. The account now matches the bank.")
+					: __("Rebuilt, but the account still deviates. See the report on the document."),
+				indicator: data.alles_stimmt ? "green" : "orange",
+			}, 15);
 			frm.reload_doc();
 		});
 	},
@@ -95,6 +148,27 @@ frappe.ui.form.on("Kefiya Bank Statement Import", {
 					bank_account: frm.doc.bank_account,
 				}).then((r) => kefiya.show_import_plan(r.message))
 			);
+
+			// The other way round: not add what is missing, but replace what
+			// the statement covers. Only for .sta files -- they carry the
+			// bank's balances, and those are what the result is measured by.
+			if (/\.sta$/i.test(frm.doc.import_file)) {
+				frm.add_custom_button(__("Rebuild from statement"), () =>
+					frm.call("plan_rebuild", {
+						file_url: frm.doc.import_file,
+						bank_account: frm.doc.bank_account,
+					}).then((r) => kefiya.show_rebuild_plan(r.message, () =>
+						frappe.confirm(
+							__("Replace the bookings of the listed periods with the statement? Bookings with money attached are kept."),
+							() => frm.call("start_rebuild", {
+								file_url: frm.doc.import_file,
+								bank_account: frm.doc.bank_account,
+							}).then(() => frappe.show_alert({
+								message: __("Rebuilding in the background. You will be told when it is done."),
+								indicator: "blue",
+							}, 10)))))
+				);
+			}
 
 			frm.page.set_primary_action("Start Import", () =>  {
 					frm.call("start_import", {
