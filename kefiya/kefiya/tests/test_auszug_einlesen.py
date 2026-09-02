@@ -137,6 +137,33 @@ class TestDerWegVonDerOberflaeche(unittest.TestCase):
         self.assertIn("/\\.sta$/i.test(frm.doc.import_file)", js)
 
 
+class TestZweiGleicheBuchungen(unittest.TestCase):
+    """30.03.2022, zweimal PayPal 6,42 EUR mit demselben Text: zwei
+    Buchungen, nicht eine und ihre Wiederholung."""
+
+    def test_die_zweite_bekommt_ihre_eigene_referenz(self):
+        from kefiya.utils.statement_formats import wiederholung
+        self.assertEqual(wiederholung("abc", 1), "abc")
+        self.assertNotEqual(wiederholung("abc", 2), "abc")
+        self.assertNotEqual(wiederholung("abc", 2), wiederholung("abc", 3))
+        # Und dieselbe bei jedem Lauf, sonst erkennt der zweite Import sie
+        # nicht wieder.
+        self.assertEqual(wiederholung("abc", 2), wiederholung("abc", 2))
+
+    def test_die_erste_behaelt_ihre_referenz(self):
+        """Nichts, was schon geschrieben ist, wechselt seine Identitaet."""
+        from kefiya.utils.statement_formats import wiederholung
+        self.assertEqual(wiederholung("abc", 0), "abc")
+
+    def test_der_import_zaehlt_statt_zu_verwerfen(self):
+        quelle = _py("utils", "statement_import.py")
+        book = _funktion(quelle, "book_entries")
+        self.assertNotIn("reference in seen", book)
+        self.assertIn("seen[reference] = seen.get(reference, 0) + 1", book)
+        self.assertIn("reference = wiederholung(reference, seen[reference])",
+                      book)
+
+
 class TestDasBerichtsformat(unittest.TestCase):
     """Die Pruefung sagt "nach", nicht "von": das Fenster beginnt hinter
     diesem Tag. Wer "von" liest, zaehlt den Tag mit."""
