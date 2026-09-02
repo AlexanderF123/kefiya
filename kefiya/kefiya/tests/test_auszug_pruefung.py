@@ -11,7 +11,7 @@ Buchungspruefung finden konnte:
     :61:1401280128RCR400000,00   Storno einer Habenbuchung
 
 MT940 kennt vier Kennzeichen: C (Haben), D (Soll) und ihre Stornos RC und
-RD. Ein Storno geht in die Gegenrichtung seiner Buchung. Zwei Stellen haben
+RD. Ein Storno geht in die Gegenrichtung seiner Buchung. Drei Stellen haben
 das nicht gewusst:
 
     1. Die Bibliothek mt940 rechnet ``if status == 'D': amount = -amount``.
@@ -20,6 +20,12 @@ das nicht gewusst:
     2. import_bank_transaction verwarf jedes Kennzeichen ausser c und d.
        In den Auszuegen dieser Instanz sind das 32 Buchungen ueber
        866.612,58 EUR, die nie im System ankamen.
+    3. statement_formats.mt940_entries -- der Weg, auf dem eine .sta-Datei
+       eingelesen wird -- nahm den Betrag unbesehen aus der Bibliothek und
+       erbte damit deren Vorzeichenfehler. Das ist der gefaehrlichste der
+       drei: er verwirft nichts, er bucht in die falsche Richtung. Auf
+       Konto 507 waeren beim Neueinlesen 410.000 EUR als Eingang gelandet,
+       die Ausgaenge sind -- eine Verschiebung von 820.000 EUR.
 
 Beide sind an der Saldodifferenz der Bank aufgefallen, nicht an einer
 Zaehlung. Deshalb steht in diesem Modul auch der Test, dass die Pruefung
@@ -320,3 +326,52 @@ class TestDerImportVerwirftKeinStornoMehr(unittest.TestCase):
         self.assertEqual(set(abgeleitet), {"c", "d", "rc", "rd"})
         self.assertEqual(abgeleitet["rd"], 1)
         self.assertEqual(abgeleitet["rc"], -1)
+
+
+class TestDerEinleseweg(unittest.TestCase):
+    """statement_formats.mt940_entries korrigiert das Vorzeichen selbst.
+
+    Ohne diesen Test kaeme der Fehler beim Neueinlesen zurueck, und zwar
+    stiller als beim ersten Mal: nichts fehlt, es steht nur alles auf der
+    falschen Seite.
+    """
+
+    def _quelltext(self):
+        pfad = os.path.join(os.path.dirname(os.path.dirname(HIER)),
+                            "utils", "statement_formats.py")
+        with open(pfad, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_der_betrag_wird_nicht_unbesehen_uebernommen(self):
+        text = self._quelltext()
+        self.assertIn("_mit_richtigem_vorzeichen(amount, data.get(\"status\"))",
+                      text)
+
+    def test_die_korrektur_kommt_aus_der_einen_tabelle(self):
+        text = self._quelltext()
+        self.assertIn("from kefiya.utils.auszug_pruefung import VORZEICHEN",
+                      text)
+
+    def test_die_korrektur_rechnet_richtig(self):
+        """Die Funktion selbst, wirklich ausgefuehrt -- nicht nur gelesen.
+
+        Sie steht in einem Modul ohne frappe, also laesst sie sich hier
+        aufrufen. Die drei Faelle sind die drei Stornos aus dem Auszug von
+        Konto 507, mit den Werten, die die Bibliothek dafuer liefert.
+        """
+        from kefiya.utils.statement_formats import _mit_richtigem_vorzeichen
+
+        # Was mt940 liefert -> was daraus werden muss
+        self.assertEqual(_mit_richtigem_vorzeichen(10000.0, "RC"), -10000.0)
+        self.assertEqual(_mit_richtigem_vorzeichen(400000.0, "RC"), -400000.0)
+        self.assertEqual(_mit_richtigem_vorzeichen(3000.0, "RD"), 3000.0)
+        # Und die beiden gewoehnlichen bleiben, wie sie sind.
+        self.assertEqual(_mit_richtigem_vorzeichen(-250.0, "D"), -250.0)
+        self.assertEqual(_mit_richtigem_vorzeichen(250.0, "C"), 250.0)
+
+    def test_ein_unbekanntes_kennzeichen_bleibt_unangetastet(self):
+        """Lieber der Wert der Bibliothek als ein geratenes Vorzeichen."""
+        from kefiya.utils.statement_formats import _mit_richtigem_vorzeichen
+
+        self.assertEqual(_mit_richtigem_vorzeichen(42.0, "XY"), 42.0)
+        self.assertEqual(_mit_richtigem_vorzeichen(42.0, None), 42.0)

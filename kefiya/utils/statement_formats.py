@@ -601,6 +601,31 @@ def _split_iban_and_name(value):
     return None, text
 
 
+def _mit_richtigem_vorzeichen(amount, status):
+    """Das Vorzeichen aus dem Buchungskennzeichen, nicht aus der Bibliothek.
+
+    mt940 rechnet ``if status == 'D': amount = -amount``. Damit bleiben die
+    beiden Stornokennzeichen RC und RD positiv. Bei RD stimmt das zufaellig
+    -- ein Storno geht in die Gegenrichtung, RD storniert eine Sollbuchung,
+    das Geld kommt zurueck. Bei RC ist es falsch.
+
+    Nachgemessen am Auszug von Konto 507: ``RC 400000,00`` vom 28.01.2014
+    kommt aus der Bibliothek als +400.000,00. Ein Einlesen ohne diese
+    Korrektur bucht 410.000 EUR als Eingang, die Ausgaenge sind -- eine
+    Verschiebung von 820.000 EUR auf einem einzigen Konto.
+
+    Ein unbekanntes Kennzeichen bleibt unangetastet: lieber der Wert der
+    Bibliothek als ein geratenes Vorzeichen. VORZEICHEN deckt die vier
+    Kennzeichen ab, die MT940 kennt, und ein Test haelt es dabei.
+    """
+    from kefiya.utils.auszug_pruefung import VORZEICHEN
+
+    richtung = VORZEICHEN.get(str(status or "").upper())
+    if richtung is None:
+        return amount
+    return abs(amount) * richtung
+
+
 def mt940_entries(text):
     """Canonical entries out of an MT940 statement.
 
@@ -624,6 +649,7 @@ def mt940_entries(text):
         amount = getattr(amount, "amount", amount)
         if amount is None:
             continue
+        amount = _mit_richtigem_vorzeichen(amount, data.get("status"))
         date = data.get("entry_date") or data.get("date")
         if date is None:
             continue
