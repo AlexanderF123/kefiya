@@ -33,6 +33,32 @@ function kefiya_handle_transfer_response(frm, msg) {
             message: __("The bank asks for a release."),
             indicator: "orange"
         }, 8);
+        // A decoupled release is confirmed in the banking app. Nobody asked
+        // the bank afterwards whether it had been, so this form asks -- in
+        // later requests -- and the server marks the order sent.
+        if (msg.decoupled && kefiya.await_release) {
+            kefiya.await_release({
+                login: msg.docname, names: [frm.doc.name],
+                scope: frm.doc.name,
+                done: function (status, message) {
+                    if (status === "submitted") {
+                        frappe.show_alert({ message: __("Released in the"
+                            + " banking app. Transfer submitted."),
+                            indicator: "green" });
+                    } else if (status === "error") {
+                        frappe.msgprint({ title: __("Release failed"),
+                            indicator: "red", message: message || "" });
+                    } else {
+                        frappe.msgprint({ title: __("Still waiting for the"
+                            + " release"), indicator: "orange",
+                            message: __("The bank has not reported the"
+                                + " release. Check your online banking"
+                                + " before sending again.") });
+                    }
+                    frm.reload_doc();
+                }
+            });
+        }
     } else if (msg.status === "vop_mismatch") {
         kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
     } else {

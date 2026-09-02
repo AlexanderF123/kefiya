@@ -131,7 +131,10 @@ frappe.provide("kefiya");
             } else if (data.mfa_required) {
                 fields.push({ fieldtype: "HTML", fieldname: "waiting",
                     label: __("Waiting for Interaction"),
-                    options: __("Follow the instructions on your banking app or device.") });
+                    options: __("Confirm the release in your banking app."
+                        + " This box closes by itself once the bank reports"
+                        + " the release; you do not need to press anything"
+                        + " here.") });
             }
         }
         // Prepended only now: everything above addresses the fields by index
@@ -211,6 +214,63 @@ frappe.provide("kefiya");
     }
 
     kefiya.tan_prompt = tanPrompt;
+
+    // Ask the bank, every few seconds, whether a decoupled release has been
+    // given -- from the page that sent the order, in LATER requests.
+    //
+    // Why this exists: the transfer path parks the challenge and returns
+    // "tan_required" at once. The box above then waited for
+    // kefiya_release_arrived, an event only the statement fetch ever sends,
+    // because only the fetch polled. On the transfer path nobody asked the
+    // bank anything: the user confirmed in the app, the box sat there, the
+    // order stayed "Due", and there was not even an error to report --
+    // KEF-TRF-2026-00007, 02.09.2026, 16:50.
+    //
+    // Each ask is send_transfer_tan with an empty TAN, which resumes the
+    // parked dialog and sends a status query (TAN process 'S'). "tan_required"
+    // back means "not yet"; "submitted" means released -- and the server
+    // marks the orders sent before answering, which the resume path never
+    // did either. Nothing here re-sends the order.
+    //
+    // done(status) fires once: "submitted", "error", or "timeout".
+    function awaitRelease(opts) {
+        var login = opts.login, names = opts.names || [];
+        var scope = opts.scope || login;
+        var every = opts.every || 3000;
+        var ceiling = opts.ceiling || 180000;
+        var started = Date.now(), stopped = false;
+
+        function finish(status, message) {
+            if (stopped) return;
+            stopped = true;
+            if (opts.done) opts.done(status, message);
+        }
+        function ask() {
+            if (stopped) return;
+            if (Date.now() - started > ceiling) {
+                finish("timeout");
+                return;
+            }
+            frappe.call({
+                method: "kefiya.utils.client.send_transfer_tan",
+                args: { kefiya_login: login, tan: "", user_scope: scope,
+                        transfer_names: JSON.stringify(names) },
+                silent: true,
+                callback: function (r) {
+                    var m = (r && r.message) || {};
+                    if (m.status === "submitted") finish("submitted");
+                    else if (m.status === "error") finish("error", m.message);
+                    else setTimeout(ask, every);
+                },
+                error: function (r) {
+                    finish("error", kefiya.call_error ? kefiya.call_error(r) : "");
+                }
+            });
+        }
+        setTimeout(ask, every);
+        return { stop: function () { stopped = true; } };
+    }
+    kefiya.await_release = awaitRelease;
 
     // Exported on its own as well: the Kefiya Login form builds its own box
     // (it has the form's docname where this one has a login from a run) and
