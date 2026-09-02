@@ -348,3 +348,10 @@ The bank checked the payee for this order and will not release it until that che
 {0}"
 "This transfer has gone to the bank. Its date cannot be changed here -- recall it with your bank if it must not be executed as it stands.","Dieser Auftrag ist bei der Bank. Sein Datum kann hier nicht mehr geändert werden — bitte bei der Bank widerrufen, wenn er so nicht ausgeführt werden soll."
 "{0}: the bank is waiting for a release, but this could not be noted down here, so the release cannot be answered. Look in your online banking before sending again -- an order may have reached the bank.","{0}: Die Bank wartet auf eine Freigabe, aber der Vorgang konnte hier nicht festgehalten werden — die Freigabe kann deshalb nicht beantwortet werden. Bitte vor einem erneuten Senden im Online-Banking nachsehen: Ein Auftrag kann die Bank erreicht haben."
+Release failed,Freigabe fehlgeschlagen
+Released in the banking app. Handed to the bank: {0} orders,In der Banking-App freigegeben. An die Bank übergeben: {0} Aufträge
+Still waiting for the release,Warte noch auf die Freigabe
+"The bank has not reported the release. If you confirmed it in the app, check your online banking before sending again; the order is still marked as not sent here.","Die Bank hat die Freigabe nicht gemeldet. Falls Sie sie in der App bestätigt haben, prüfen Sie Ihr Online-Banking, bevor Sie erneut senden; der Auftrag gilt hier weiterhin als nicht gesendet."
+Confirm the release in your banking app. This box closes by itself once the bank reports the release; you do not need to press anything here.,"Bestätigen Sie die Freigabe in Ihrer Banking-App. Dieses Fenster schließt sich von selbst, sobald die Bank die Freigabe meldet; Sie müssen hier nichts drücken."
+Released in the banking app. Transfer submitted.,In der Banking-App freigegeben. Überweisung übermittelt.
+The bank has not reported the release. Check your online banking before sending again.,"Die Bank hat die Freigabe nicht gemeldet. Prüfen Sie Ihr Online-Banking, bevor Sie erneut senden."

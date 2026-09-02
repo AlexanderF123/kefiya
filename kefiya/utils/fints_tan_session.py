@@ -359,4 +359,9 @@ class TanSession:
 
             # on success clear stored tan state
             self._persist_fints_state()
+            # And close the "confirm in your app" box. The fetch path did
+            # this from its own poll; the transfer path never polled, so the
+            # box waited for an event nobody sent and the user closed it by
+            # hand -- or did not, and pressed Send again.
+            self._tell_the_browser_it_can_stop_waiting()
 

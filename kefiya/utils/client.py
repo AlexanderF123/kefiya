@@ -969,13 +969,27 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
 
     status = (result or {}).get("status")
     if status == "submitted":
-        doc.db_set("status", "Scheduled at Bank" if scheduled else "Sent")
-        if result.get("task_id"):
-            doc.db_set("bank_task_id", result["task_id"])
+        _mark_sent([doc], result, scheduled)
     elif status == "vop_mismatch":
         doc.db_set("vop_pending", 1)
         _parked_is_not_failed(doc)
     return result
+
+
+def _mark_sent(docs, result, scheduled):
+    """Write down that the bank now holds these orders. One place.
+
+    Three paths end with the bank accepting an order: the single send, the
+    outbox batch, and the release of a parked challenge in a later request.
+    Only the first two wrote it down. An order released in the banking app
+    stayed "Due" on the outgoing page while its money was gone -- and "Due"
+    is the one state that invites a second send. See send_transfer_tan.
+    """
+    task_id = (result or {}).get("task_id")
+    for doc in docs:
+        doc.db_set("status", "Scheduled at Bank" if scheduled else "Sent")
+        if task_id:
+            doc.db_set("bank_task_id", task_id)
 
 
 def _parked_is_not_failed(doc):
@@ -1485,11 +1499,7 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
         # The bank accepted one message covering all of them, so they are
         # marked together -- leaving part of a batch as unsent would invite a
         # second send of money that is already gone.
-        for doc in docs:
-            doc.db_set("status",
-                       "Scheduled at Bank" if scheduled else "Sent")
-            if result.get("task_id"):
-                doc.db_set("bank_task_id", result["task_id"])
+        _mark_sent(docs, result, scheduled)
     elif status == "vop_mismatch":
         for doc in docs:
             doc.db_set("vop_pending", 1)
@@ -1598,8 +1608,8 @@ def approve_vop_transfer(kefiya_login, user_scope, confirmed=0):
 
 
 @frappe.whitelist()
-def send_transfer_tan(kefiya_login, tan, user_scope):
-    """Continue a pending SEPA transfer by sending the user's TAN.
+def send_transfer_tan(kefiya_login, tan, user_scope, transfer_names=None):
+    """Continue a pending SEPA transfer: answer the parked challenge.
 
     Reuses the controller's stored-TAN resume mechanism (the pending transfer
     dialog was persisted when the TAN was requested).
@@ -1610,6 +1620,20 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
     never looking at the answer at all, while its own docstring promised that
     a money movement is never reported as done on a guess. A refusal now
     arrives here as an exception and is reported as one.
+
+    ``transfer_names`` are the orders this release belongs to. Given them, a
+    release that goes through marks them sent here -- the resume path never
+    did, so an order released in the banking app stayed "Due" on the outgoing
+    page while its money was gone, which is the one state that invites a
+    second send.
+
+    For a decoupled procedure the TAN is empty and this is a status query:
+    resuming the parked dialog sends TAN process 'S', the bank answers "not
+    yet" as a fresh challenge -- reported here as tan_required -- or carries
+    on with the order. The outgoing-payments page asks this every few seconds
+    while its release box is open. That is the LATER request python-fints
+    documents for a decoupled release, not a poll on the dialog that has just
+    sent the order. Nothing here re-sends the order.
     """
     # Permission gate: continuing a money transfer with a TAN requires write
     # rights on the paying Kefiya Login (whitelisted endpoint would otherwise be
@@ -1621,12 +1645,19 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
         FinTSController,
         TanInteractionRequired,
     )
+    if isinstance(transfer_names, str):
+        transfer_names = frappe.parse_json(transfer_names)
+    names = [n for n in (transfer_names or []) if n]
+
     interactive = {"docname": user_scope, "enabled": True}
     try:
         # Re-instantiating with the TAN resumes the stored dialog and sends it.
-        FinTSController(kefiya_login, interactive, tan=tan)
+        # None, not "": that is what the release box hands over for a
+        # decoupled procedure, and the path that is known to work.
+        FinTSController(kefiya_login, interactive, tan=tan or None)
     except TanInteractionRequired:
-        # The bank requested a further/renewed challenge; the UI re-prompts.
+        # The bank requested a further/renewed challenge -- or, on a decoupled
+        # procedure, has not seen the release yet. The caller asks again.
         return {"status": "tan_required", "docname": kefiya_login}
     except Exception as e:
         frappe.log_error(
@@ -1634,7 +1665,11 @@ def send_transfer_tan(kefiya_login, tan, user_scope):
             message=frappe.get_traceback(),
         )
         return {"status": "error", "message": str(e)}
-    return {"status": "submitted"}
+
+    docs = [frappe.get_doc("Kefiya Transfer", n) for n in names]
+    if docs:
+        _mark_sent(docs, {}, _bank_holds_the_date(docs[0]))
+    return {"status": "submitted", "sent": [d.name for d in docs]}
 
 
 @frappe.whitelist()
@@ -2159,5 +2194,9 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
             # get index of tan_mode in possible_tan_modes
             FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium)
     except TanInteractionRequired:
-        # will have triggered user interaction via socket
-        pass
+        # will have triggered user interaction via socket -- or, on a
+        # decoupled procedure, the bank has not seen the release yet. Said
+        # so, rather than returning None for both outcomes: the box used to
+        # take silence for success.
+        return {"status": "tan_required", "docname": fints_login}
+    return {"status": "submitted", "docname": fints_login}

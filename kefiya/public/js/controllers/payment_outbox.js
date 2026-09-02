@@ -843,7 +843,8 @@ kefiya.payment_outbox = function (root) {
 					__("Approved: {0}", [(m.approved || []).length]),
 					__("Not approved"));
 			}
-			reportSendResult(m, (m.sent || []).length || names.length, login);
+			reportSendResult(m, (m.sent || []).length || names.length, login,
+				m.sent || names);
 		}).catch(function (r) {
 			view.busy = false;
 			reportFailure(__("Not sent"), r);
@@ -855,13 +856,21 @@ kefiya.payment_outbox = function (root) {
 	// check comes back the same three ways, and this was written out twice --
 	// so the next status the server learns to return would have had two places
 	// to be handled, and would have been handled in one.
-	function reportSendResult(m, count, login) {
+	function reportSendResult(m, count, login, names) {
 		if (m.status === "error") {
 			frappe.msgprint({ title: __("Not sent"), indicator: "red",
 				message: esc(m.message || "") });
 		} else if (m.status === "tan_required") {
 			frappe.show_alert({ message: __("The bank asks for a release."),
 				indicator: "orange" }, 8);
+			// A decoupled release is given in the banking app, and nobody
+			// asked the bank afterwards whether it had been: the order stayed
+			// "Due" with no error at all. So this page asks, in later
+			// requests, until the bank says yes or the wait runs out.
+			if (m.decoupled && kefiya.await_release) {
+				awaitRelease(login, names || [], count);
+				return;
+			}
 		} else if (m.status === "vop_mismatch") {
 			// Nothing was handed to the bank. This branch did not exist, so a
 			// parked payee check fell into the success case below and was
@@ -878,6 +887,34 @@ kefiya.payment_outbox = function (root) {
 				indicator: "green" }, 8);
 		}
 		load();
+	}
+
+	// The release after a parked decoupled challenge, and what it came to.
+	// "submitted" here means the server has already marked the orders sent.
+	function awaitRelease(login, names, count) {
+		kefiya.await_release({
+			login: login, names: names, scope: login,
+			done: function (status, message) {
+				if (status === "submitted") {
+					view.selected = {};
+					frappe.show_alert({
+						message: __("Released in the banking app. Handed to"
+							+ " the bank: {0} orders", [count]),
+						indicator: "green" }, 8);
+				} else if (status === "error") {
+					frappe.msgprint({ title: __("Release failed"),
+						indicator: "red", message: esc(message || "") });
+				} else {
+					frappe.msgprint({ title: __("Still waiting for the release"),
+						indicator: "orange",
+						message: __("The bank has not reported the release."
+							+ " If you confirmed it in the app, check your"
+							+ " online banking before sending again; the"
+							+ " order is still marked as not sent here.") });
+				}
+				load();
+			}
+		});
 	}
 
 	// One message for a batch, and it names what did not work. A batch that
