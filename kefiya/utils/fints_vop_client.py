@@ -30,7 +30,8 @@ WHY THIS CANNOT SEND TWICE, which is the only question that matters here:
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
                                     POLL_LIMIT_SECONDS, can_be_approved,
                                     demands_confirmation, poll_pause,
-                                    readable_verdict, result_from)
+                                    readable_verdict, result_from,
+                                    wants_confirmation)
 
 #: The releases this copy was checked against. Any other one gets the
 #: library's own method, unchanged -- a stale copy of a payment path is worse
@@ -354,7 +355,8 @@ def _build(parts):
                         # cannot work.
                         if not can_be_approved(hivpp):
                             _log_no_vop_id(
-                                hivpp, getattr(self, "vop_poll_trail", None))
+                                hivpp, getattr(self, "vop_poll_trail", None),
+                                said=what_the_bank_said(self))
                         # Park whenever there is something to release with and
                         # a reason to. The reason is either a verdict that
                         # wants looking at, or the bank saying outright that it
@@ -373,6 +375,18 @@ def _build(parts):
                                 command_seg=command_seg,
                                 resume_method=resume_func,
                             )
+                        # What the TAN -- or every status query of a
+                        # decoupled release -- carries along: the execution
+                        # order, when the bank asked for one. Not merely when
+                        # there is a VoP-ID to send it with. The Sparkasse
+                        # answers a matched name with "3091 nicht benoetigt"
+                        # and a VoP-ID both; sending HKVPA on each poll of
+                        # the release got "0020 erhalten" for the HKVPA and
+                        # "9010 nicht ausgefuehrt" for the order, twice.
+                        if not wants_confirmation(
+                                response, (vop_seg[0] if vop_seg else None,
+                                           command_seg, tan_seg), hivpp):
+                            hivpp = None
                     else:
                         hivpp = None
 
@@ -479,8 +493,15 @@ def _poll_note(step, waited, hivpp, scroll=None, said=None):
     return note
 
 
-def _log_no_vop_id(hivpp, trail=None):
-    """The bank never handed over a VoP-ID. Said, so it is not guessed at."""
+def _log_no_vop_id(hivpp, trail=None, said=None):
+    """The bank never handed over a VoP-ID. Said, so it is not guessed at.
+
+    ``said`` is every response code the connection heard, message-level
+    ones included. The trail shows only the codes that answer the payee
+    check itself, and the Volksbank's "9800 FGW Gatewaywechsel" -- the one
+    line that would explain a "9000 interne Probleme" on the third ask --
+    answers the message, not the segment.
+    """
     try:
         import frappe
 
@@ -493,12 +514,14 @@ def _log_no_vop_id(hivpp, trail=None):
                 "\n\nLast answer in full:\npolling_id={2}"
                 "\nwait_for_seconds={3}\npayment_status_report={4} bytes"
                 "\nvop_single_result={5}"
+                "\n\nEvery code the connection heard, oldest first:\n{6}"
             ).format(POLL_LIMIT_SECONDS,
                      "\n".join(trail or ["  (the loop kept no trail)"]),
                      getattr(hivpp, "polling_id", None),
                      getattr(hivpp, "wait_for_seconds", None),
                      len(getattr(hivpp, "payment_status_report", b"") or b""),
-                     getattr(hivpp, "vop_single_result", None)))
+                     getattr(hivpp, "vop_single_result", None),
+                     said or "  (not recorded)"))
     except Exception:
         pass
 

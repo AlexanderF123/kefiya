@@ -357,3 +357,76 @@ class TestTheCeilingIsNotThirty(unittest.TestCase):
 
     def test_it_is_a_minute(self):
         self.assertEqual(POLL_LIMIT_SECONDS, 60)
+
+
+class TestWhenTheExecutionOrderTravels(unittest.TestCase):
+    """HKVPA goes with the TAN -- and with every status query of a decoupled
+    release -- only when the bank asked for it.
+
+    The Sparkasse answers a matched name with "3091 VOP-Ausfuehrungsauftrag
+    nicht benoetigt" and a VoP-ID both. The VoP-ID alone used to decide, so
+    HKVPA went out on each poll of the release and the bank answered "0020
+    Ausfuehrungsbestaetigung erhalten" for it and "9010 Der Auftrag wurde
+    nicht ausgefuehrt" for the order. KEF-TRF-2026-00007, twice.
+    """
+
+    def _answer(self, *codes):
+        return Response([Line(c) for c in codes], by_code=True)
+
+    def test_not_needed_means_none_whatever_else_is_there(self):
+        from kefiya.utils.fints_vop import wants_confirmation
+        hivpp = Segment(vop_id=b"abc", result="RCVC")
+        self.assertFalse(wants_confirmation(
+            self._answer("3091", "3955"), (object(),), hivpp))
+
+    def test_demanded_means_yes(self):
+        from kefiya.utils.fints_vop import wants_confirmation
+        self.assertTrue(wants_confirmation(
+            self._answer("3040", "3945"), (object(),), Segment(vop_id=b"x")))
+
+    def test_a_close_match_means_yes(self):
+        from kefiya.utils.fints_vop import wants_confirmation
+        self.assertTrue(wants_confirmation(
+            self._answer("3955"), (object(),),
+            Segment(vop_id=b"x", result="RCVC")))
+
+    def test_a_match_with_nothing_said_means_no(self):
+        """A VoP-ID is not a reason. A matched name has one and nothing to
+        confirm."""
+        from kefiya.utils.fints_vop import wants_confirmation
+        self.assertFalse(wants_confirmation(
+            self._answer("3955"), (object(),),
+            Segment(vop_id=b"x", result="RVMT")))
+        self.assertFalse(wants_confirmation(
+            self._answer("3955"), (object(),), Segment(vop_id=b"x")))
+
+    def test_the_code_is_looked_for_on_every_segment(self):
+        """The bank chooses which segment a code answers; 3091 has been seen
+        on the payee check, 3945 on the TAN request."""
+        from kefiya.utils.fints_vop import said_to_any
+
+        class OnlyTheSecond:
+            def responses(self, segment):
+                return [Line("3091")] if segment == "zwei" else []
+
+        self.assertTrue(said_to_any(OnlyTheSecond(), ("eins", "zwei"), "3091"))
+        self.assertFalse(said_to_any(OnlyTheSecond(), ("eins",), "3091"))
+        self.assertFalse(said_to_any(OnlyTheSecond(), (None,), "3091"))
+
+    def test_it_never_raises(self):
+        from kefiya.utils.fints_vop import said_to_any, wants_confirmation
+        self.assertFalse(said_to_any(Response([], explode=True), (object(),),
+                                     "3091"))
+        self.assertFalse(wants_confirmation(
+            Response([], explode=True), (object(),), None))
+
+    def test_the_copy_asks_before_it_parks(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "utils", "fints_vop_client.py")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        body = source.split("def _send_pay_with_possible_retry(")[1]
+        self.assertLess(body.index("if not wants_confirmation("),
+                        body.index("return NeedTANResponse("))
+        self.assertIn("hivpp = None", body)
