@@ -333,9 +333,22 @@ class TestTheBankSaidThereIsMore(unittest.TestCase):
             source = handle.read()
         loop = source.split("def _await_vop_result(")[1]
         self.assertIn("aufsetzpunkt=scroll)", loop)
-        # And it is refreshed from each answer, or the second ask repeats
-        # the first one's reference for as long as the loop runs.
-        self.assertIn("scroll = touchdown_in(again, query) or scroll", loop)
+        # And it is read off each answer anew: the reference is the bank's
+        # ticket for the very next ask, and an answer without one leaves the
+        # next ask without one. Repeating the previous ticket is what the
+        # second follow-up did when the Volksbank answered it with 9000.
+        self.assertIn("scroll = touchdown_in(again, query)\n", loop)
+        self.assertNotIn("or scroll", loop)
+
+    def test_the_trail_says_what_each_ask_was_built_from(self):
+        """The Aufsetzpunkt as this answer attached it, and the bank's codes
+        to the ask -- so "was a fresh one issued" can be read off the log
+        instead of guessed."""
+        self.assertIn("aufsetzpunkt=None",
+                      _poll_note(2, 4.0, Segment(), None))
+        self.assertIn("said=3040 mehr", _poll_note(
+            2, 4.0, Segment(), "staticscrollref", said="3040 mehr"))
+        self.assertNotIn("said=", _poll_note(2, 4.0, Segment(), None))
 
 
 class TestTheCeilingIsNotThirty(unittest.TestCase):

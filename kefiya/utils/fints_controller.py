@@ -33,6 +33,7 @@ from kefiya.utils import accepted_payee
 from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import pain_payee
+from kefiya.utils import release_outcome
 from kefiya.utils import vop_rule
 from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
 from kefiya.utils.fints_masking import mask_iban
@@ -327,6 +328,12 @@ class FinTSController(TanSession):
         if self.__init_tan_mode(tan_mode, tan_medium, tan) is False:
             raise TanInteractionRequired()
 
+        # What became of a parked release, in one word -- see release_outcome.
+        # Set BEFORE the block below, so a caller that reads it always finds
+        # one: an access with nothing parked has nothing released either.
+        self.release_outcome = release_outcome.NOTHING_PARKED
+        self.release_failure = ""
+
         # If there is an open TAN request, try to fulfill it.
         #
         # Not while a dialog of this access is already standing: resume_dialog()
@@ -346,6 +353,7 @@ class FinTSController(TanSession):
             if self.__parked_challenge_is_stale():
                 self.__discard_parked_challenge()
             else:
+                self.release_outcome = release_outcome.PENDING
                 try:
                     self._resume_and_answer_the_parked_tan(tan)
                 except TanInteractionRequired:
@@ -374,6 +382,19 @@ class FinTSController(TanSession):
                     # Keeping it would brick the access; throwing it away costs
                     # one fresh TAN, which the ordinary login now asks for.
                     self.__discard_parked_challenge()
+
+                    # Swallowed on purpose -- the fetch path goes on with a
+                    # fresh login -- but not silently, and not as a success.
+                    # This branch wrote nothing anywhere, and send_transfer_tan
+                    # then read a constructor that had not raised as a release
+                    # that had gone through: KEF-TRF-2026-00007, 03.09.2026,
+                    # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
+                    # ausgefuehrt". The word below is what the transfer path
+                    # reads instead, and the log carries the bank's own
+                    # sentences, which python-fints' exception replaces with
+                    # one about a wrong bank URL.
+                    self.release_outcome = release_outcome.FAILED
+                    self.release_failure = self.__note_the_failed_release()
 
         # After successful login/tan verification fetch available accounts if not already present
         if self.__fetch_fints_accounts() is False:
@@ -631,6 +652,34 @@ class FinTSController(TanSession):
             return True
 
         return time_diff_in_hours(now_datetime(), parked_since) > PARKED_CHALLENGE_MAX_AGE_HOURS
+
+    def __note_the_failed_release(self):
+        """Write down that answering the parked challenge failed, and how.
+
+        Called from inside the except block, so the traceback is still the
+        one that matters. Answers the bank's own words for a message to a
+        person; never raises, because it runs on a path that is already
+        cleaning up.
+        """
+        try:
+            said = fints_vop_client.what_the_bank_said(self.fints_connection)
+        except Exception:
+            said = "(the bank's words could not be read)"
+        try:
+            frappe.log_error(
+                title="Kefiya: the parked release could not be answered",
+                message=(
+                    "login={0}\n\nThe status query on the parked challenge"
+                    " failed. The challenge has been discarded; the order"
+                    " it belonged to is NOT sent.\n\nWhat the bank said:\n"
+                    "{1}\n\n{2}"
+                ).format(self.kefiya_login.name, said, frappe.get_traceback()),
+                reference_doctype="Kefiya Login",
+                reference_name=self.kefiya_login.name,
+            )
+        except Exception:
+            pass
+        return said
 
     def __discard_parked_challenge(self):
         """Forget a challenge that can no longer be released.
