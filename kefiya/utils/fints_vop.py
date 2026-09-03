@@ -65,6 +65,22 @@ from kefiya.utils.vop_rule import result_from
 #: The bank checked the payee and wants the check confirmed before releasing.
 CONFIRMATION_DEMANDED = "3945"
 
+#: The bank checked the payee and needs NO execution order for it. The
+#: Sparkasse says this on every transfer whose name matched::
+#:
+#:     3091 VOP-Ausfuehrungsauftrag nicht benoetigt.
+#:
+#: An order that is nevertheless sent one -- HKVPA on every status query of
+#: the decoupled release, because a VoP-ID was there to send it with -- gets
+#: "0020 Ausfuehrungsbestaetigung nach Namensabgleich erhalten" for the
+#: HKVPA and "9010 Der Auftrag wurde nicht ausgefuehrt" for the order.
+#: KEF-TRF-2026-00007, twice on 03.09.2026.
+EXECUTION_ORDER_NOT_NEEDED = "3091"
+
+#: The verdict for which the library itself attaches the execution order:
+#: a close match, which the payer has to confirm.
+CLOSE_MATCH = "RCVC"
+
 #: How long to keep asking while the bank is still checking. The bank names
 #: the pause between two questions itself (wait_for_seconds); this only bounds
 #: the total, because somebody is sitting in front of a spinner.
@@ -93,6 +109,48 @@ def demands_confirmation(response, tan_seg):
     except Exception:
         return False
     return False
+
+
+def said_to_any(response, segments, code):
+    """Did the bank answer ``code`` to any of these segments?
+
+    A response code refers to one segment, and the bank chooses which: 3091
+    has been seen on the payee check, 3945 on the TAN request. Asking each
+    segment in turn is the only way not to miss it. Defensive like
+    demands_confirmation: what cannot be read answers False.
+    """
+    for segment in segments or ():
+        if segment is None:
+            continue
+        try:
+            for resp in response.responses(segment):
+                if str(getattr(resp, "code", "")) == code:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def wants_confirmation(response, segments, hivpp):
+    """Should the execution order (HKVPA) travel with the TAN, or with the
+    status queries of a decoupled release?
+
+    Only when the bank asked for it: it said outright that it will not
+    release without the confirmation (3945), or the verdict is a close match
+    (RCVC), which is the one case the library itself sends HKVPA for. A bank
+    that said it needs no execution order (3091) gets none, whatever else
+    the answer carries -- sending one anyway is what ended KEF-TRF-2026-00007
+    with "9010 Der Auftrag wurde nicht ausgefuehrt" after the release in
+    the app.
+
+    Deliberately not "whenever there is a VoP-ID": at a bank whose name check
+    matched there is a VoP-ID and nothing to confirm.
+    """
+    if said_to_any(response, segments, EXECUTION_ORDER_NOT_NEEDED):
+        return False
+    if said_to_any(response, segments, CONFIRMATION_DEMANDED):
+        return True
+    return result_from(hivpp) == CLOSE_MATCH
 
 
 def can_be_approved(hivpp):
