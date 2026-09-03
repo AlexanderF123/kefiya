@@ -287,7 +287,15 @@ def _build(parts):
                         " through".format(len(self.vop_poll_trail), waited))
                     _log_poll_failure()
                     break
-                scroll = touchdown_in(again, query) or scroll
+                # Only the reference THIS answer carries, or none. An
+                # Aufsetzpunkt is the bank's ticket for the very next ask;
+                # repeating the previous one where the bank attached none
+                # sends a ticket it did not issue. The second follow-up at
+                # the Volksbank came back "9000 interne Probleme" carrying
+                # exactly such a repeated reference, and whether the bank
+                # had issued a fresh one could not be told from the trail.
+                # Now it can.
+                scroll = touchdown_in(again, query)
                 if nxt is None:
                     # The bank answered, but with no payee-check segment in
                     # it. Worth its own line: it is a different thing from a
@@ -304,7 +312,7 @@ def _build(parts):
                 hivpp = nxt
                 self.vop_poll_trail.append(
                     _poll_note(len(self.vop_poll_trail), waited, hivpp,
-                               scroll))
+                               scroll, said=_codes_in(again, query)))
             return hivpp
 
         def _send_pay_with_possible_retry(self, dialog, command_seg,
@@ -444,14 +452,18 @@ def touchdown_in(response, asked):
     return None
 
 
-def _poll_note(step, waited, hivpp, scroll=None):
+def _poll_note(step, waited, hivpp, scroll=None, said=None):
     """One line about one answer to the payee check.
 
     The point of the trail: "asked for 30 seconds and got nothing" was said
     whether the bank had been asked fifteen times or once, and those are
     different faults with different fixes. Now the log says which.
+
+    ``scroll`` is the Aufsetzpunkt this very answer attached -- None when it
+    attached none -- and ``said`` the bank's response codes to the ask, so
+    the trail shows what the next ask was built from.
     """
-    return (
+    note = (
         "  ask {0} after {1:.0f}s: vop_id={2} result={3!r} polling_id={4}"
         " report={5} bytes wait={6} aufsetzpunkt={7!r}"
     ).format(
@@ -462,6 +474,9 @@ def _poll_note(step, waited, hivpp, scroll=None):
         len(getattr(hivpp, "payment_status_report", b"") or b""),
         getattr(hivpp, "wait_for_seconds", None),
         scroll)
+    if said:
+        note += " said={0}".format(said)
+    return note
 
 
 def _log_no_vop_id(hivpp, trail=None):

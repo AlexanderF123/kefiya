@@ -12,6 +12,7 @@ import json
 from frappe import _
 
 from kefiya.utils import account_classification, account_kind
+from kefiya.utils import release_outcome
 
 
 def _use_tan_authentication() -> bool:
@@ -1654,7 +1655,7 @@ def send_transfer_tan(kefiya_login, tan, user_scope, transfer_names=None):
         # Re-instantiating with the TAN resumes the stored dialog and sends it.
         # None, not "": that is what the release box hands over for a
         # decoupled procedure, and the path that is known to work.
-        FinTSController(kefiya_login, interactive, tan=tan or None)
+        controller = FinTSController(kefiya_login, interactive, tan=tan or None)
     except TanInteractionRequired:
         # The bank requested a further/renewed challenge -- or, on a decoupled
         # procedure, has not seen the release yet. The caller asks again.
@@ -1666,10 +1667,44 @@ def send_transfer_tan(kefiya_login, tan, user_scope, transfer_names=None):
         )
         return {"status": "error", "message": str(e)}
 
+    # The constructor does not raise when the status query fails: it
+    # discards the dead challenge and goes on, which is right for a fetch and
+    # was read here as a release. KEF-TRF-2026-00007 was marked "Sent" on the
+    # bank's "9010 Der Auftrag wurde nicht ausgefuehrt". So the word the
+    # controller wrote down is what decides, and only one word does.
+    if not release_outcome.may_mark_sent(controller.release_outcome):
+        return {"status": "error",
+                "message": _release_not_given(controller, kefiya_login)}
+
     docs = [frappe.get_doc("Kefiya Transfer", n) for n in names]
     if docs:
         _mark_sent(docs, {}, _bank_holds_the_date(docs[0]))
     return {"status": "submitted", "sent": [d.name for d in docs]}
+
+
+def _release_not_given(controller, kefiya_login):
+    """Why the orders stay unsent, in the bank's words where it has any.
+
+    Two ways to land here. The status query failed -- the bank answered the
+    query with an error, the challenge is gone, and the order it belonged to
+    is not sent. Or nothing was parked at all: a release box that keeps
+    asking after the challenge was discarded, or a second tab, finds no
+    challenge to answer -- and used to be told "submitted" for it.
+    """
+    outcome = getattr(controller, "release_outcome", None)
+    if outcome == release_outcome.FAILED:
+        return _(
+            "The bank did not release this order. It was NOT sent, and the"
+            " release request has been discarded.\n\nWhat the bank said:\n{0}"
+            "\n\nLook in your online banking before sending again: if the"
+            " transfer is there after all, cancel this order instead of"
+            " repeating it."
+        ).format(getattr(controller, "release_failure", "") or "(nothing)")
+    return _(
+        "{0} has no release waiting for the banking app, so there was"
+        " nothing to release and nothing was marked as sent. Look in your"
+        " online banking before sending again."
+    ).format(kefiya_login)
 
 
 @frappe.whitelist()

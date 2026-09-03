@@ -40,6 +40,7 @@ from fints.client import NeedTANResponse, NeedRetryResponse
 
 from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
+from kefiya.utils import release_outcome
 from kefiya.utils import tan_challenge
 from kefiya.utils.decoupled_budget import decoupled_wait, job_budget_seconds
 from kefiya.utils.fints_errors import (
@@ -356,6 +357,12 @@ class TanSession:
             # point the TAN is actually answered means every caller inherits
             # it, and none of them has to reach into this object for it.
             self._refuse_a_refused_order()
+
+            # The one place that may say so. Everything that reports an
+            # order as sent after a release reads this word, and nothing
+            # else -- not "the constructor did not raise", which is what
+            # send_transfer_tan read while the bank was saying 9010.
+            self.release_outcome = release_outcome.RELEASED
 
             # on success clear stored tan state
             self._persist_fints_state()

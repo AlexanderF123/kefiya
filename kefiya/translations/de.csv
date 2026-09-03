@@ -376,3 +376,15 @@ The statement cannot rebuild this account: see the plan. Nothing was changed.,Di
 {0}: {1} bookings replaced by {2} from the statement. {3},{0}: {1} Buchungen ersetzt durch {2} aus dem Auszug. {3}
 The account now matches the bank.,Das Konto stimmt jetzt mit der Bank überein.
 {0} periods still deviate.,{0} Zeiträume weichen noch ab.
+"The bank did not release this order. It was NOT sent, and the release request has been discarded.
+
+What the bank said:
+{0}
+
+Look in your online banking before sending again: if the transfer is there after all, cancel this order instead of repeating it.","Die Bank hat diesen Auftrag nicht freigegeben. Er wurde NICHT gesendet, und die Freigabeanforderung ist verworfen.
+
+Was die Bank gesagt hat:
+{0}
+
+Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
+"{0} has no release waiting for the banking app, so there was nothing to release and nothing was marked as sent. Look in your online banking before sending again.","Für {0} wartet keine Freigabe auf die Banking-App, also gab es nichts freizugeben und nichts wurde als gesendet vermerkt. Bitte vor einem erneuten Senden im Online-Banking nachsehen."
