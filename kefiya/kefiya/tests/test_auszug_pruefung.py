@@ -36,9 +36,10 @@ import os
 import unittest
 from decimal import Decimal
 
-from kefiya.utils.auszug_pruefung import (VORZEICHEN, abschnitte, blaetter,
-                                          blinde_jahre, kette, summenprobe,
-                                          urteil, vergleiche)
+from kefiya.utils.auszug_pruefung import (VORZEICHEN, abschnitte, bewegung_aus,
+                                          blaetter, blinde_jahre, fenster,
+                                          kette, summenprobe, urteil,
+                                          vergleiche)
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -78,6 +79,56 @@ KETTE_GEBROCHEN = (ZWEI_BLAETTER
 def _ein_blatt(zeilen, anfang="C231230EUR1000,00", ende="C241230EUR1000,00"):
     return (":20:REF\n:25:67250020/9219498\n:28C:00000\n"
             ":60F:{0}\n{1}:62F:{2}\n-\n".format(anfang, "".join(zeilen), ende))
+
+
+#: So datiert StarMoney: der Anfangssaldo traegt den Tag der ERSTEN
+#: Buchung, nicht den Vortag. Nachgebildet dem Auszug von 33108982,
+#: ``:60F:C210104EUR1991,03`` mit sechs Buchungen vom 04.01.2021 darunter.
+STARMONEY_DATIERT = (
+    ":20:REFSTARMONEY\n"
+    ":25:67092300/33108982\n"
+    ":28C:00000/001\n"
+    ":60F:C210104EUR1000,00\n"
+    ":61:2101040104CR250,00NMSCNONREF\n"
+    ":86:051?00GUTSCHRIFT\n"
+    ":61:2101040104D100,00NMSCNONREF\n"
+    ":86:020?00AUFTRAG\n"
+    ":61:2103150315D50,00NMSCNONREF\n"
+    ":86:020?00AUFTRAG\n"
+    ":62F:C211230EUR1100,00\n"
+    "-\n"
+    ":20:REFSTARMONEY\n"
+    ":25:67092300/33108982\n"
+    ":28C:00000/001\n"
+    ":60F:C220103EUR1100,00\n"
+    ":61:2201030103D100,00NMSCNONREF\n"
+    ":86:020?00AUFTRAG\n"
+    ":62F:C221230EUR1000,00\n"
+    "-\n"
+)
+
+#: Ein Blatt in zwei Bloecken: der erste endet mit einem Zwischensaldo
+#: (:62M:), der zweite nimmt ihn mit :60M: auf. So exportiert StarMoney
+#: den Jahrgang 2020 von Konto 33108982 -- 221 Buchungen, die vorher
+#: verloren gingen.
+GETEILTES_BLATT = (
+    ":20:REFSTARMONEY\n"
+    ":25:67092300/33108982\n"
+    ":28C:00000\n"
+    ":60F:C200813EUR0,00\n"
+    ":61:2008130813CR2230,04NMSCNONREF\n"
+    ":86:051?00GUTSCHRIFT\n"
+    ":62M:C200813EUR2230,04\n"
+    "-\n"
+    ":20:REFSTARMONEY\n"
+    ":25:67092300/33108982\n"
+    ":28C:00000/001\n"
+    ":60M:C200813EUR2230,04\n"
+    ":61:2012300102D239,01NMSCNONREF\n"
+    ":86:020?00AUFTRAG\n"
+    ":62F:C201230EUR1991,03\n"
+    "-\n"
+)
 
 
 class TestVorzeichen(unittest.TestCase):
@@ -137,6 +188,106 @@ class TestDasBlattLesen(unittest.TestCase):
             ":62F:C241230EUR10,00\n-\n")
         konten = {blatt.konto for blatt in blaetter(zwei)}
         self.assertEqual(konten, {"9219498", "9280049"})
+
+
+class TestEinGeteiltesBlatt(unittest.TestCase):
+    """:62M: ist kein Blattende, :60M: kein Blattanfang."""
+
+    def test_zwei_bloecke_sind_ein_blatt(self):
+        blatt, = blaetter(GETEILTES_BLATT)
+        self.assertEqual(blatt.anfang_tag, "2020-08-13")
+        self.assertEqual(blatt.ende_tag, "2020-12-30")
+        self.assertEqual(blatt.zeilen, 2)
+        self.assertEqual(blatt.summe, Decimal("1991.03"))
+        self.assertEqual(summenprobe([blatt]), [])
+
+    def test_der_zwischensaldo_wird_nachgerechnet_nicht_geglaubt(self):
+        """Ein falscher :62M: aendert das Blatt nicht -- die Summenprobe
+        ueber das ganze Blatt ist die Pruefung, nicht der Zwischensaldo."""
+        gelogen = GETEILTES_BLATT.replace(":62M:C200813EUR2230,04",
+                                          ":62M:C200813EUR9999,99")
+        blatt, = blaetter(gelogen)
+        self.assertEqual(blatt.summe, Decimal("1991.03"))
+        self.assertEqual(summenprobe([blatt]), [])
+
+    def test_eine_fortsetzung_ohne_anfang_ist_kein_blatt(self):
+        nur_zweiter = GETEILTES_BLATT.split("-\n", 1)[1]
+        self.assertEqual(blaetter(nur_zweiter), [])
+
+    def test_der_buchungstag_ueber_den_jahreswechsel(self):
+        """Valuta 30.12.2020, gebucht 02.01. -- das ist der 02.01.2021."""
+        blatt, = blaetter(GETEILTES_BLATT)
+        # erster_tag ist der frueheste Buchungstag, nicht die Valuta.
+        self.assertEqual(blatt.erster_tag, "2020-08-13")
+        spaet, = blaetter(_ein_blatt([":61:2012300102D239,01NMSCNONREF\n"],
+                                     anfang="C201230EUR1000,00",
+                                     ende="C210102EUR760,99"))
+        self.assertEqual(spaet.erster_tag, "2021-01-02")
+
+
+class TestDieFenster(unittest.TestCase):
+    """von < Buchungstag <= bis -- und der erste Tag geht nicht verloren."""
+
+    def test_ein_blatt_beginnt_wo_das_vorige_endet(self):
+        eins, zwei = blaetter(ZWEI_BLAETTER)
+        self.assertEqual(fenster([eins, zwei]),
+                         [("2023-12-30", "2024-12-30"),
+                          ("2024-12-30", "2025-12-30")])
+
+    def test_ein_anfangssaldo_vom_vortag_bleibt_ausgeschlossen(self):
+        """ZWEI_BLAETTER datiert den Anfangssaldo auf den 30.12., die erste
+        Buchung ist vom 02.01.: das Fenster beginnt hinter dem 30.12."""
+        eins, _zwei = blaetter(ZWEI_BLAETTER)
+        self.assertEqual(fenster([eins])[0][0], "2023-12-30")
+
+    def test_starmoney_datiert_auf_den_ersten_buchungstag(self):
+        """Zwei Buchungen vom 04.01. auf einem Blatt, dessen Anfangssaldo
+        den 04.01. traegt. Das Fenster muss VOR dem 04.01. beginnen, sonst
+        fehlen sie -- und die Bank meldet 150,00, die man nie findet."""
+        eins, zwei = blaetter(STARMONEY_DATIERT)
+        self.assertEqual(eins.erster_tag, "2021-01-04")
+        self.assertEqual(fenster([eins, zwei]),
+                         [("2021-01-03", "2021-12-30"),
+                          ("2021-12-30", "2022-12-30")])
+
+    def test_der_erste_tag_zaehlt_beim_vergleich_mit(self):
+        """Das ist die Zahl, an der es auffiel: sechs von sechs Jahrgaengen
+        wichen ab, weil jeder erste Tag aus jedem Fenster fiel."""
+        gelesen = blaetter(STARMONEY_DATIERT)
+        gerufen = []
+
+        def bewegung(a, b):
+            gerufen.append((a, b))
+            return {("2021-01-03", "2021-12-30"): Decimal("100.00"),
+                    ("2021-12-30", "2022-12-30"): Decimal("-100.00")}[(a, b)]
+
+        self.assertEqual(vergleiche(gelesen, bewegung), [])
+        self.assertEqual(gerufen, [("2021-01-03", "2021-12-30"),
+                                   ("2021-12-30", "2022-12-30")])
+
+    def test_die_bewegung_aus_eintraegen(self):
+        """Der zweite Leser: dieselbe Frage, gestellt an gelesene
+        Eintraege statt an die Instanz."""
+        eintraege = [{"date": "2021-01-04", "amount": 250.0},
+                     {"date": "2021-01-04", "amount": -100.0},
+                     {"date": "2021-03-15", "amount": -50.0},
+                     {"date": "2022-01-03", "amount": -100.0}]
+        lesung = bewegung_aus(eintraege)
+        self.assertEqual(lesung("2021-01-03", "2021-12-30"), Decimal("100.0"))
+        self.assertEqual(lesung("2021-01-04", "2021-12-30"), Decimal("-50.0"))
+        self.assertEqual(vergleiche(blaetter(STARMONEY_DATIERT), lesung), [])
+
+    def test_das_urteil_nennt_die_fenster_als_einen_zeitraum(self):
+        gefaellt = urteil(blaetter(STARMONEY_DATIERT),
+                          bewegung_aus([{"date": "2021-01-04", "amount": 100.0},
+                                        {"date": "2022-01-03", "amount": -100.0}]))
+        self.assertEqual(gefaellt["spricht_fuer"],
+                         [("2021-01-03", "2022-12-30")])
+        # Und einzeln, fuer das Ersetzen je Blatt.
+        self.assertEqual(gefaellt["fenster"],
+                         [("2021-01-03", "2021-12-30"),
+                          ("2021-12-30", "2022-12-30")])
+        self.assertEqual(gefaellt["abweichungen"], [])
 
 
 class TestFrageEinsDieKette(unittest.TestCase):

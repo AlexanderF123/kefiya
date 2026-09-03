@@ -474,6 +474,25 @@ def reference_number(bank_account, entry):
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
+def wiederholung(reference, ordinal):
+    """The reference of the ordinal-th identical entry within one file.
+
+    Two bookings can be the same to the last character -- on 30.03.2022 two
+    PayPal debits of 6,42 EUR with the same text, on account 33108982 -- and
+    they are two bookings. Under one reference the second read as a repeat
+    of the first and was silently dropped: the rebuild booked 1.112 of the
+    1.113 rows of that year, and the bank's balance said so.
+
+    The first keeps its reference, so nothing already written changes its
+    identity; the k-th gets one derived from it, the same on every run, so
+    a second import still recognises it.
+    """
+    if ordinal <= 1:
+        return reference
+    return hashlib.md5("{0}|{1}".format(reference, ordinal)
+                       .encode("utf-8")).hexdigest()
+
+
 # --------------------------------------------------------------------------
 # MT940
 # --------------------------------------------------------------------------

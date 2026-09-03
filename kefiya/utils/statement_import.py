@@ -30,7 +30,7 @@ from frappe.utils import cint, flt
 from kefiya.utils import statement_formats as formats
 from kefiya.utils.statement_formats import (  # noqa: F401 -- the public names
     PROFILES, decode, normalise_pushed, parse_amount, parse_date, read_rows,
-    reference_number, to_entry,
+    reference_number, to_entry, wiederholung,
 )
 
 
@@ -195,18 +195,22 @@ def _existing_budget(bank_account, entries):
 def book_entries(entries, dry_run=True, sample_size=5):
     """Walk canonical entries once, deciding and counting the same way for all.
 
-    Each entry must carry `bank_account`. Three ways the same booking can
-    already be here, checked in order of cost: twice within this run, already
-    written by this app, or already delivered by the bank under its own
-    reference. The last one is why the plan and the import cannot have
-    separate loops -- they would eventually disagree about what a duplicate
-    is, and the one nobody looks at would be the lenient one.
+    Each entry must carry `bank_account`. Two ways the same booking can
+    already be here, checked in order of cost: already written by this app,
+    or already delivered by the bank under its own reference. The second is
+    why the plan and the import cannot have separate loops -- they would
+    eventually disagree about what a duplicate is, and the one nobody looks
+    at would be the lenient one.
+
+    An entry that repeats an earlier one of the SAME run to the character is
+    not a duplicate: it is the second of two bookings, and it gets the
+    second reference -- see statement_formats.wiederholung.
 
     :return: dict(total, created|would_create, duplicates, accounts, sample)
     """
     result = {"total": 0, "created": 0, "would_create": 0, "duplicates": 0,
               "accounts": {}, "sample": [], "dry_run": bool(dry_run)}
-    seen = set()
+    seen = {}
     companies = {}
 
     # What each account already holds, counted once before anything is booked.
@@ -229,17 +233,17 @@ def book_entries(entries, dry_run=True, sample_size=5):
 
         reference = entry.get("reference_number") or reference_number(
             target, entry)
+        seen[reference] = seen.get(reference, 0) + 1
+        reference = wiederholung(reference, seen[reference])
 
-        # Three ways this can already be here. The first two are identity --
-        # this exact entry, twice in the file or written by an earlier run.
-        # The third is the budget: a booking that looks like this one and was
-        # not written by us, which is how a bank-delivered booking is
-        # recognised at all.
+        # Two ways this can already be here. The first is identity -- this
+        # exact entry, written by an earlier run. The second is the budget:
+        # a booking that looks like this one and was not written by us,
+        # which is how a bank-delivered booking is recognised at all.
         budget = budgets.get(target, {})
         token = _token(entry)
-        duplicate = (reference in seen
-                     or frappe.db.exists("Bank Transaction",
-                                         {"reference_number": reference}))
+        duplicate = frappe.db.exists("Bank Transaction",
+                                     {"reference_number": reference})
         if not duplicate and budget.get(token):
             budget[token] -= 1
             duplicate = True
@@ -248,7 +252,6 @@ def book_entries(entries, dry_run=True, sample_size=5):
             result["duplicates"] += 1
             per["duplicates"] += 1
             continue
-        seen.add(reference)
         per["new"] += 1
 
         if len(result["sample"]) < sample_size:

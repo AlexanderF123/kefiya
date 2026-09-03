@@ -38,6 +38,7 @@ Das Modul kommt ohne frappe aus, damit es ohne Bench pruefbar ist. Die
 Anbindung an die Instanz steht in kontenpruefung.py.
 """
 
+import datetime
 import re
 from collections import namedtuple
 from decimal import Decimal
@@ -46,11 +47,16 @@ from decimal import Decimal
 #: waere Rundungsrauschen, alles Groebere wuerde Fehler durchlassen.
 CENT = Decimal("0.005")
 
-#: :60F: (Anfangssaldo) und :62F: (Schlusssaldo). Die M-Varianten (:60M:,
-#: :62M:) sind Zwischensalden eines mehrteiligen Auszugs und markieren KEIN
-#: Blattende -- sie werden bewusst nicht gelesen.
-_SALDO = re.compile(r"^:6(?P<art>[02])F:(?P<vz>[CD])(?P<tag>\d{6})[A-Z]{3}(?P<wert>[\d,.]+)",
-                    re.MULTILINE)
+#: :60F: (Anfangssaldo) und :62F: (Schlusssaldo) schliessen ein Blatt ein.
+#: Die M-Varianten (:60M:, :62M:) sind Zwischensalden: ein Blatt, das zu
+#: lang fuer einen Block ist, geht mit :62M: zu Ende und mit :60M: im
+#: naechsten Block weiter. Beide Bloecke zusammen sind EIN Blatt -- wer den
+#: ersten wegen des fehlenden :62F: und den zweiten wegen des fehlenden
+#: :60F: verwirft, verliert das ganze Blatt. Auf Konto 33108982 war das der
+#: Jahrgang 2020: 221 Buchungen, und der Auszug schien erst 2021 zu beginnen.
+_SALDO = re.compile(
+    r"^:6(?P<art>[02])(?P<schluss>[FM]):(?P<vz>[CD])(?P<tag>\d{6})"
+    r"[A-Z]{3}(?P<wert>[\d,.]+)", re.MULTILINE)
 
 #: :61: Umsatz. Valuta (6), optional Buchungstag (4), Soll/Haben, optional
 #: ein Waehrungsbuchstabe, dann der Betrag mit Komma als Dezimaltrennzeichen.
@@ -60,7 +66,11 @@ _UMSATZ = re.compile(
     re.MULTILINE)
 
 #: Ein Kontoauszugsblatt: welches Konto, welcher Zeitraum, was drin steht.
-Blatt = namedtuple("Blatt", "konto anfang_tag anfang ende_tag ende summe zeilen")
+#: ``erster_tag`` ist der frueheste Buchungstag auf dem Blatt (None, wenn es
+#: leer ist) -- er entscheidet, wie das Fenster des Blattes beginnt, siehe
+#: fenster().
+Blatt = namedtuple(
+    "Blatt", "konto anfang_tag anfang ende_tag ende summe zeilen erster_tag")
 
 #: Ein Befund aus Frage 1 oder 2. `fehlt` ist der Betrag, um den es nicht
 #: aufgeht -- bei Frage 1 die Sprungstelle, bei Frage 2 die Luecke im Blatt.
@@ -96,6 +106,28 @@ def _tag(sechs):
                            sechs[2:4], sechs[4:6])
 
 
+def _vortag(iso):
+    return (datetime.date.fromisoformat(iso)
+            - datetime.timedelta(days=1)).isoformat()
+
+
+def _buchungstag(valuta, buchung):
+    """Der Buchungstag eines Umsatzes als ISO-Datum.
+
+    :61: nennt die Valuta mit Jahr und den Buchungstag ohne. Das Jahr ist
+    das der Valuta -- ausser am Jahreswechsel: Valuta 30.12., gebucht am
+    02.01., liegt im neuen Jahr, und umgekehrt.
+    """
+    if not buchung:
+        return _tag(valuta)
+    jahr = int(_tag(valuta)[:4])
+    if valuta[2:4] == "12" and buchung[:2] == "01":
+        jahr += 1
+    elif valuta[2:4] == "01" and buchung[:2] == "12":
+        jahr -= 1
+    return "%04d-%s-%s" % (jahr, buchung[:2], buchung[2:4])
+
+
 def blaetter(text):
     """Die Auszugsblaetter einer .sta-Datei, in ihrer Reihenfolge.
 
@@ -103,9 +135,15 @@ def blaetter(text):
     StarMoney tun das -- deshalb traegt jedes Blatt seine Kontonummer aus
     :25: bei sich und wird nicht der Datei zugeschrieben.
 
+    Ein Blatt kann ueber mehrere Bloecke gehen (:62M: ... :60M:, siehe
+    _SALDO). Es beginnt mit dem :60F: und endet mit dem :62F:; was dazwischen
+    an Zwischensalden steht, wird nicht gelesen, sondern nachgerechnet -- die
+    Summenprobe ueber das ganze Blatt fragt genau das.
+
     :return: Liste von Blatt
     """
     gefunden = []
+    offen = None
     for roh in _bloecke(text):
         konto = _konto_in(roh)
         salden = list(_SALDO.finditer(roh))
@@ -113,16 +151,37 @@ def blaetter(text):
         ende = next((m for m in salden if m.group("art") == "2"), None)
         if konto is None or anfang is None or ende is None:
             continue
-        betraege = [_zahl(m.group("vz"), m.group("wert"))
-                    for m in _UMSATZ.finditer(roh)]
+
+        umsaetze = list(_UMSATZ.finditer(roh))
+        betraege = [_zahl(m.group("vz"), m.group("wert")) for m in umsaetze]
+        tage = [_buchungstag(m.group("valuta"), m.group("buchung"))
+                for m in umsaetze]
+
+        if anfang.group("schluss") == "F":
+            offen = {"konto": konto,
+                     "anfang_tag": _tag(anfang.group("tag")),
+                     "anfang": _zahl(anfang.group("vz"), anfang.group("wert")),
+                     "betraege": [], "tage": []}
+        elif offen is None or offen["konto"] != konto:
+            # Eine Fortsetzung ohne Anfang: ihr Blatt ist nicht lesbar.
+            offen = None
+            continue
+
+        offen["betraege"].extend(betraege)
+        offen["tage"].extend(tage)
+        if ende.group("schluss") != "F":
+            continue
+
         gefunden.append(Blatt(
-            konto=konto,
-            anfang_tag=_tag(anfang.group("tag")),
-            anfang=_zahl(anfang.group("vz"), anfang.group("wert")),
+            konto=offen["konto"],
+            anfang_tag=offen["anfang_tag"],
+            anfang=offen["anfang"],
             ende_tag=_tag(ende.group("tag")),
             ende=_zahl(ende.group("vz"), ende.group("wert")),
-            summe=sum(betraege, Decimal(0)),
-            zeilen=len(betraege)))
+            summe=sum(offen["betraege"], Decimal(0)),
+            zeilen=len(offen["betraege"]),
+            erster_tag=min(offen["tage"]) if offen["tage"] else None))
+        offen = None
     return gefunden
 
 
@@ -190,9 +249,64 @@ def blinde_jahre(daneben):
     return {bruch.tag[:4] for bruch in daneben}
 
 
-def vergleiche(blaetter_eines_kontos, bewegung_zwischen, ausser=()):
+def fenster(lauf):
+    """Die Zeitfenster ``von < Buchungstag <= bis`` der Blaetter eines Laufs.
+
+    Zwei Regeln, und beide sind an echten Auszuegen gemessen:
+
+    1. Ein Blatt, das an ein anderes anschliesst, beginnt, wo das andere
+       endet: ``von`` ist der Schlusstag des Vorgaengers. Damit sind die
+       Fenster lueckenlos und ueberlappen nicht -- gleich, wie die Bank den
+       Anfangssaldo datiert.
+    2. Das erste Blatt eines Laufs hat keinen Vorgaenger. Datiert die Bank
+       den Anfangssaldo auf den Vortag der ersten Buchung, beginnt das
+       Fenster hinter diesem Tag. StarMoney aber datiert ihn auf den ERSTEN
+       BUCHUNGSTAG selbst: ``:60F:C210104`` und darunter sechs Buchungen
+       vom 04.01. Ein Fenster, das hinter dem 04.01. beginnt, verliert sie.
+       Ob das so ist, sagt das Blatt selbst -- ``erster_tag``.
+
+    Vor dieser Regel galt ``anfang_tag < Datum`` fuer jedes Blatt. Auf Konto
+    33108982 fielen damit die Buchungen jedes ersten Tages aus jedem Fenster,
+    und die Pruefung meldete sechs von sechs Jahrgaengen als falsch -- auch
+    dort, wo die Buchhaltung stimmte.
+
+    :param lauf: Blaetter ohne Bruch, in Reihenfolge -- siehe abschnitte()
+    :return: Liste von (von, bis), eines je Blatt, von exklusiv
+    """
+    ergebnis = []
+    vorher = None
+    for blatt in lauf:
+        if vorher is not None:
+            von = vorher.ende_tag
+        elif blatt.erster_tag is not None \
+                and blatt.erster_tag <= blatt.anfang_tag:
+            von = _vortag(min(blatt.erster_tag, blatt.anfang_tag))
+        else:
+            von = blatt.anfang_tag
+        ergebnis.append((von, blatt.ende_tag))
+        vorher = blatt
+    return ergebnis
+
+
+def bewegung_aus(eintraege):
+    """Eine Funktion (von, bis) -> Decimal aus gelesenen Eintraegen.
+
+    Das Gegenstueck zu dem, was die Instanz fuer vergleiche() liefert -- nur
+    dass die Bewegung hier aus einer Liste von Eintraegen kommt, jeder mit
+    ``date`` und ``amount``. So laesst sich ein zweiter Leser derselben
+    Datei gegen die Blaetter halten, bevor irgendetwas gebucht wird.
+    """
+    def zwischen(von, bis):
+        return sum((Decimal(str(e["amount"])) for e in eintraege
+                    if von < str(e["date"])[:10] <= bis), Decimal(0))
+    return zwischen
+
+
+def vergleiche(lauf, bewegung_zwischen, ausser=()):
     """Frage 3: trifft die Buchhaltung den Kontoauszug?
 
+    :param lauf: Blaetter ohne Bruch, in Reihenfolge -- ihre Fenster kommen
+        aus fenster()
     :param bewegung_zwischen: Funktion (von, bis) -> Decimal, die Summe der
         Bewegungen im System in ``von < Datum <= bis``. Absichtlich
         hineingereicht statt hier abgefragt: so ist dieses Modul ohne Bench
@@ -202,14 +316,14 @@ def vergleiche(blaetter_eines_kontos, bewegung_zwischen, ausser=()):
     :return: Liste der Abweichungen, leer wenn die Buchhaltung stimmt
     """
     abweichungen = []
-    for blatt in blaetter_eines_kontos:
+    for blatt, (von, bis) in zip(lauf, fenster(lauf)):
         if blatt.ende_tag[:4] in ausser or blatt.anfang_tag[:4] in ausser:
             continue
         soll = blatt.ende - blatt.anfang
-        ist = Decimal(str(bewegung_zwischen(blatt.anfang_tag, blatt.ende_tag)))
+        ist = Decimal(str(bewegung_zwischen(von, bis)))
         if abs(soll - ist) > CENT:
             abweichungen.append(Abweichung(
-                konto=blatt.konto, von=blatt.anfang_tag, bis=blatt.ende_tag,
+                konto=blatt.konto, von=von, bis=bis,
                 bank=soll, system=ist, fehlt=soll - ist))
     return abweichungen
 
@@ -248,9 +362,11 @@ def urteil(blaetter_eines_kontos, bewegung_zwischen):
     ueber die Bruchstelle -- aber nicht ueber den Rest.
 
     :return: {"kette", "summenprobe", "blind", "abweichungen", "brauchbar",
-              "spricht_fuer"}
-        ``spricht_fuer`` nennt die Zeitraeume, ueber die dieser Auszug
-        ueberhaupt etwas sagen kann. Ohne diese Angabe liest sich ein leeres
+              "fenster", "spricht_fuer"}
+        ``fenster`` sind die Zeitfenster (von, bis) der Blaetter, ueber die
+        dieser Auszug urteilen kann -- eines je Blatt, von EXKLUSIV, siehe
+        fenster(). ``spricht_fuer`` fasst sie zusammen, wo sie aneinander
+        anschliessen. Ohne diese Angabe liest sich ein leeres
         ``abweichungen`` wie ein Freispruch, obwohl es auch heissen kann,
         dass gar nicht geprueft wurde.
     """
@@ -259,15 +375,23 @@ def urteil(blaetter_eines_kontos, bewegung_zwischen):
     blind = blinde_jahre(daneben)
 
     abweichungen = []
+    beurteilbar = []
     spricht_fuer = []
     for lauf in abschnitte(blaetter_eines_kontos):
-        beurteilbar = [b for b in lauf
-                       if b.anfang_tag[:4] not in blind
-                       and b.ende_tag[:4] not in blind]
-        if not beurteilbar:
-            continue
-        spricht_fuer.append((beurteilbar[0].anfang_tag,
-                             beurteilbar[-1].ende_tag))
+        im_lauf = [(von, bis) for b, (von, bis) in zip(lauf, fenster(lauf))
+                   if b.anfang_tag[:4] not in blind
+                   and b.ende_tag[:4] not in blind]
+        beurteilbar.extend(im_lauf)
+        # Blaetter eines Laufs, die aneinander anschliessen, sprechen als ein
+        # Zeitraum; ein blindes Blatt dazwischen teilt ihn -- und ein Bruch
+        # sowieso, denn jeder Lauf spricht fuer sich.
+        zeitraeume = []
+        for von, bis in im_lauf:
+            if zeitraeume and zeitraeume[-1][1] == von:
+                zeitraeume[-1] = (zeitraeume[-1][0], bis)
+            else:
+                zeitraeume.append((von, bis))
+        spricht_fuer.extend(zeitraeume)
         abweichungen.extend(vergleiche(lauf, bewegung_zwischen, ausser=blind))
 
     return {
@@ -275,6 +399,7 @@ def urteil(blaetter_eines_kontos, bewegung_zwischen):
         "summenprobe": daneben,
         "blind": sorted(blind),
         "brauchbar": bool(spricht_fuer),
+        "fenster": beurteilbar,
         "spricht_fuer": spricht_fuer,
         "abweichungen": abweichungen,
     }

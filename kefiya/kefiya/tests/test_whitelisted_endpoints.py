@@ -241,7 +241,10 @@ class TestEveryEndpointIsGated(unittest.TestCase):
 
     #: A gate does not have to be written out in the function: these helpers
     #: are gates, and delegating to them is the point of having them.
-    GATE_MARKERS = ("has_permission", "_require_login_read")
+    GATE_MARKERS = ("has_permission", "_require_login_read",
+                    # The statement check and the rebuild from a statement:
+                    # one gate each, named for what it allows.
+                    "_darf_pruefen", "_darf_ersetzen")
 
     #: Endpoints that legitimately carry no gate of their own, each with the
     #: reason. Anything not on this list must gate itself.
