@@ -571,14 +571,18 @@ class TestAParkedPayeeCheckIsNotASend(unittest.TestCase):
     """
 
     def test_the_send_handler_knows_the_parked_case(self):
+        # Die Frage "was hat die Bank geantwortet" wohnt in sendOutcome,
+        # seit auch der Einzelversand sie stellt. Der Bericht handelt danach.
+        self.assertIn('m.status === "vop_mismatch"',
+                      _function(_source(), "function sendOutcome("))
         body = _function(_source(), "function reportSendResult(")
-        self.assertIn('m.status === "vop_mismatch"', body)
+        self.assertIn('outcome === "payee"', body)
         self.assertIn("kefiya.vop_prompt({", body)
 
     def test_the_parked_case_is_decided_before_the_success_branch(self):
         """Order matters: the success branch is the else of this chain."""
         body = _function(_source(), "function reportSendResult(")
-        self.assertLess(body.index('"vop_mismatch"'),
+        self.assertLess(body.index('"payee"'),
                         body.index("Handed to the bank: {0} orders"))
 
     def test_one_place_says_what_a_send_came_back_with(self):

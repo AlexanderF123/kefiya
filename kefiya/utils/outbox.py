@@ -262,6 +262,13 @@ def outbox_data(q=None, show_sent=0):
     return {
         "today": today, "q": q, "show_sent": show_sent, "rows": out,
         "payers": transfer_sources(),
+        # Which way the send dialog offers first when several orders are
+        # selected. It asks either way -- a collective order is ONE order at
+        # the bank over the total, and that is a different payment from
+        # several separate ones. This only says which answer is pre-filled.
+        "send_default": (
+            frappe.db.get_single_value("Kefiya Settings", "default_send_mode")
+            or "One after another"),
         "can": {
             "submit": _may("submit"),
             "write": _may("write"),

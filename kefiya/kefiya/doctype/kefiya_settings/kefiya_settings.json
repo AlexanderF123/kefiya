@@ -21,7 +21,9 @@
   "auto_reconcile_section",
   "auto_reconcile_after_import",
   "auto_create_advance_payments",
-  "auto_reconcile_own_transfers"
+  "auto_reconcile_own_transfers",
+  "outgoing_section",
+  "default_send_mode"
  ],
  "fields": [
   {
@@ -135,12 +137,25 @@
    "fieldname": "auto_reconcile_own_transfers",
    "fieldtype": "Check",
    "label": "Auto Book Our Own Transfers"
+  },
+  {
+   "fieldname": "outgoing_section",
+   "fieldtype": "Section Break",
+   "label": "Outgoing payments"
+  },
+  {
+   "default": "One after another",
+   "description": "What the send dialog offers first when several orders are selected. It always asks -- a collective order is one order at the bank over the total, and that is a different payment from several separate ones.",
+   "fieldname": "default_send_mode",
+   "fieldtype": "Select",
+   "label": "Default for several orders",
+   "options": "One after another\nAs one collective order"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-04 15:27:13.970063",
+ "modified": "2026-09-04 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya Settings",

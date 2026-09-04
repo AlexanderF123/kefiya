@@ -90,10 +90,13 @@ class TestThePageAsksTheBank(unittest.TestCase):
         self.assertIn('finish("timeout")', body)
 
     def test_the_outbox_asks_on_a_decoupled_release(self):
+        entscheidung = _function(_js("payment_outbox.js"),
+                                 "function sendOutcome(")
+        self.assertIn('m.status === "tan_required"', entscheidung)
+        self.assertIn("m.decoupled", entscheidung)
         body = _function(_js("payment_outbox.js"),
                          "function reportSendResult(")
-        self.assertIn('m.status === "tan_required"', body)
-        self.assertIn("m.decoupled", body)
+        self.assertIn('outcome === "release"', body)
         self.assertIn("awaitRelease(login, names || [], count)", body)
 
     def test_the_outbox_names_the_orders_it_sent(self):
@@ -227,6 +230,6 @@ class TestAReleasedPayeeCheckIsWrittenDown(unittest.TestCase):
 
     def test_die_oberflaeche_verliert_die_namen_nicht(self):
         body = _function(_js("payment_outbox.js"), "function reportSendResult(")
-        zweig = body.split('m.status === "vop_mismatch"')[1]
+        zweig = body.split('outcome === "payee"')[1]
         self.assertIn("r2.transfer_names", zweig)
         self.assertIn(": names", zweig)

@@ -314,6 +314,8 @@ kefiya.payment_outbox = function (root) {
 			view.payers = m.payers || [];
 			view.can = m.can || {};
 			view.today = m.today || "";
+			// Which way the send dialog offers first. It still asks.
+			view.sendDefault = m.send_default || "One after another";
 			// An order that is gone must not stay selected: it would be
 			// counted in the footer sum and sent to an endpoint that then
 			// refuses the whole batch.
@@ -811,16 +813,22 @@ kefiya.payment_outbox = function (root) {
 				+ " confirmation in its app). Nothing is debited until then.")
 			+ "</div>";
 
-		frappe.confirm(message, function () {
-			// One call, and the approval happens inside it -- AFTER the server
-			// has accepted the batch. Approving here first, as this page did,
-			// meant a batch refused for mixing execution dates left its drafts
-			// locked for nothing, undoable only by cancelling and re-entering
-			// them. The endpoint knows every refusal; the browser knows none.
-			handToBank(rows.map(function (r) { return r.name; }),
-				rows[0].kefiya_login, toApprove.length);
-		});
+		const names = rows.map(function (r) { return r.name; });
+		if (rows.length === 1) {
+			frappe.confirm(message, function () {
+				// One call, and the approval happens inside it -- AFTER the
+				// server has accepted the batch. Approving here first, as
+				// this page did, meant a batch refused for mixing execution
+				// dates left its drafts locked for nothing, undoable only by
+				// cancelling and re-entering them. The endpoint knows every
+				// refusal; the browser knows none.
+				handToBank(names, rows[0].kefiya_login, toApprove.length);
+			});
+			return;
+		}
+		askHowToSend(rows, message, toApprove);
 	}
+
 
 	function handToBank(names, login, approving) {
 		view.busy = true;
@@ -856,22 +864,24 @@ kefiya.payment_outbox = function (root) {
 	// check comes back the same three ways, and this was written out twice --
 	// so the next status the server learns to return would have had two places
 	// to be handled, and would have been handled in one.
+	// What a send answered, in one word. Every caller asks this and none
+	// reads the statuses itself, so a status the server learns to return is
+	// handled in one place or in none -- never in one of two.
+	function sendOutcome(m) {
+		if (!m || m.status === "error") return "error";
+		if (m.status === "vop_mismatch") return "payee";
+		if (m.status === "tan_required") {
+			return (m.decoupled && kefiya.await_release) ? "release" : "tan";
+		}
+		return "done";
+	}
+
 	function reportSendResult(m, count, login, names) {
-		if (m.status === "error") {
+		const outcome = sendOutcome(m);
+		if (outcome === "error") {
 			frappe.msgprint({ title: __("Not sent"), indicator: "red",
 				message: esc(m.message || "") });
-		} else if (m.status === "tan_required") {
-			frappe.show_alert({ message: __("The bank asks for a release."),
-				indicator: "orange" }, 8);
-			// A decoupled release is given in the banking app, and nobody
-			// asked the bank afterwards whether it had been: the order stayed
-			// "Due" with no error at all. So this page asks, in later
-			// requests, until the bank says yes or the wait runs out.
-			if (m.decoupled && kefiya.await_release) {
-				awaitRelease(login, names || [], count);
-				return;
-			}
-		} else if (m.status === "vop_mismatch") {
+		} else if (outcome === "payee") {
 			// Nothing was handed to the bank. This branch did not exist, so a
 			// parked payee check fell into the success case below and was
 			// reported in green -- for an order that never left.
@@ -888,6 +898,17 @@ kefiya.payment_outbox = function (root) {
 				}
 			});
 			return;
+		} else if (outcome === "release" || outcome === "tan") {
+			frappe.show_alert({ message: __("The bank asks for a release."),
+				indicator: "orange" }, 8);
+			// A decoupled release is given in the banking app, and nobody
+			// asked the bank afterwards whether it had been: the order stayed
+			// "Due" with no error at all. So this page asks, in later
+			// requests, until the bank says yes or the wait runs out.
+			if (outcome === "release") {
+				awaitRelease(login, names || [], count);
+				return;
+			}
 		} else {
 			view.selected = {};
 			frappe.show_alert({
@@ -923,6 +944,174 @@ kefiya.payment_outbox = function (root) {
 				load();
 			}
 		});
+	}
+
+	// Several orders can go two ways, and they are two different payments.
+	// A collective order is ONE order at the bank carrying every payment,
+	// authorised once; sent one after another, each is its own order and the
+	// bank asks for each. This page picked the first silently, and the user
+	// found out from the bank.
+	//
+	// No preselection: the choice is the point of asking.
+	//: The two ways, as the settings name them and as the dialog offers them.
+	//: One list, so a default stored on the instance cannot mean something
+	//: the dialog does not offer.
+	const TOGETHER = "As one collective order";
+	const SEND_WAYS = [
+		{ stored: "One after another",
+			label: __("One after another — a release for each") },
+		{ stored: TOGETHER,
+			label: __("As one collective order — a single release") },
+	];
+
+	function askHowToSend(rows, message, toApprove) {
+		const names = rows.map(function (r) { return r.name; });
+		const preset = SEND_WAYS.find(function (way) {
+			return way.stored === view.sendDefault;
+		}) || SEND_WAYS[0];
+		const dialog = new frappe.ui.Dialog({
+			title: __("Send {0} orders", [rows.length]),
+			fields: [
+				{ fieldtype: "HTML", options: message },
+				{
+					fieldtype: "Select", fieldname: "how", reqd: 1,
+					label: __("How should these go to the bank?"),
+					options: SEND_WAYS.map(function (way) {
+						return way.label;
+					}),
+					// Pre-filled from Kefiya Settings, never decided from
+					// there: the question is asked either way.
+					default: preset.label,
+					description: __("A collective order reaches the bank as a"
+						+ " single order over the total, and one release"
+						+ " covers all of it.")
+				}
+			],
+			primary_action_label: __("Send"),
+			primary_action: function (values) {
+				const chosen = SEND_WAYS.find(function (way) {
+					return way.label === values.how;
+				});
+				if (!chosen) return;
+				dialog.hide();
+				if (chosen.stored === TOGETHER) {
+					handToBank(names, rows[0].kefiya_login, toApprove.length);
+				} else {
+					sendOneByOne(names, rows[0].kefiya_login, toApprove);
+				}
+			}
+		});
+		dialog.show();
+	}
+
+	// One order, one release, then the next.
+	//
+	// It stops at the first order it cannot see through -- a typed TAN is
+	// answered in its own box, and nothing tells this loop when that box is
+	// done -- and then says how far it got, with the rest still selected so
+	// pressing Send again carries on. Guessing that the TAN went through
+	// would mark orders sent that never left.
+	function sendOneByOne(names, login, toApprove) {
+		// Which of them are still drafts. Each is approved on its own turn,
+		// immediately before its own send -- not all of them upfront. An
+		// order that never goes out because the run stopped earlier must not
+		// be left approved, and approving locks amounts and recipients.
+		const isDraft = {};
+		(toApprove || []).forEach(function (r) { isDraft[r.name] = 1; });
+		view.busy = true;
+
+		function finish(sent, name, why) {
+			view.busy = false;
+			if (why) {
+				frappe.msgprint({
+					title: __("Stopped at {0}", [name]), indicator: "orange",
+					message: "<div>" + __("Sent so far: {0} of {1}.",
+						[sent, names.length]) + "</div>"
+						+ "<div style='margin-top:8px'>" + esc(why) + "</div>",
+				});
+			} else {
+				view.selected = {};
+				frappe.show_alert({
+					message: __("Sent one after another: {0}", [sent]),
+					indicator: "green" }, 8);
+			}
+			load();
+		}
+
+		// Asked through sendOutcome like every other caller, so a status
+		// the server learns to return is never handled here and not there.
+		function after(index, sent, m) {
+			const name = names[index];
+			switch (sendOutcome(m)) {
+			case "done":
+				step(index + 1, sent + 1);
+				return;
+			case "payee":
+				kefiya.vop_prompt({
+					login: login, scope: login, answer: m.vop_result,
+					onResult: function (r2) { after(index, sent, r2 || {}); },
+				});
+				return;
+			case "release":
+				kefiya.await_release({
+					login: login, names: [name], scope: login,
+					done: function (status, message) {
+						if (status === "submitted") { step(index + 1, sent + 1); }
+						else {
+							finish(sent, name, message
+								|| __("The bank has not reported the release."));
+						}
+					},
+				});
+				return;
+			case "tan":
+				finish(sent, name, __("The bank asks for a TAN for this order."
+					+ " Answer it in the box that opened; the remaining orders"
+					+ " stay selected — press Send again afterwards."));
+				return;
+			default:
+				finish(sent, name, m.message || __("Unknown error"));
+			}
+		}
+
+		function step(index, sent) {
+			if (index >= names.length) { finish(sent, null, null); return; }
+			const name = names[index];
+			const ready = isDraft[name]
+				? frappe.call({
+					method: "kefiya.utils.client.approve_transfers",
+					args: { transfer_names: JSON.stringify([name]) },
+					freeze: true, freeze_message: __("Approving …"),
+				}).then(function (r) {
+					const m = (r && r.message) || {};
+					const refused = (m.refused || [])[0];
+					if (refused) {
+						finish(sent, name, refused.reason
+							|| __("Not approved"));
+						return false;
+					}
+					return true;
+				})
+				: Promise.resolve(true);
+
+			ready.then(function (go) {
+				if (!go) return;
+				return frappe.call({
+					method: "kefiya.utils.client.submit_kefiya_transfer",
+					args: { transfer_name: name, user_scope: login,
+						confirmed: 1 },
+					freeze: true,
+					freeze_message: __("Sending {0} of {1} …",
+						[index + 1, names.length]),
+				}).then(function (r) {
+					after(index, sent, (r && r.message) || {});
+				});
+			}).catch(function (r) {
+				finish(sent, name, errText(r));
+			});
+		}
+
+		step(0, 0);
 	}
 
 	// One message for a batch, and it names what did not work. A batch that

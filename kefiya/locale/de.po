@@ -604,3 +604,18 @@ msgstr "Die VoP-ID der Empfängerprüfung, zu der die geparkte TAN-Anforderung g
 
 msgid "Stored VoP-ID"
 msgstr "Gespeicherte VoP-ID"
+
+msgid "Outgoing payments"
+msgstr "Zahlungsausgang"
+
+msgid "Default for several orders"
+msgstr "Vorgabe bei mehreren Aufträgen"
+
+msgid "One after another"
+msgstr "Nacheinander"
+
+msgid "As one collective order"
+msgstr "Als eine Sammelüberweisung"
+
+msgid "What the send dialog offers first when several orders are selected. It always asks -- a collective order is one order at the bank over the total, and that is a different payment from several separate ones."
+msgstr "Was der Sendedialog zuerst anbietet, wenn mehrere Aufträge ausgewählt sind. Gefragt wird immer — eine Sammelüberweisung ist ein einziger Auftrag bei der Bank über die Summe, und das ist eine andere Zahlung als mehrere einzelne."
