@@ -112,8 +112,15 @@ kefiya.transfer_form = function (options) {
 			// Autocomplete, not Data with a <datalist> hung on it: Frappe
 			// sets autocomplete="off" on its inputs, and Chrome then shows
 			// no datalist at all. The list was fetched, attached, and never
-			// seen. Frappe's own control allows free text just the same.
+			// seen.
+			//
+			// ignore_validation is not optional. The control's validate()
+			// answers "" for any value not in its list once the list has
+			// entries -- the very refusal the old comment feared, and the
+			// one flag that switches it off. A transfer with no invoice
+			// behind it is what this document exists for.
 			fieldtype: "Autocomplete", fieldname: "recipient_name", reqd: 1,
+			ignore_validation: 1,
 			label: __("Recipient"), default: item.recipient_name || "",
 			description: __("Free text. Known payees are suggested while you"
 				+ " type, but any name may be entered."),
@@ -121,6 +128,7 @@ kefiya.transfer_form = function (options) {
 		{ fieldtype: "Column Break" },
 		{
 			fieldtype: "Autocomplete", fieldname: "recipient_iban", reqd: 1,
+			ignore_validation: 1,
 			label: __("IBAN"), default: item.recipient_iban || "",
 			description: __("Checked against its checksum before it is stored."),
 		},
