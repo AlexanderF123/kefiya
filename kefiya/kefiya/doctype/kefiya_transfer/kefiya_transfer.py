@@ -25,7 +25,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate, now_datetime
 
 from kefiya.utils import own_transfer
-from kefiya.utils import pain_iban_only
+from kefiya.utils import pain_dk
 
 
 def normalize_iban(value):
@@ -367,12 +367,18 @@ def requested_execution_date(doc):
     A past date is refused rather than quietly moved forward, but only where
     it is the order itself. Silently turning "execute on the 16th" into
     "execute today" is a different payment than the one somebody approved.
+
+    And an order the bank does NOT hold carries no date at all -- which the
+    German banks spell as the fixed value 1999-01-01, see pain_dk. Today's
+    date was still a date, and the Volksbank refused it in as many words:
+    "9150 Ausfuehrungsdatum darf nicht belegt werden. Wert ist ungleich
+    1999-01-01", after it had accepted the payee release.
     """
     from frappe.utils import cint
 
     today = now_datetime().date()
     if cint(getattr(doc, "manage_due_date", 0)) or not doc.execution_date:
-        return today
+        return pain_dk.execution_date(today, bank_holds_it=False)
 
     wanted = getdate(doc.execution_date)
     if wanted < today:
@@ -382,7 +388,7 @@ def requested_execution_date(doc):
             " Change the date, or set it to be held here and sent on the day."
         ).format(doc.name, frappe.utils.formatdate(doc.execution_date)),
             title=_("Execution date has passed"))
-    return wanted
+    return pain_dk.execution_date(wanted, bank_holds_it=True)
 
 
 def build_pain001_for(docs):
@@ -485,5 +491,5 @@ def build_pain001_for(docs):
     # answered the release with "9010 Der Auftrag wurde nicht ausgefuehrt",
     # four times running. The file is accepted on arrival and processed at
     # execution, and execution is where the German schema applies.
-    xml = pain_iban_only.debtor_agent_not_provided(xml)
+    xml = pain_dk.debtor_agent_not_provided(xml)
     return xml, control_sum / 100.0, len(rows)

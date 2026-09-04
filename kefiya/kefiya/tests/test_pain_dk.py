@@ -1,7 +1,9 @@
 # Copyright (c) 2026, Phamos GmbH and contributors
 # For license information, please see license.txt
 
-"""Das Institut des Zahlers in einer pain.001 ohne BIC.
+"""Was die deutschen Banken an einer pain.001 anders wollen als die ISO.
+
+Zwei Regeln, zwei Ueberweisungen, die daran gescheitert sind.
 
 sepaxml 2.7.0 schreibt ohne BIC ein leeres <FinInstnId/>. Das ISO-Schema
 laesst das durch, das Schema der Deutschen Kreditwirtschaft nicht: dort
@@ -13,11 +15,13 @@ Die Regel laeuft hier ohne Bench. Dass build_pain001 sie aufruft, steht im
 Quelltext und wird als Quelltext geprueft.
 """
 
+import datetime
 import os
 import unittest
 
-from kefiya.utils.pain_iban_only import (NOT_PROVIDED, debtor_agent_is_empty,
-                                         debtor_agent_not_provided)
+from kefiya.utils.pain_dk import (IMMEDIATE_EXECUTION, NOT_PROVIDED,
+                                  debtor_agent_is_empty,
+                                  debtor_agent_not_provided, execution_date)
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 WURZEL = os.path.dirname(os.path.dirname(HIER))
@@ -80,7 +84,49 @@ class TestBuildPain001RuftEsAuf(unittest.TestCase):
             if "\ndef " in koerper[10:] else koerper
         self.assertLess(
             koerper.index("sepa.export(validate=True)"),
-            koerper.index("pain_iban_only.debtor_agent_not_provided(xml)"))
+            koerper.index("pain_dk.debtor_agent_not_provided(xml)"))
         self.assertLess(
-            koerper.index("pain_iban_only.debtor_agent_not_provided(xml)"),
+            koerper.index("pain_dk.debtor_agent_not_provided(xml)"),
             koerper.index("return xml, control_sum / 100.0, len(rows)"))
+
+
+class TestSofortHeisstNeunzehnhundertneunundneunzig(unittest.TestCase):
+    """Eine sofortige Ueberweisung traegt kein Ausfuehrungsdatum, und "kein
+    Datum" schreibt die DK als 1999-01-01. Die Volksbank prueft woertlich
+    darauf: "9150 Ausfuehrungsdatum darf nicht belegt werden. Wert ist
+    ungleich 1999-01-01" -- nachdem sie die Empfaengerfreigabe angenommen
+    hatte."""
+
+    def test_die_bank_haelt_ihn_also_traegt_er_seinen_tag(self):
+        tag = datetime.date(2026, 9, 30)
+        self.assertEqual(execution_date(tag, bank_holds_it=True), tag)
+
+    def test_sonst_der_feste_wert(self):
+        tag = datetime.date(2026, 9, 30)
+        self.assertEqual(execution_date(tag, bank_holds_it=False),
+                         IMMEDIATE_EXECUTION)
+        self.assertEqual(execution_date(datetime.date.today(), False),
+                         datetime.date(1999, 1, 1))
+
+    def test_es_ist_kein_platzhalter_von_uns(self):
+        """Die Bank prueft genau auf diesen Wert."""
+        self.assertEqual(IMMEDIATE_EXECUTION, datetime.date(1999, 1, 1))
+
+
+class TestDieRegelEntscheidetBeideFaelle(unittest.TestCase):
+
+    def _rule(self):
+        pfad = os.path.join(WURZEL, "kefiya", "doctype", "kefiya_transfer",
+                            "kefiya_transfer.py")
+        with open(pfad, encoding="utf-8") as handle:
+            quelle = handle.read()
+        return quelle.split("def requested_execution_date(")[1].split(
+            "\ndef ")[0]
+
+    def test_der_sofortige_auftrag_traegt_den_festen_wert(self):
+        self.assertIn("pain_dk.execution_date(today, bank_holds_it=False)",
+                      self._rule())
+
+    def test_der_terminierte_traegt_seinen_tag(self):
+        self.assertIn("pain_dk.execution_date(wanted, bank_holds_it=True)",
+                      self._rule())

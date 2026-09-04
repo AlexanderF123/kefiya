@@ -186,10 +186,17 @@ class TestOnlyTheBanksOwnDateGoesIntoTheMessage(unittest.TestCase):
 
     def test_an_order_we_hold_carries_no_date_to_the_bank(self):
         """It is sent ON the day, and that moment is an ordinary immediate
-        transfer -- the date was our bookkeeping."""
+        transfer -- the date was our bookkeeping.
+
+        "No date" is not today's date: the German banks write it as the fixed
+        value 1999-01-01, and the Volksbank checks for exactly that. See
+        pain_dk and test_pain_dk.
+        """
         body = self._rule()
         self.assertIn('cint(getattr(doc, "manage_due_date", 0))', body)
-        self.assertIn("return today", body)
+        self.assertIn("pain_dk.execution_date(today, bank_holds_it=False)",
+                      body)
+        self.assertNotIn("return today", body)
 
     def test_a_past_date_is_refused_and_not_moved_forward(self):
         """Silently turning "execute on the 16th" into "execute today" is a
