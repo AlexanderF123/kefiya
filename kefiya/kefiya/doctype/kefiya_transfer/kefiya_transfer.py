@@ -25,6 +25,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate, now_datetime
 
 from kefiya.utils import own_transfer
+from kefiya.utils import pain_iban_only
 
 
 def normalize_iban(value):
@@ -476,4 +477,13 @@ def build_pain001_for(docs):
 
     if isinstance(xml, bytes):
         xml = xml.decode("utf-8")
+
+    # Without a BIC on the paying account sepaxml writes an empty debtor
+    # agent, which passes the ISO schema and not the German one: the DK
+    # pain.001 wants a BIC or Othr/Id NOTPROVIDED there. The Sparkasse took
+    # the order, checked the payee, asked for the release in the app -- and
+    # answered the release with "9010 Der Auftrag wurde nicht ausgefuehrt",
+    # four times running. The file is accepted on arrival and processed at
+    # execution, and execution is where the German schema applies.
+    xml = pain_iban_only.debtor_agent_not_provided(xml)
     return xml, control_sum / 100.0, len(rows)

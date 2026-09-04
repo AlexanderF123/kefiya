@@ -94,10 +94,21 @@ class TestAnUnknownNameStaysTypeable(unittest.TestCase):
     control that refuses an unknown payee would refuse exactly that."""
 
     def test_the_recipient_is_still_a_free_field(self):
+        """Autocomplete now, because Frappe puts autocomplete="off" on its
+        inputs and Chrome then shows no <datalist>: the list was fetched,
+        attached and never seen. The old fear about the control was right,
+        though -- its validate() answers "" for any value not in the list --
+        and ignore_validation is the flag that switches that off. Both
+        fields carry it, or an unknown payee is silently emptied."""
         body = _controller("transfer_form.js")
-        recipient = body.split('fieldname: "recipient_name"')[0]
-        self.assertTrue(recipient.rstrip().endswith('fieldtype: "Data",'),
-                        "The recipient must stay a Data field.")
+        for field in ("recipient_name", "recipient_iban"):
+            marker = 'fieldname: "{0}"'.format(field)
+            before, after = body.split(marker)[0], body.split(marker)[1]
+            self.assertTrue(
+                before.rstrip().endswith('fieldtype: "Autocomplete",'),
+                "{0} must be an Autocomplete field".format(field))
+            self.assertIn("ignore_validation: 1", after[:200],
+                          "{0} must not refuse an unknown value".format(field))
 
     def test_the_widget_that_does_not_exist_is_gone(self):
         body = _controller("transfer_form.js")

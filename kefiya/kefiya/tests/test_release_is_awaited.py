@@ -145,8 +145,13 @@ class TestOnePlaceWritesItDown(unittest.TestCase):
                       _py("utils", "client.py"))
 
     def test_every_sending_path_uses_it(self):
+        import re
+
         source = _py("utils", "client.py")
-        self.assertEqual(source.count("_mark_sent("), 4,
+        # The bare name, not a suffix of another: release_outcome's
+        # may_mark_sent() ends in the same letters and is a question, not a
+        # write.
+        self.assertEqual(len(re.findall(r"(?<![\w.])_mark_sent\(", source)), 4,
                          "the definition and three callers: single send,"
                          " outbox batch, release of a parked challenge")
 
