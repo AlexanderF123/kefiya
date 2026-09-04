@@ -34,6 +34,7 @@ from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import pain_payee
 from kefiya.utils import release_outcome
+from kefiya.utils import sepa_descriptor
 from kefiya.utils import vop_rule
 from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
 from kefiya.utils.fints_masking import mask_iban
@@ -1915,6 +1916,13 @@ class FinTSController(TanSession):
 
         with self.fints_connection:
             account = self._require_fints_account()
+            # The schema's name as THIS bank lists it. python-fints sends the
+            # ISO URN unless told otherwise; the Volksbank lists its schemas
+            # as "sepade:xsd:pain.001.001.03_GBIC_3.xsd" and never the URN,
+            # so every order there carried a name the bank does not keep --
+            # and the payee check broke off with "9000 interne Probleme" on
+            # its second follow-up, six times. See sepa_descriptor.
+            kwargs["pain_descriptor"] = self._pain_descriptor(instant_payment)
             try:
                 if scheduled:
                     response = self._send_scheduled_transfer(
@@ -1993,6 +2001,32 @@ class FinTSController(TanSession):
                 result["task_id"] = (
                     getattr(response, "data", None) or {}).get("task_id")
             return result
+
+    def _pain_descriptor(self, instant_payment=False):
+        """The name of pain.001.001.03 in this bank's own list.
+
+        HIIPZS for an instant transfer, HISPAS otherwise; the bank names the
+        formats each order type takes. Never raises -- a bank parameter set
+        this cannot read leaves python-fints' default in place, which is what
+        every order carried before this existed. Written to the log either
+        way, so the next question about a refused order has the answer.
+        """
+        bpd = getattr(self.fints_connection, "bpd", None)
+        supported = []
+        try:
+            if instant_payment:
+                supported = sepa_descriptor.formats_in(
+                    bpd.find_segment_first("HIIPZS"))
+            if not supported:
+                supported = sepa_descriptor.formats_in(
+                    bpd.find_segment_first("HISPAS"))
+        except Exception:
+            supported = []
+        chosen = sepa_descriptor.choose(supported)
+        frappe.logger("kefiya").info(
+            "Kefiya SEPA descriptor: login=%s instant=%s chosen=%s bank_lists=%s",
+            self.kefiya_login.name, instant_payment, chosen, supported)
+        return chosen
 
     def _refuse_unsigned(self, multiple, scheduled, instant_payment,
                          verdict=None):

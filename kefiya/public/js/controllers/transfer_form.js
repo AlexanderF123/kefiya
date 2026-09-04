@@ -109,14 +109,18 @@ kefiya.transfer_form = function (options) {
 		{ fieldtype: "HTML", fieldname: "standing" },
 		{ fieldtype: "Section Break", label: __("Recipient") },
 		{
-			fieldtype: "Data", fieldname: "recipient_name", reqd: 1,
+			// Autocomplete, not Data with a <datalist> hung on it: Frappe
+			// sets autocomplete="off" on its inputs, and Chrome then shows
+			// no datalist at all. The list was fetched, attached, and never
+			// seen. Frappe's own control allows free text just the same.
+			fieldtype: "Autocomplete", fieldname: "recipient_name", reqd: 1,
 			label: __("Recipient"), default: item.recipient_name || "",
 			description: __("Free text. Known payees are suggested while you"
 				+ " type, but any name may be entered."),
 		},
 		{ fieldtype: "Column Break" },
 		{
-			fieldtype: "Data", fieldname: "recipient_iban", reqd: 1,
+			fieldtype: "Autocomplete", fieldname: "recipient_iban", reqd: 1,
 			label: __("IBAN"), default: item.recipient_iban || "",
 			description: __("Checked against its checksum before it is stored."),
 		},
@@ -357,10 +361,13 @@ kefiya.transfer_form = function (options) {
 		if (!payees.length || !dialog.$wrapper) return;
 		payeeList = payees;
 
-		kefiya.suggest(dialog.fields_dict.recipient_name.$input,
+		// set_data is the Autocomplete control's own list. The IBAN field
+		// gets its list per payee, from offerTheirIbans.
+		dialog.fields_dict.recipient_name.set_data(
 			payees.map(function (p) { return p.name; }));
-		fillIbans = kefiya.suggest(dialog.fields_dict.recipient_iban.$input,
-			[]);
+		fillIbans = function (values) {
+			dialog.fields_dict.recipient_iban.set_data(values || []);
+		};
 
 		// A name already in the field -- correcting an order -- gets its
 		// IBAN list too, without touching what is stored.
