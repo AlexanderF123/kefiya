@@ -47,6 +47,12 @@ kefiya.outbox_style = function (root) {
 		"#zk button[disabled]{opacity:.45;cursor:not-allowed}",
 		"#zk .zk-primary,#zk .zk-send{background:#14532d;color:#fff;",
 		"border-color:#14532d;font-weight:600}",
+		// The generic hover above painted the green buttons in the page's
+		// light hover colour, with their white text still on: the Send
+		// button went white on white under the mouse. Their own hover
+		// keeps the text readable -- a darker green, not a lighter grey.
+		"#zk .zk-primary:hover:not([disabled]),#zk .zk-send:hover:not([disabled])"
+			+ "{background:#0f3f22;border-color:#0f3f22;color:#fff}",
 		"#zk .zk-send{padding:8px 22px;font-size:14px}",
 		"#zk .zk-send[disabled]{background:#c8d3cb;border-color:#c8d3cb;",
 		"color:#fff;opacity:1}",
