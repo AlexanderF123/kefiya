@@ -45,14 +45,19 @@ frappe.provide("kefiya");
         if (answer.iban) rows += row(__("IBAN"), answer.iban);
         if (answer.bank_name) rows += row(__("Name at the Bank"), answer.bank_name);
         if (answer.result) rows += row(__("Bank's Answer"), answer.result);
+        if (answer.status) rows += row(__("Status at the Bank"), answer.status);
+        if (answer.detail) rows += row(__("What the bank adds"), answer.detail);
+        // Nothing readable at all is a different situation from a verdict
+        // without a name, and only the first one leaves the reviewer as the
+        // whole check. A bank that answers with a payment status report --
+        // the Volksbank -- is read since vop_report; before that this box
+        // said "cannot read the result" and asked for a release anyway.
+        var saidSomething = !!(answer.result || answer.bank_name
+            || answer.status || answer.detail);
         return "<table style='margin:10px 0'>" + rows + "</table>"
-            // No verdict is not the same as no answer. This bank replies with
-            // a payment status report -- a pain.002 document neither this app
-            // nor python-fints reads -- so the row above is simply absent, and
-            // saying nothing would leave the reviewer looking for it.
-            + (answer.result ? ""
+            + (saidSomething ? ""
                 : "<div class='alert alert-info' style='margin:10px 0'>"
-                  + __("This bank returns its result in a format this app cannot read, so it is not shown above. Check the recipient against the original document yourself — here, you are the check.")
+                  + __("The bank sent no result this app could read, so nothing is shown above. Check the recipient against the original document yourself — here, you are the check.")
                   + "</div>");
     }
 
