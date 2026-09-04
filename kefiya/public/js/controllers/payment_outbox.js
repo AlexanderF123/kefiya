@@ -877,7 +877,15 @@ kefiya.payment_outbox = function (root) {
 			// reported in green -- for an order that never left.
 			kefiya.vop_prompt({
 				login: login, scope: login, answer: m.vop_result,
-				onResult: function (r2) { reportSendResult(r2 || {}, count, login); }
+				// With the names. Dropping them here left the release box
+				// with nothing to hand send_transfer_tan, so an order the
+				// bank took after a payee release was marked nowhere.
+				onResult: function (r2) {
+					r2 = r2 || {};
+					reportSendResult(r2, count, login,
+						(r2.transfer_names || []).length
+							? r2.transfer_names : names);
+				}
 			});
 			return;
 		} else {

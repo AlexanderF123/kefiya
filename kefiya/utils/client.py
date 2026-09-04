@@ -1602,10 +1602,65 @@ def approve_vop_transfer(kefiya_login, user_scope, confirmed=0):
         ),
     )
 
+    # Read before the release: approve_pending_vop clears the parked state,
+    # and with it the only record of which orders this check belonged to.
+    names = _orders_behind(login.vop_reference)
+
     from kefiya.utils.fints_controller import FinTSController
     interactive = {"docname": user_scope, "enabled": True}
     controller = FinTSController(kefiya_login, interactive)
-    return controller.approve_pending_vop()
+    return _release_result(controller.approve_pending_vop(), names)
+
+
+def _orders_behind(reference):
+    """The orders a parked payee check belongs to.
+
+    ``vop_reference`` is what the send passed as its payment reference: one
+    transfer name, or a batch's names joined by commas and cut at 140
+    characters -- so a long batch can lose its tail here. Only names that
+    resolve to a document are returned, and _release_result says so when the
+    bank accepted an order this cannot name.
+    """
+    names = [part.strip() for part in (reference or "").split(",")]
+    return [name for name in names
+            if name and frappe.db.exists("Kefiya Transfer", name)]
+
+
+def _release_result(result, names):
+    """Write down what the payee release came to. One place.
+
+    This path returned the bank's answer and touched nothing else. So an
+    order the Volksbank accepted on 04.09.2026 stayed "Approved" with its
+    payee check flagged open -- money gone, and the outgoing page inviting a
+    second send. The ordinary send and the banking-app release both write it
+    down; this one did not.
+
+    A release the bank answers with a challenge is not finished: the names
+    travel back to the browser so the box that waits for the app can hand
+    them to send_transfer_tan, which marks them.
+    """
+    status = (result or {}).get("status")
+    if status == "submitted":
+        if not names:
+            frappe.log_error(
+                title="Kefiya: released payee check, order not identified",
+                message=(
+                    "The bank accepted the released order, and the parked"
+                    " payee check named no transfer this app could find, so"
+                    " nothing was marked as sent. Look in the online banking"
+                    " and set the order's status by hand."
+                ),
+            )
+            return result
+        docs = [frappe.get_doc("Kefiya Transfer", name) for name in names]
+        _mark_sent(docs, result, _bank_holds_the_date(docs[0]))
+        for doc in docs:
+            # The check is answered -- it must not keep flagging the order.
+            doc.db_set("vop_pending", 0)
+        result["sent"] = [doc.name for doc in docs]
+    elif status == "tan_required":
+        result["transfer_names"] = names
+    return result
 
 
 @frappe.whitelist()

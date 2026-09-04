@@ -151,9 +151,10 @@ class TestOnePlaceWritesItDown(unittest.TestCase):
         # The bare name, not a suffix of another: release_outcome's
         # may_mark_sent() ends in the same letters and is a question, not a
         # write.
-        self.assertEqual(len(re.findall(r"(?<![\w.])_mark_sent\(", source)), 4,
-                         "the definition and three callers: single send,"
-                         " outbox batch, release of a parked challenge")
+        self.assertEqual(len(re.findall(r"(?<![\w.])_mark_sent\(", source)), 5,
+                         "the definition and four callers: single send,"
+                         " outbox batch, release of a parked challenge,"
+                         " release of a parked payee check")
 
     def test_nobody_writes_sent_on_their_own(self):
         source = _py("utils", "client.py")
@@ -181,3 +182,51 @@ class TestTheBoxClosesOnTheTransferPathToo(unittest.TestCase):
     def test_the_box_says_it_closes_by_itself(self):
         source = _js("tan_prompt.js")
         self.assertIn("This box closes by itself once the bank reports", source)
+
+
+class TestAReleasedPayeeCheckIsWrittenDown(unittest.TestCase):
+    """Der Empfaenger wurde freigegeben, die Bank nahm den Auftrag -- und
+    im System stand er weiter als "Empfaengerpruefung offen".
+
+    KEF-TRF-2026-00010, 04.09.2026, 18:42: Die Volksbank nahm die Freigabe
+    an und fuehrte die Ueberweisung aus. approve_vop_transfer gab die
+    Antwort der Bank zurueck und ruehrte sonst nichts an: Status blieb
+    "Freigegeben", vop_pending blieb 1. Das ist genau der Zustand, der zu
+    einem zweiten Senden einlaedt -- derselbe, den die App-Freigabe schon
+    einmal hatte.
+    """
+
+    def _release(self):
+        return _pyfunc(_py("utils", "client.py"), "def approve_vop_transfer(")
+
+    def test_die_namen_werden_vor_der_freigabe_gelesen(self):
+        """approve_pending_vop loescht den geparkten Zustand -- und damit
+        die einzige Spur, zu welchen Auftraegen die Pruefung gehoerte."""
+        body = self._release()
+        self.assertLess(body.index("_orders_behind(login.vop_reference)"),
+                        body.index("controller.approve_pending_vop()"))
+
+    def test_ein_angenommener_auftrag_gilt_als_gesendet(self):
+        body = _pyfunc(_py("utils", "client.py"), "def _release_result(")
+        self.assertIn('status == "submitted"', body)
+        self.assertIn("_mark_sent(docs, result, _bank_holds_the_date(docs[0]))",
+                      body)
+        self.assertIn('doc.db_set("vop_pending", 0)', body)
+
+    def test_ein_auftrag_ohne_namen_wird_gemeldet_nicht_verschwiegen(self):
+        body = _pyfunc(_py("utils", "client.py"), "def _release_result(")
+        self.assertIn("frappe.log_error(", body)
+        self.assertIn("set the order's status by hand", body)
+
+    def test_eine_offene_freigabe_reicht_die_namen_weiter(self):
+        """Sonst haelt das Freigabefenster nichts in der Hand, was es
+        send_transfer_tan mitgeben koennte."""
+        body = _pyfunc(_py("utils", "client.py"), "def _release_result(")
+        self.assertIn('status == "tan_required"', body)
+        self.assertIn('result["transfer_names"] = names', body)
+
+    def test_die_oberflaeche_verliert_die_namen_nicht(self):
+        body = _function(_js("payment_outbox.js"), "function reportSendResult(")
+        zweig = body.split('m.status === "vop_mismatch"')[1]
+        self.assertIn("r2.transfer_names", zweig)
+        self.assertIn(": names", zweig)
