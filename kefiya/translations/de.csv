@@ -395,3 +395,6 @@ Release transfer,Überweisung freigeben
 Cancel transfer,Überweisung abbrechen
 Please confirm you verified the recipient.,"Bitte bestätigen, dass der Empfänger geprüft wurde."
 Releasing transfer...,Überweisung wird freigegeben ...
+Status at the Bank,Status bei der Bank
+What the bank adds,Ergänzung der Bank
+"The bank sent no result this app could read, so nothing is shown above. Check the recipient against the original document yourself — here, you are the check.","Die Bank hat kein Ergebnis geschickt, das diese App lesen kann; deshalb steht oben nichts. Bitte den Empfänger selbst gegen den Originalbeleg prüfen — hier sind Sie die Prüfung."

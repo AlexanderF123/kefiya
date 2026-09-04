@@ -35,6 +35,7 @@ from kefiya.utils import fints_vop_client
 from kefiya.utils import pain_payee
 from kefiya.utils import release_outcome
 from kefiya.utils import sepa_descriptor
+from kefiya.utils import vop_report
 from kefiya.utils import vop_rule
 from kefiya.utils.fints_interactive import FinTSInteractive  # noqa: F401
 from kefiya.utils.fints_masking import mask_iban
@@ -1714,11 +1715,24 @@ class FinTSController(TanSession):
         payee = pain_payee.the_only_payee(pain_xml)
         name, iban = payee if payee else ("", "")
         vop_result = getattr(response, "vop_result", None)
+
+        # The other form the answer comes in. A bank with report_complete='V'
+        # -- the Volksbank -- leaves the EVPE empty and puts everything in a
+        # pain.002 document, which python-fints does not read and neither did
+        # this. The reviewer was told "this app cannot read the result" and
+        # asked to release money anyway. See vop_report.
+        bericht = vop_report.read(
+            getattr(vop_result, "payment_status_report", None))
+
         return {
-            "result": vop_rule.result_from(vop_result),
-            "bank_name": vop_rule.bank_name_from(vop_result),
+            "result": vop_rule.result_from(vop_result) or bericht["result"],
+            "bank_name": (vop_rule.bank_name_from(vop_result)
+                          or bericht["bank_name"]),
             "payee_name": name,
             "iban": iban,
+            # Only from the report: the EVPE has no equivalent.
+            "status": bericht["status"],
+            "detail": bericht["detail"],
         }
 
     def _may_confirm_without_asking(self, answer):
