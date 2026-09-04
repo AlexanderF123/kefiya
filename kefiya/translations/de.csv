@@ -388,3 +388,10 @@ Was die Bank gesagt hat:
 
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
 "{0} has no release waiting for the banking app, so there was nothing to release and nothing was marked as sent. Look in your online banking before sending again.","Für {0} wartet keine Freigabe auf die Banking-App, also gab es nichts freizugeben und nichts wurde als gesendet vermerkt. Bitte vor einem erneuten Senden im Online-Banking nachsehen."
+The bank could not confirm that the payee name matches the IBAN. <b>No money has been sent.</b>,"Die Bank konnte nicht bestätigen, dass der Name des Empfängers zur IBAN gehört. <b>Es wurde kein Geld gesendet.</b>"
+"Compare the recipient against the invoice before releasing. If the account details were changed recently or came in by email, treat this as a possible fraud attempt and clarify by phone using a known number.","Vor der Freigabe den Empfänger mit der Rechnung vergleichen. Wurde die Bankverbindung kürzlich geändert oder kam sie per E-Mail, ist das ein möglicher Betrugsversuch: bitte telefonisch unter einer bekannten Nummer klären."
+I verified the recipient against the original document,Ich habe den Empfänger gegen den Originalbeleg geprüft
+Release transfer,Überweisung freigeben
+Cancel transfer,Überweisung abbrechen
+Please confirm you verified the recipient.,"Bitte bestätigen, dass der Empfänger geprüft wurde."
+Releasing transfer...,Überweisung wird freigegeben ...
