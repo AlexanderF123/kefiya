@@ -63,21 +63,34 @@ def formats_in(segment):
     es geparst hat.
 
     HISPAS kennt die Bibliothek und legt die Liste unter
-    ``parameter.supported_sepa_formats`` ab. HIIPZS kennt sie nicht und
-    laesst die Daten als Liste von Listen liegen. Beides wird hier zu einer
-    flachen Liste von Zeichenketten, die "pain." enthalten. Nie eine
-    Ausnahme: ein Segment, das sich nicht lesen laesst, nennt keine Formate.
+    ``parameter.supported_sepa_formats`` ab -- als ``fints.types.ValueList``,
+    was **keine** ``list`` ist. Ein ``isinstance(value, (list, tuple))``
+    ging daran vorbei, und die Volksbank bekam ihren eigenen Namen deshalb
+    nur bei der Echtzeitueberweisung: deren HIIPZS kennt die Bibliothek
+    nicht und laesst die Daten als echte Listen liegen. Also wird hier
+    jedes Iterable durchlaufen, das keine Zeichenkette ist.
+
+    Beides wird zu einer flachen Liste von Zeichenketten, die "pain."
+    enthalten. Nie eine Ausnahme: ein Segment, das sich nicht lesen laesst,
+    nennt keine Formate.
     """
     if segment is None:
         return []
     found = []
 
-    def walk(value):
-        if isinstance(value, (list, tuple)):
-            for item in value:
-                walk(item)
-        elif isinstance(value, str) and "pain." in value:
-            found.append(value)
+    def walk(value, tiefe=0):
+        if isinstance(value, str):
+            if "pain." in value:
+                found.append(value)
+            return
+        if tiefe > 4 or isinstance(value, (bytes, bytearray)):
+            return
+        try:
+            items = list(value)
+        except TypeError:
+            return
+        for item in items:
+            walk(item, tiefe + 1)
 
     try:
         parameter = getattr(segment, "parameter", None)
