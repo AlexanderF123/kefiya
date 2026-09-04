@@ -398,3 +398,16 @@ Releasing transfer...,Überweisung wird freigegeben ...
 Status at the Bank,Status bei der Bank
 What the bank adds,Ergänzung der Bank
 "The bank sent no result this app could read, so nothing is shown above. Check the recipient against the original document yourself — here, you are the check.","Die Bank hat kein Ergebnis geschickt, das diese App lesen kann; deshalb steht oben nichts. Bitte den Empfänger selbst gegen den Originalbeleg prüfen — hier sind Sie die Prüfung."
+Send {0} orders,{0} Aufträge senden
+How should these go to the bank?,Wie sollen sie zur Bank gehen?
+One after another — a release for each,Nacheinander — eine Freigabe je Auftrag
+As one collective order — a single release,Als eine Sammelüberweisung — eine einzige Freigabe
+"A collective order reaches the bank as a single order over the total, and one release covers all of it.","Eine Sammelüberweisung erreicht die Bank als ein einziger Auftrag über die Summe, und eine Freigabe gilt für alles."
+Stopped at {0},Angehalten bei {0}
+Sent so far: {0} of {1}.,Bisher gesendet: {0} von {1}.
+Sent one after another: {0},Nacheinander gesendet: {0}
+The bank has not reported the release.,Die Bank hat die Freigabe nicht gemeldet.
+The bank asks for a TAN for this order. Answer it in the box that opened; the remaining orders stay selected — press Send again afterwards.,Die Bank verlangt für diesen Auftrag eine TAN. Bitte im geöffneten Fenster beantworten; die übrigen Aufträge bleiben ausgewählt — danach erneut auf Senden drücken.
+Sending {0} of {1} …,Sende {0} von {1} …
+{0} orders over {1} go to the bank from {2} accounts.,{0} Aufträge über {1} gehen von {2} Konten zur Bank.
+Orders from several accounts are selected. They can only go one after another — a collective order leaves from exactly one account.,Es sind Aufträge von mehreren Konten markiert. Sie können nur nacheinander gehen — eine Sammelüberweisung geht von genau einem Konto ab.

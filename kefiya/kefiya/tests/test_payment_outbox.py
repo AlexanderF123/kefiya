@@ -111,13 +111,19 @@ class TestNoBatchReportsOnlyItsSuccesses(unittest.TestCase):
 
 class TestSendingRefusesRatherThanGuesses(unittest.TestCase):
 
-    def test_several_paying_accounts_abort_the_send(self):
+    def test_several_paying_accounts_rule_out_the_collective_way(self):
+        """A collective order leaves from exactly one account -- that is what
+        makes it ONE order. Sent one after another, each order pays from its
+        own, so a mixed selection is refused for the collective way and only
+        there. It used to be refused outright, and the one way that works
+        was not offered at all."""
         body = _function(_source(), "function send() {")
-        self.assertIn("Object.keys(accounts).length > 1", body)
-        self.assertIn("One account at a time", body)
-        self.assertIn("return;", body.split(
-            "Object.keys(accounts).length > 1")[1][:400],
-            "Warning and then sending anyway would debit the wrong account.")
+        self.assertIn("groupByAccount(rows)", body)
+        self.assertIn("askHowToSend(rows, message, toApprove,"
+                      " groups.length === 1)", body)
+        frage = _function(_source(), "function askHowToSend(")
+        self.assertIn("way.stored !== TOGETHER", frage)
+        self.assertIn("leaves from exactly one account.", frage)
 
     def test_the_send_says_what_it_is_leaving_out(self):
         body = _function(_source(), "function send() {")
@@ -191,13 +197,16 @@ class TestTheConfirmationCanBeCheckedOnItsOwn(unittest.TestCase):
         self.assertIn("<style>", body)
 
     def test_the_send_confirmation_uses_it(self):
+        """One block per paying account: a single block over a mixed
+        selection would name one account and debit several."""
         body = _function(_source(), "function send() {")
-        self.assertIn("kefiya.outbox_confirm_html(rows, payer)", body)
+        self.assertIn("kefiya.outbox_confirm_html(group.rows, group.payer)",
+                      body)
 
     def test_the_payer_is_looked_up_and_may_be_missing(self):
         """An account that is no longer offered as a payer must not take the
         confirmation down with it."""
-        body = _function(_source(), "function send() {")
+        body = _function(_source(), "function groupByAccount(")
         self.assertIn("view.payers.find", body)
         self.assertIn("|| null", body)
         panel = self._panel()
@@ -571,14 +580,18 @@ class TestAParkedPayeeCheckIsNotASend(unittest.TestCase):
     """
 
     def test_the_send_handler_knows_the_parked_case(self):
+        # Die Frage "was hat die Bank geantwortet" wohnt in sendOutcome,
+        # seit auch der Einzelversand sie stellt. Der Bericht handelt danach.
+        self.assertIn('m.status === "vop_mismatch"',
+                      _function(_source(), "function sendOutcome("))
         body = _function(_source(), "function reportSendResult(")
-        self.assertIn('m.status === "vop_mismatch"', body)
+        self.assertIn('outcome === "payee"', body)
         self.assertIn("kefiya.vop_prompt({", body)
 
     def test_the_parked_case_is_decided_before_the_success_branch(self):
         """Order matters: the success branch is the else of this chain."""
         body = _function(_source(), "function reportSendResult(")
-        self.assertLess(body.index('"vop_mismatch"'),
+        self.assertLess(body.index('"payee"'),
                         body.index("Handed to the bank: {0} orders"))
 
     def test_one_place_says_what_a_send_came_back_with(self):
