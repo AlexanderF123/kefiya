@@ -66,11 +66,28 @@ class TestDerNameDerBank(unittest.TestCase):
                          "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03")
 
 
+class ValueList:
+    """Was python-fints wirklich ablegt: iterierbar, aber keine ``list``.
+
+    Genau daran ging die erste Fassung vorbei -- sie fragte
+    ``isinstance(value, (list, tuple))``, und die Volksbank bekam ihren
+    eigenen Schemanamen deshalb nur bei der Echtzeitueberweisung, deren
+    Segment die Bibliothek nicht parst.
+    """
+
+    def __init__(self, items):
+        self._items = list(items)
+
+    def __iter__(self):
+        return iter(self._items)
+
+
 class Parsed:
     """HISPAS, wie python-fints es kennt."""
 
     def __init__(self, formats):
-        self.parameter = type("P", (), {"supported_sepa_formats": formats})()
+        self.parameter = type(
+            "P", (), {"supported_sepa_formats": ValueList(formats)})()
 
 
 class Raw:
@@ -84,6 +101,21 @@ class TestDieFormateAusDemSegment(unittest.TestCase):
 
     def test_aus_dem_geparsten_segment(self):
         self.assertEqual(formats_in(Parsed(SPARKASSE)), SPARKASSE)
+
+    def test_auch_wenn_die_liste_keine_liste_ist(self):
+        """fints.types.ValueList ist iterierbar und keine list -- der Fehler,
+        der die Volksbank bei der normalen Ueberweisung beim Namen der
+        Bibliothek liess."""
+        self.assertEqual(formats_in(Parsed(VOLKSBANK))[:1],
+                         ["sepade:xsd:pain.008.001.02.xsd"])
+        self.assertEqual(choose(formats_in(Parsed(VOLKSBANK))),
+                         "sepade:xsd:pain.001.001.03_GBIC_3.xsd")
+
+    def test_eine_zeichenkette_wird_nicht_buchstabenweise_gelesen(self):
+        """Auch Zeichenketten sind iterierbar. Eine davon ist ein Name, kein
+        Behaelter voller Buchstaben."""
+        self.assertEqual(formats_in(Raw("sepade:xsd:pain.001.001.03.xsd")),
+                         ["sepade:xsd:pain.001.001.03.xsd"])
 
     def test_aus_dem_rohen_segment(self):
         raw = Raw(["1", "1", "1", [None, "sepade:xsd:pain.001.001.03.xsd",
