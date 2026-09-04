@@ -762,36 +762,29 @@ kefiya.payment_outbox = function (root) {
 		const rows = applicable("send");
 		if (!rows.length || view.busy) return;
 
-		// A collective order always leaves from exactly one account. Refusing
-		// beats picking one, which would debit the wrong account for the rest.
-		const accounts = {};
-		rows.forEach(function (r) { accounts[r.kefiya_login] = 1; });
-		if (Object.keys(accounts).length > 1) {
-			frappe.msgprint({
-				title: __("One account at a time"), indicator: "orange",
-				message: __("Orders from several accounts are selected. A"
-					+ " collective order always leaves from exactly one"
-					+ " account — please send them one account at a time."),
-			});
-			return;
-		}
+		// One collective order leaves from exactly ONE account -- that is
+		// what makes it one order. Sent one after another, each order pays
+		// from its own account, so a selection across accounts is only
+		// refused for the collective way, and only there.
+		const groups = groupByAccount(rows);
 
 		const skipped = selection().length - rows.length;
 		let sum = 0;
 		rows.forEach(function (r) { sum += Number(r.total_amount || 0); });
 
-		// The ordering party's own account, out of the payer list the page
-		// already has. The row names the account but not its IBAN, and an
-		// IBAN is what somebody comparing this against online banking reads.
-		const payer = view.payers.find(function (p) {
-			return p.login === rows[0].kefiya_login;
-		}) || null;
-
+		// One block per account, each with its own ordering party. A single
+		// block over a mixed selection would name one account and debit
+		// several.
 		let message = "<div>"
-			+ __("{0} orders over {1} go from {2} to the bank.",
-				[rows.length, money(sum), esc(rows[0].bank_account || "")])
+			+ (groups.length > 1
+				? __("{0} orders over {1} go to the bank from {2} accounts.",
+					[rows.length, money(sum), groups.length])
+				: __("{0} orders over {1} go from {2} to the bank.",
+					[rows.length, money(sum), esc(rows[0].bank_account || "")]))
 			+ "</div>"
-			+ kefiya.outbox_confirm_html(rows, payer);
+			+ groups.map(function (group) {
+				return kefiya.outbox_confirm_html(group.rows, group.payer);
+			}).join("");
 		if (skipped > 0) {
 			message += "<div class='text-muted small' style='margin-top:8px'>"
 				+ __("{0} selected orders are not being sent — they are held"
@@ -813,7 +806,6 @@ kefiya.payment_outbox = function (root) {
 				+ " confirmation in its app). Nothing is debited until then.")
 			+ "</div>";
 
-		const names = rows.map(function (r) { return r.name; });
 		if (rows.length === 1) {
 			frappe.confirm(message, function () {
 				// One call, and the approval happens inside it -- AFTER the
@@ -822,11 +814,34 @@ kefiya.payment_outbox = function (root) {
 				// dates left its drafts locked for nothing, undoable only by
 				// cancelling and re-entering them. The endpoint knows every
 				// refusal; the browser knows none.
-				handToBank(names, rows[0].kefiya_login, toApprove.length);
+				handToBank([rows[0].name], rows[0].kefiya_login,
+					toApprove.length);
 			});
 			return;
 		}
-		askHowToSend(rows, message, toApprove);
+		askHowToSend(rows, message, toApprove, groups.length === 1);
+	}
+
+	//: The selection by paying account, in the order the rows came in. The
+	//: payer carries the IBAN, which is what somebody comparing this against
+	//: their online banking reads; the row names only the account.
+	function groupByAccount(rows) {
+		const groups = [];
+		const seen = {};
+		rows.forEach(function (r) {
+			if (seen[r.kefiya_login] === undefined) {
+				seen[r.kefiya_login] = groups.length;
+				groups.push({
+					login: r.kefiya_login,
+					payer: view.payers.find(function (p) {
+						return p.login === r.kefiya_login;
+					}) || null,
+					rows: [],
+				});
+			}
+			groups[seen[r.kefiya_login]].rows.push(r);
+		});
+		return groups;
 	}
 
 
@@ -964,11 +979,19 @@ kefiya.payment_outbox = function (root) {
 			label: __("As one collective order — a single release") },
 	];
 
-	function askHowToSend(rows, message, toApprove) {
-		const names = rows.map(function (r) { return r.name; });
-		const preset = SEND_WAYS.find(function (way) {
+	function askHowToSend(rows, message, toApprove, oneAccount) {
+		// Across accounts only one way exists, and it is offered as the only
+		// one rather than refusing the selection: a collective order is one
+		// order from one account, but sending them one after another pays
+		// each from its own.
+		const ways = oneAccount
+			? SEND_WAYS
+			: SEND_WAYS.filter(function (way) {
+				return way.stored !== TOGETHER;
+			});
+		const preset = ways.find(function (way) {
 			return way.stored === view.sendDefault;
-		}) || SEND_WAYS[0];
+		}) || ways[0];
 		const dialog = new frappe.ui.Dialog({
 			title: __("Send {0} orders", [rows.length]),
 			fields: [
@@ -976,28 +999,31 @@ kefiya.payment_outbox = function (root) {
 				{
 					fieldtype: "Select", fieldname: "how", reqd: 1,
 					label: __("How should these go to the bank?"),
-					options: SEND_WAYS.map(function (way) {
-						return way.label;
-					}),
+					options: ways.map(function (way) { return way.label; }),
 					// Pre-filled from Kefiya Settings, never decided from
 					// there: the question is asked either way.
 					default: preset.label,
-					description: __("A collective order reaches the bank as a"
-						+ " single order over the total, and one release"
-						+ " covers all of it.")
+					description: oneAccount
+						? __("A collective order reaches the bank as a single"
+							+ " order over the total, and one release covers"
+							+ " all of it.")
+						: __("Orders from several accounts are selected. They"
+							+ " can only go one after another — a collective"
+							+ " order leaves from exactly one account.")
 				}
 			],
 			primary_action_label: __("Send"),
 			primary_action: function (values) {
-				const chosen = SEND_WAYS.find(function (way) {
+				const chosen = ways.find(function (way) {
 					return way.label === values.how;
 				});
 				if (!chosen) return;
 				dialog.hide();
 				if (chosen.stored === TOGETHER) {
-					handToBank(names, rows[0].kefiya_login, toApprove.length);
+					handToBank(rows.map(function (r) { return r.name; }),
+						rows[0].kefiya_login, toApprove.length);
 				} else {
-					sendOneByOne(names, rows[0].kefiya_login, toApprove);
+					sendOneByOne(rows, toApprove);
 				}
 			}
 		});
@@ -1011,7 +1037,11 @@ kefiya.payment_outbox = function (root) {
 	// done -- and then says how far it got, with the rest still selected so
 	// pressing Send again carries on. Guessing that the TAN went through
 	// would mark orders sent that never left.
-	function sendOneByOne(names, login, toApprove) {
+	function sendOneByOne(orders, toApprove) {
+		// Each order carries its own paying account: across accounts this is
+		// the only way, and every send has to reach the bank the order
+		// actually pays from.
+		const names = orders.map(function (r) { return r.name; });
 		// Which of them are still drafts. Each is approved on its own turn,
 		// immediately before its own send -- not all of them upfront. An
 		// order that never goes out because the run stopped earlier must not
@@ -1048,13 +1078,16 @@ kefiya.payment_outbox = function (root) {
 				return;
 			case "payee":
 				kefiya.vop_prompt({
-					login: login, scope: login, answer: m.vop_result,
+					login: orders[index].kefiya_login,
+					scope: orders[index].kefiya_login,
+					answer: m.vop_result,
 					onResult: function (r2) { after(index, sent, r2 || {}); },
 				});
 				return;
 			case "release":
 				kefiya.await_release({
-					login: login, names: [name], scope: login,
+					login: orders[index].kefiya_login, names: [name],
+					scope: orders[index].kefiya_login,
 					done: function (status, message) {
 						if (status === "submitted") { step(index + 1, sent + 1); }
 						else {
@@ -1098,7 +1131,8 @@ kefiya.payment_outbox = function (root) {
 				if (!go) return;
 				return frappe.call({
 					method: "kefiya.utils.client.submit_kefiya_transfer",
-					args: { transfer_name: name, user_scope: login,
+					args: { transfer_name: name,
+						user_scope: orders[index].kefiya_login,
 						confirmed: 1 },
 					freeze: true,
 					freeze_message: __("Sending {0} of {1} …",

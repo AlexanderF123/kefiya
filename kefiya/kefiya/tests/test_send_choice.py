@@ -48,7 +48,7 @@ class TestGefragtWirdVorher(unittest.TestCase):
         self.assertIn("frappe.confirm(message,", self.senden)
 
     def test_mehrere_fuehren_zur_frage(self):
-        self.assertIn("askHowToSend(rows, message, toApprove);", self.senden)
+        self.assertIn("askHowToSend(rows, message, toApprove,", self.senden)
         # Und nicht daran vorbei: der Sammelweg wird nur noch aus der Frage
         # heraus oder fuer den einzelnen Auftrag aufgerufen.
         sammel = self.senden.count("handToBank(")
@@ -61,8 +61,8 @@ class TestGefragtWirdVorher(unittest.TestCase):
         self.assertIn("One after another", wege)
         self.assertIn("As one collective order", wege)
         frage = _funktion(quelle, "\tfunction askHowToSend(")
-        self.assertIn("handToBank(names,", frage)
-        self.assertIn("sendOneByOne(names,", frage)
+        self.assertIn("handToBank(rows.map(", frage)
+        self.assertIn("sendOneByOne(rows, toApprove)", frage)
 
     def test_die_vorauswahl_kommt_aus_den_einstellungen(self):
         """Vorbelegt, nie entschieden: gefragt wird so oder so."""
@@ -71,8 +71,9 @@ class TestGefragtWirdVorher(unittest.TestCase):
         self.assertIn('fieldname: "how", reqd: 1', frage)
         self.assertIn("way.stored === view.sendDefault", frage)
         self.assertIn("default: preset.label", frage)
-        # Und ohne Treffer der erste Weg -- einzeln, nicht zusammen.
-        self.assertIn("|| SEND_WAYS[0]", frage)
+        # Und ohne Treffer der erste angebotene Weg -- einzeln, nicht
+        # zusammen.
+        self.assertIn("|| ways[0]", frage)
         quelle = _js("payment_outbox.js")
         wege = quelle.split("const SEND_WAYS = [")[1].split("];")[0]
         self.assertLess(wege.index("One after another"),
@@ -99,6 +100,13 @@ class TestEinzelnHeisstEinzeln(unittest.TestCase):
                       self.einzeln)
         self.assertIn("names[index]", self.einzeln)
         self.assertNotIn("send_transfer_outbox", self.einzeln)
+
+    def test_jeder_auftrag_von_seinem_eigenen_konto(self):
+        """Ueber Konten hinweg ist das der einzige Weg, und jeder Auftrag
+        muss die Bank erreichen, von der er wirklich zahlt."""
+        self.assertIn("user_scope: orders[index].kefiya_login",
+                      self.einzeln)
+        self.assertIn("login: orders[index].kefiya_login", self.einzeln)
 
     def test_der_naechste_erst_nach_der_freigabe_des_vorigen(self):
         self.assertIn("step(index + 1, sent + 1)", self.einzeln)

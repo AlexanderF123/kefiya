@@ -409,3 +409,5 @@ Sent one after another: {0},Nacheinander gesendet: {0}
 The bank has not reported the release.,Die Bank hat die Freigabe nicht gemeldet.
 The bank asks for a TAN for this order. Answer it in the box that opened; the remaining orders stay selected — press Send again afterwards.,Die Bank verlangt für diesen Auftrag eine TAN. Bitte im geöffneten Fenster beantworten; die übrigen Aufträge bleiben ausgewählt — danach erneut auf Senden drücken.
 Sending {0} of {1} …,Sende {0} von {1} …
+{0} orders over {1} go to the bank from {2} accounts.,{0} Aufträge über {1} gehen von {2} Konten zur Bank.
+Orders from several accounts are selected. They can only go one after another — a collective order leaves from exactly one account.,Es sind Aufträge von mehreren Konten markiert. Sie können nur nacheinander gehen — eine Sammelüberweisung geht von genau einem Konto ab.
