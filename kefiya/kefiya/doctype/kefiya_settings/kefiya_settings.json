@@ -23,7 +23,8 @@
   "auto_create_advance_payments",
   "auto_reconcile_own_transfers",
   "outgoing_section",
-  "default_send_mode"
+  "default_send_mode",
+  "self_approval_up_to"
  ],
  "fields": [
   {
@@ -150,12 +151,20 @@
    "fieldtype": "Select",
    "label": "Default for several orders",
    "options": "One after another\nAs one collective order"
+  },
+  {
+   "default": "0",
+   "description": "Largest total a person may approve on a transfer they entered or last changed. 0 means never: every transfer needs a second person to approve it.",
+   "fieldname": "self_approval_up_to",
+   "fieldtype": "Currency",
+   "label": "Self-approval allowed up to",
+   "non_negative": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-04 21:00:00.000000",
+ "modified": "2026-09-26 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya Settings",
