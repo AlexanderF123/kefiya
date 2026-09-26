@@ -23,11 +23,17 @@ Two people count as having entered a transfer:
   submit is about to overwrite it). Editing someone else's draft and then
   approving it is entering it -- the amount on it is yours.
 
-Kefiya Settings may allow self-approval for small transfers
-(``self_approval_up_to``). It is a ceiling, not a switch, and it defaults to 0:
-a field that did not exist before reads as 0, so the rule is on for every site
-from the moment this code is deployed, without anybody having to save the
-settings first.
+Kefiya Settings can relax the rule in two ways, and both start closed:
+
+* ``self_approval_up_to`` -- a ceiling below which the person who entered a
+  transfer may approve it alone. It defaults to 0, and a field that did not
+  exist before reads as 0, so the rule is on from the moment this code is
+  deployed, without anybody having to save the settings first.
+* ``self_approval_roles`` -- roles whose holders may always approve alone,
+  whatever the amount. Four eyes are not always necessary: a managing director
+  who types a payment and releases it carries that responsibility anyway, and
+  a second signature from someone who reports to them adds nothing. Empty by
+  default; which roles belong here is the site's decision, not the app's.
 
 The decision itself is kept free of Frappe so it can be tested without a bench.
 """
@@ -67,6 +73,12 @@ def applies(total, self_approval_up_to):
     return _as_amount(total) > ceiling
 
 
+def may_approve_alone(user_roles, exempt_roles):
+    """Does one of the user's roles release them from the rule?"""
+    exempt = {r for r in (exempt_roles or []) if r}
+    return any(r in exempt for r in (user_roles or []))
+
+
 def _as_amount(value):
     try:
         return float(value or 0)
@@ -83,6 +95,14 @@ def enforce(doc):
     ceiling = frappe.db.get_single_value(
         "Kefiya Settings", "self_approval_up_to")
     if not applies(doc.total_amount, ceiling):
+        return
+
+    exempt_roles = frappe.get_all(
+        "Kefiya Self Approval Role",
+        filters={"parent": "Kefiya Settings",
+                 "parentfield": "self_approval_roles"},
+        pluck="role")
+    if may_approve_alone(frappe.get_roles(), exempt_roles):
         return
 
     # The stored value, read before this submit overwrites modified_by with

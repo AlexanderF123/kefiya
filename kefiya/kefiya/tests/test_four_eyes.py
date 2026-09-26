@@ -27,10 +27,13 @@ class _Refused(Exception):
     pass
 
 
-def _fake_frappe(session_user, stored_modified_by, ceiling):
+def _fake_frappe(session_user, stored_modified_by, ceiling, user_roles=(),
+                 exempt_roles=()):
     """Just enough of frappe for enforce(): settings, one stored value, a
-    session user, _() and throw()."""
+    session user, its roles, the exempt roles, _() and throw()."""
     fake = types.ModuleType("frappe")
+    fake.get_roles = lambda: list(user_roles)
+    fake.get_all = lambda doctype, filters=None, pluck=None: list(exempt_roles)
     fake.session = types.SimpleNamespace(user=session_user)
     fake.db = types.SimpleNamespace(
         get_single_value=lambda doctype, field: ceiling,
@@ -95,14 +98,28 @@ class TestWhenTheRuleBinds(unittest.TestCase):
         self.assertTrue(four_eyes.applies(10, "a lot"))
 
 
+class TestWhoIsReleased(unittest.TestCase):
+
+    def test_a_listed_role_releases(self):
+        self.assertTrue(four_eyes.may_approve_alone(["A", "GF"], ["GF"]))
+
+    def test_an_empty_list_releases_nobody(self):
+        self.assertFalse(four_eyes.may_approve_alone(["GF"], []))
+        self.assertFalse(four_eyes.may_approve_alone(["GF"], None))
+
+    def test_an_empty_row_releases_nobody(self):
+        self.assertFalse(four_eyes.may_approve_alone([""], [""]))
+
+
 class TestEnforceRuns(unittest.TestCase):
     """enforce() executed against a stand-in frappe."""
 
     def _run(self, session_user, owner, stored_modified_by, total=500,
-             ceiling=0, new=False):
+             ceiling=0, new=False, user_roles=(), exempt_roles=()):
         saved = sys.modules.get("frappe")
         sys.modules["frappe"] = _fake_frappe(
-            session_user, stored_modified_by, ceiling)
+            session_user, stored_modified_by, ceiling, user_roles,
+            exempt_roles)
         try:
             four_eyes.enforce(_Transfer(owner, total, new=new))
         finally:
@@ -130,6 +147,22 @@ class TestEnforceRuns(unittest.TestCase):
     def test_above_the_ceiling_one_person_is_refused(self):
         with self.assertRaises(_Refused):
             self._run("a@x", "a@x", "a@x", total=150, ceiling=100)
+
+    def test_a_role_released_from_the_rule_approves_alone(self):
+        """The managing director types and releases a payment alone."""
+        self._run("gf@x", "gf@x", "gf@x", total=50000,
+                  user_roles=["Employee", "Managing Director"],
+                  exempt_roles=["Managing Director"])
+
+    def test_nobody_is_released_by_default(self):
+        with self.assertRaises(_Refused):
+            self._run("gf@x", "gf@x", "gf@x",
+                      user_roles=["Managing Director"], exempt_roles=[])
+
+    def test_another_role_does_not_release(self):
+        with self.assertRaises(_Refused):
+            self._run("a@x", "a@x", "a@x", user_roles=["Accounts User"],
+                      exempt_roles=["Managing Director"])
 
 
 def _source(*parts):
@@ -169,6 +202,10 @@ class TestEveryApprovalPathPassesTheCheck(unittest.TestCase):
         self.assertIn("self_approval_up_to", fields)
         self.assertEqual(fields["self_approval_up_to"]["default"], "0")
         self.assertIn("self_approval_up_to", meta["field_order"])
+        self.assertEqual(fields["self_approval_roles"]["options"],
+                         "Kefiya Self Approval Role")
+        self.assertNotIn("default", fields["self_approval_roles"],
+                         "Which roles may approve alone is the site's call.")
 
 
 if __name__ == "__main__":
