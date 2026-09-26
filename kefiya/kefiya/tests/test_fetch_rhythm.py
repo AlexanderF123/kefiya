@@ -53,18 +53,28 @@ class TestWelcherRhythmus(unittest.TestCase):
         self.assertEqual(fetch_rhythm.interval_days("Cooperative Shares", 7), 7)
         self.assertEqual(fetch_rhythm.interval_days("Current Account", 14), 14)
 
-    def test_die_null_ist_eine_ansage(self):
-        """Ausdruecklich "bei jedem Lauf" -- nicht "nimm die Vorgabe"."""
-        self.assertEqual(fetch_rhythm.interval_days("Loan", 0), 0)
-        self.assertEqual(fetch_rhythm.interval_days("Loan", "0"), 0)
+    def test_die_null_ist_keine_angabe(self):
+        """Und das ist der Unterschied, an dem die Regel zuerst wirkungslos
+        blieb: ein Int-Feld in Frappe kennt kein "nicht gesetzt", die
+        Migration schreibt die 0 in jede bestehende Zeile. Haette die 0
+        "bei jedem Lauf" geheissen, stuende sie nach dem Deploy an allen 44
+        Zugaengen -- und genau so kam es: 60 Volksbank-Importe am 26.09.,
+        zweimal dreissig, unveraendert."""
+        self.assertEqual(fetch_rhythm.interval_days("Loan", 0), 30)
+        self.assertEqual(fetch_rhythm.interval_days("Loan", "0"), 30)
+        self.assertEqual(fetch_rhythm.interval_days("Current Account", 0), 0)
 
-    def test_leer_heisst_vorgabe(self):
+    def test_leer_heisst_auch_vorgabe(self):
         self.assertEqual(fetch_rhythm.interval_days("Loan", None), 30)
         self.assertEqual(fetch_rhythm.interval_days("Loan", ""), 30)
 
-    def test_unsinn_haelt_nichts_an(self):
-        self.assertEqual(fetch_rhythm.interval_days("Loan", "bald"), 0)
-        self.assertEqual(fetch_rhythm.interval_days("Loan", -5), 0)
+    def test_wer_es_oft_will_traegt_eins_ein(self):
+        self.assertEqual(fetch_rhythm.interval_days("Cooperative Shares", 1), 1)
+
+    def test_unsinn_ueberlaesst_es_der_kontoart(self):
+        self.assertEqual(fetch_rhythm.interval_days("Loan", "bald"), 30)
+        self.assertEqual(fetch_rhythm.interval_days("Loan", -5), 30)
+        self.assertEqual(fetch_rhythm.interval_days("Current Account", "bald"), 0)
 
 
 class TestWannWiederFaellig(unittest.TestCase):
@@ -101,9 +111,10 @@ class TestWannWiederFaellig(unittest.TestCase):
         giro = {"account_kind": "Current Account",
                 "last_fetch_attempt": "2026-09-25 09:53:00"}
         self.assertTrue(fetch_rhythm.due_now(giro, JETZT))
-        # Und was am Zugang steht, gilt auch hier.
+        # Und was am Zugang steht, gilt auch hier -- ab 1.
         self.assertTrue(fetch_rhythm.due_now(
-            dict(ruhend, fetch_interval_days=0), JETZT))
+            dict(ruhend, fetch_interval_days=1,
+                 last_fetch_attempt="2026-09-23 09:00:00"), JETZT))
         # Eine Zeile ohne alles: abrufen.
         self.assertTrue(fetch_rhythm.due_now({}, JETZT))
 

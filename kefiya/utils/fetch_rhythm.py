@@ -17,9 +17,16 @@ Gezaehlt am 25.09.2026 auf der Instanz:
 
 Deshalb ein Rhythmus: was sich von Natur aus selten bewegt, wird selten
 abgerufen. Die Vorgabe haengt an der Kontoart, die die Bank selbst gemeldet
-hat (HIUPD, am Kefiya Login), und laesst sich je Zugang ueberschreiben. Null
-heisst "bei jedem Lauf" -- das ist der Stand von vorher, und bei einem
-Girokonto bleibt es dabei.
+hat (HIUPD, am Kefiya Login), und laesst sich je Zugang ueberschreiben.
+
+**Die Null am Zugang heisst "keine eigene Angabe", nicht "bei jedem Lauf".**
+Das war zuerst andersherum gedacht und hat die ganze Regel wirkungslos
+gemacht: ein Int-Feld in Frappe kennt kein "nicht gesetzt", die Migration
+schreibt seinen Vorgabewert in jede bestehende Zeile, und so stand nach dem
+Deploy an allen 44 Zugaengen eine 0. Sie schlug die Vorgabe der Kontoart --
+und der erste Lauf danach rief wieder alle dreissig Volksbank-Zugaenge ab
+(60 Importe am 26.09., zweimal dreissig, unveraendert). Wer ein ruhendes
+Konto trotzdem oft will, traegt 1 ein: hoechstens taeglich.
 
 Ausgelassen wird nur der SAMMELabruf. Wer ein Konto von Hand abruft, bekommt
 es abgerufen; sonst waere aus einer Schonung eine Sperre geworden.
@@ -41,7 +48,10 @@ DEFAULT_DAYS = {
     "Securities Account": 7,
 }
 
-#: Was "bei jedem Lauf" heisst.
+#: Was "bei jedem Lauf" heisst -- und zugleich, was am Zugang "keine eigene
+#: Angabe" heisst. Ein Int-Feld in Frappe kann beides nicht auseinanderhalten:
+#: es ist nach der Migration ueberall 0. Also entscheidet hier die Kontoart,
+#: und eine Angabe ab 1 schlaegt sie.
 EVERY_RUN = 0
 
 
@@ -49,17 +59,16 @@ def interval_days(account_kind, setting=None):
     """Der Rhythmus eines Zugangs in Tagen.
 
     :param account_kind: was die Bank ueber das Konto gesagt hat
-    :param setting: was am Zugang eingestellt ist; gesetzt schlaegt es die
-        Vorgabe der Kontoart -- auch die 0, mit der jemand ausdruecklich
-        "bei jedem Lauf" verlangt. Deshalb entscheidet hier None und nicht
-        die Wahrheit des Wertes.
+    :param setting: was am Zugang eingetragen ist. Ab 1 gilt es; 0, leer und
+        Unsinn heissen "keine eigene Angabe" und ueberlassen die Antwort der
+        Kontoart. Wer ein ruhendes Konto oft will, traegt 1 ein.
     """
-    if setting is not None and str(setting).strip() != "":
-        try:
-            gewaehlt = int(setting)
-        except (TypeError, ValueError):
-            gewaehlt = EVERY_RUN
-        return max(EVERY_RUN, gewaehlt)
+    try:
+        gewaehlt = int(setting)
+    except (TypeError, ValueError):
+        gewaehlt = EVERY_RUN
+    if gewaehlt >= 1:
+        return gewaehlt
     return DEFAULT_DAYS.get((account_kind or "").strip(), EVERY_RUN)
 
 

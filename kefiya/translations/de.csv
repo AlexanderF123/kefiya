@@ -346,7 +346,7 @@ The bank checked the payee for this order and will not release it until that che
 {0}","Die Bank hat diesen Auftrag nach der Freigabe abgelehnt. Er wurde NICHT gesendet.
 
 {0}"
-"This transfer has gone to the bank. Its date cannot be changed here -- recall it with your bank if it must not be executed as it stands.","Dieser Auftrag ist bei der Bank. Sein Datum kann hier nicht mehr geändert werden — bitte bei der Bank widerrufen, wenn er so nicht ausgeführt werden soll."
+This transfer has gone to the bank. Its date cannot be changed here -- recall it with your bank if it must not be executed as it stands.,"Dieser Auftrag ist bei der Bank. Sein Datum kann hier nicht mehr geändert werden — bitte bei der Bank widerrufen, wenn er so nicht ausgeführt werden soll."
 "{0}: the bank is waiting for a release, but this could not be noted down here, so the release cannot be answered. Look in your online banking before sending again -- an order may have reached the bank.","{0}: Die Bank wartet auf eine Freigabe, aber der Vorgang konnte hier nicht festgehalten werden — die Freigabe kann deshalb nicht beantwortet werden. Bitte vor einem erneuten Senden im Online-Banking nachsehen: Ein Auftrag kann die Bank erreicht haben."
 Release failed,Freigabe fehlgeschlagen
 Released in the banking app. Handed to the bank: {0} orders,In der Banking-App freigegeben. An die Bank übergeben: {0} Aufträge
@@ -423,4 +423,4 @@ The bank does not list {0} under this access. Load the accounts first.,Die Bank 
 "Four eyes: you were the last to change this transfer, so someone else has to approve it.","Vier-Augen-Prinzip: Sie haben diese Überweisung zuletzt geändert, deshalb muss sie jemand anderes freigeben."
 Approval by a second person,Freigabe durch eine zweite Person
 Fetch at most every n days,Höchstens alle n Tage abrufen
-"0 = bei jedem Sammelabruf. Sonst: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer uebernimmt die Vorgabe der Kontoart (Geschaeftsanteile, Avale, Darlehen: 30 Tage).","0 = bei jedem Sammelabruf. Sonst: höchstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer übernimmt die Vorgabe der Kontoart (Geschäftsanteile, Avale, Darlehen: 30 Tage)."
+"Leer oder 0: die Vorgabe der Kontoart gilt (Geschaeftsanteile, Avale, Darlehen: 30 Tage; Depots: 7; Zahlungskonten: bei jedem Lauf). Ab 1: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar.","Leer oder 0: die Vorgabe der Kontoart gilt (Geschäftsanteile, Avale, Darlehen: 30 Tage; Depots: 7; Zahlungskonten: bei jedem Lauf). Ab 1: höchstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar."

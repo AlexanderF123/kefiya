@@ -21,12 +21,14 @@ is a caller.
 """
 
 import base64
+import datetime
 import re
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from kefiya.utils import booking_budget
 from kefiya.utils import statement_formats as formats
 from kefiya.utils.statement_formats import (  # noqa: F401 -- the public names
     PROFILES, decode, normalise_pushed, parse_amount, parse_date, read_rows,
@@ -54,6 +56,11 @@ def already_booked(bank_account, entry):
     Reporting a real booking as "already present" is recoverable by looking at
     the day; a duplicate in the ledger is the error that took 3.000 entries to
     notice the last time.
+
+    Auf den Tag genau, und das bleibt hier auch so. Das Datumsfenster von
+    booking_budget gilt dem Einlesen einer DATEI, wo Buchungstag und Valuta
+    durcheinandergehen koennen; hier kommt die Buchung von der Bank selbst
+    und traegt deren Tag.
 
     :return: name of the existing Bank Transaction, or None
     """
@@ -180,16 +187,22 @@ def _existing_budget(bank_account, entries):
     if not days:
         return {}
 
-    budget = {}
+    # Ein paar Tage ueber die Datei hinaus gelesen: was sie am Ersten nennt,
+    # kann die Bank am Achtundzwanzigsten gebucht haben. Ohne diesen Rand
+    # koennte das Fenster in booking_budget gar nicht greifen.
+    rand = datetime.timedelta(days=booking_budget.TOLERANZ_TAGE)
+    von = (datetime.date.fromisoformat(min(days)) - rand).isoformat()
+    bis = (datetime.date.fromisoformat(max(days)) + rand).isoformat()
+
+    rows = []
     for row in frappe.get_all(
             "Bank Transaction",
             filters={"bank_account": bank_account,
-                     "date": ["between", [min(days), max(days)]]},
+                     "date": ["between", [von, bis]]},
             fields=["date", "deposit", "withdrawal"], limit_page_length=0):
         amount = flt(row.get("deposit")) - flt(row.get("withdrawal"))
-        key = (str(row["date"])[:10], int(round(amount * 100)))
-        budget[key] = budget.get(key, 0) + 1
-    return budget
+        rows.append((row["date"], int(round(amount * 100))))
+    return booking_budget.budget_from(rows)
 
 
 def book_entries(entries, dry_run=True, sample_size=5):
@@ -209,6 +222,10 @@ def book_entries(entries, dry_run=True, sample_size=5):
     :return: dict(total, created|would_create, duplicates, accounts, sample)
     """
     result = {"total": 0, "created": 0, "would_create": 0, "duplicates": 0,
+              # Wie viele der Doppel nur ueber das Datumsfenster erkannt
+              # wurden. Steht in der Vorschau, damit sichtbar ist, worauf
+              # die Erkennung beruht.
+              "duplicates_shifted": 0,
               "accounts": {}, "sample": [], "dry_run": bool(dry_run)}
     seen = {}
     companies = {}
@@ -241,12 +258,21 @@ def book_entries(entries, dry_run=True, sample_size=5):
         # a booking that looks like this one and was not written by us,
         # which is how a bank-delivered booking is recognised at all.
         budget = budgets.get(target, {})
-        token = _token(entry)
+        tag, cent = _token(entry)
         duplicate = frappe.db.exists("Bank Transaction",
                                      {"reference_number": reference})
-        if not duplicate and budget.get(token):
-            budget[token] -= 1
-            duplicate = True
+        if not duplicate:
+            # Der Betrag entscheidet, das Datum darf ein paar Tage daneben
+            # liegen: Buchungstag und Valuta sind nicht dasselbe, und welcher
+            # von beiden in einer Exportdatei steht, entscheidet das Programm,
+            # das sie geschrieben hat. 73 der 230 Doppel vom 15.08.2026 waren
+            # allein deshalb nicht zu erkennen. Siehe booking_budget.
+            wie = booking_budget.consume(budget, tag, cent)
+            if wie:
+                duplicate = True
+                if wie == "fenster":
+                    result["duplicates_shifted"] = (
+                        result.get("duplicates_shifted", 0) + 1)
 
         if duplicate:
             result["duplicates"] += 1
