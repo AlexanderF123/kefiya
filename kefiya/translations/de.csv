@@ -422,3 +422,5 @@ The bank does not list {0} under this access. Load the accounts first.,Die Bank 
 "Four eyes: you entered this transfer, so someone else has to approve it.","Vier-Augen-Prinzip: Sie haben diese Überweisung erfasst, deshalb muss sie jemand anderes freigeben."
 "Four eyes: you were the last to change this transfer, so someone else has to approve it.","Vier-Augen-Prinzip: Sie haben diese Überweisung zuletzt geändert, deshalb muss sie jemand anderes freigeben."
 Approval by a second person,Freigabe durch eine zweite Person
+Fetch at most every n days,Höchstens alle n Tage abrufen
+"0 = bei jedem Sammelabruf. Sonst: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer uebernimmt die Vorgabe der Kontoart (Geschaeftsanteile, Avale, Darlehen: 30 Tage).","0 = bei jedem Sammelabruf. Sonst: höchstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer übernimmt die Vorgabe der Kontoart (Geschäftsanteile, Avale, Darlehen: 30 Tage)."

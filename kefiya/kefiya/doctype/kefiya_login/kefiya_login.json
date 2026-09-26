@@ -20,6 +20,7 @@
   "account_kind",
   "failed_connection",
   "skip_fetch",
+  "fetch_interval_days",
   "allowed_sync_days_in_past",
   "transfer_limit_section",
   "transfer_limit_amount",
@@ -307,6 +308,13 @@
    "fieldtype": "Check",
    "label": "Vom Abruf ausnehmen",
    "description": "Loan and clearing accounts are not offered for statement retrieval over FinTS. Tick this to keep the login out of the scheduled and collective fetch instead of letting it fail every run."
+  },
+  {
+   "default": "0",
+   "description": "0 = bei jedem Sammelabruf. Sonst: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer uebernimmt die Vorgabe der Kontoart (Geschaeftsanteile, Avale, Darlehen: 30 Tage).",
+   "fieldname": "fetch_interval_days",
+   "fieldtype": "Int",
+   "label": "Fetch at most every n days"
   }
  ],
  "icon": "fa fa-university",

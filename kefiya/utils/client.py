@@ -12,6 +12,7 @@ import json
 from frappe import _
 
 from kefiya.utils import account_classification, account_kind
+from kefiya.utils import fetch_rhythm
 from kefiya.utils import release_outcome
 
 
@@ -135,13 +136,22 @@ def get_fetch_groups():
     # rather than an error.
     rows = frappe.get_list(
         "Kefiya Login",
-        fields=["name", "blz", "fints_login", "account_iban", "skip_fetch"],
+        fields=["name", "blz", "fints_login", "account_iban", "skip_fetch",
+                "account_kind", "fetch_interval_days", "last_fetch_attempt"],
         limit_page_length=0,
     )
 
     groups = {}
     for row in rows:
         if row.get("skip_fetch") or not row.get("account_iban"):
+            continue
+        # Und was heute nicht an der Reihe ist. Die Volksbank verlangt je
+        # Auftrag eine Freigabe in ihrer App, und vierzehn ihrer dreissig
+        # Zugaenge hier hatten in 90 Tagen keine einzige Buchung --
+        # Geschaeftsanteile, Avale, ruhende Konten. Jeder Lauf kostete fuer
+        # sie eine Freigabe und brachte nichts. Siehe fetch_rhythm; von Hand
+        # bleibt jedes Konto jederzeit abrufbar.
+        if not fetch_rhythm.due_now(row):
             continue
         # The BLZ alone would merge two different accesses at the same bank,
         # and the FinTS login is a credential -- hash the pair instead of
