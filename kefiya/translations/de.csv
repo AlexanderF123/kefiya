@@ -419,3 +419,5 @@ Create access,Zugang anlegen
 The bank does not list {0} under this access. Load the accounts first.,Die Bank führt {0} nicht unter diesem Zugang. Bitte zuerst die Konten laden.
 {0} is already fetched by another access.,{0} wird bereits über einen anderen Zugang abgerufen.
 "The bank account {0} has the IBAN {1}, not {2}.","Das Bankkonto {0} hat die IBAN {1}, nicht {2}."
+Fetch at most every n days,Höchstens alle n Tage abrufen
+"0 = bei jedem Sammelabruf. Sonst: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer uebernimmt die Vorgabe der Kontoart (Geschaeftsanteile, Avale, Darlehen: 30 Tage).","0 = bei jedem Sammelabruf. Sonst: höchstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer übernimmt die Vorgabe der Kontoart (Geschäftsanteile, Avale, Darlehen: 30 Tage)."
