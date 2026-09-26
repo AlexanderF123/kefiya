@@ -13,8 +13,10 @@ document itself has to carry the safeguards that the invoice workflow would
 otherwise provide:
 
 * the IBAN is checksum-verified, because a typo silently pays a stranger;
-* money only leaves after submit, and submit rights are separate from create
-  rights, so the person entering a transfer is not the person releasing it;
+* money only leaves after submit, and the person who entered or last changed
+  a transfer may not submit it (four_eyes.enforce). Separate submit and create
+  rights alone did not guarantee that: most people who release payments hold
+  both;
 * sending is a distinct, explicitly confirmed step -- submit alone moves
   nothing.
 """
@@ -24,6 +26,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate, now_datetime
 
+from kefiya.utils import four_eyes
 from kefiya.utils import own_transfer
 from kefiya.utils import pain_dk
 
@@ -244,6 +247,11 @@ class KefiyaTransfer(Document):
         return company
 
     def before_submit(self):
+        # Four eyes first: every approval path -- the form, the outbox batch,
+        # "Approve and send" -- ends here, so this is the one place the rule
+        # cannot be walked around.
+        four_eyes.enforce(self)
+
         # Submitting approves the transfer; it does not send it. Sending is a
         # separate, explicitly confirmed action so an approval can never move
         # money as a side effect.

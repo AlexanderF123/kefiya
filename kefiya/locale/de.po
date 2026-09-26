@@ -619,3 +619,18 @@ msgstr "Als eine Sammelüberweisung"
 
 msgid "What the send dialog offers first when several orders are selected. It always asks -- a collective order is one order at the bank over the total, and that is a different payment from several separate ones."
 msgstr "Was der Sendedialog zuerst anbietet, wenn mehrere Aufträge ausgewählt sind. Gefragt wird immer — eine Sammelüberweisung ist ein einziger Auftrag bei der Bank über die Summe, und das ist eine andere Zahlung als mehrere einzelne."
+
+msgid "Self-approval allowed up to"
+msgstr "Eigene Freigabe erlaubt bis"
+
+msgid "Largest total a person may approve on a transfer they entered or last changed. 0 means never: every transfer needs a second person to approve it."
+msgstr "Höchste Summe, die jemand bei einer Überweisung freigeben darf, die er selbst erfasst oder zuletzt geändert hat. 0 heißt nie: Jede Überweisung braucht eine zweite Person zur Freigabe."
+
+msgid "Roles that may approve alone"
+msgstr "Rollen, die allein freigeben dürfen"
+
+msgid "Holders of these roles may approve a transfer they entered or last changed, whatever the amount. Everybody else needs a second person above the amount set above."
+msgstr "Wer eine dieser Rollen hat, darf eine Überweisung, die er selbst erfasst oder zuletzt geändert hat, unabhängig vom Betrag freigeben. Alle anderen brauchen oberhalb des Betrags darüber eine zweite Person."
+
+msgid "Kefiya Self Approval Role"
+msgstr "Rolle mit eigener Freigabe"
