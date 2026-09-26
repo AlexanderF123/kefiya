@@ -311,7 +311,7 @@
   },
   {
    "default": "0",
-   "description": "0 = bei jedem Sammelabruf. Sonst: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar. Leer uebernimmt die Vorgabe der Kontoart (Geschaeftsanteile, Avale, Darlehen: 30 Tage).",
+   "description": "Leer oder 0: die Vorgabe der Kontoart gilt (Geschaeftsanteile, Avale, Darlehen: 30 Tage; Depots: 7; Zahlungskonten: bei jedem Lauf). Ab 1: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar.",
    "fieldname": "fetch_interval_days",
    "fieldtype": "Int",
    "label": "Fetch at most every n days"
