@@ -116,3 +116,36 @@ def due_now(row, now=None):
                interval_days(row.get("account_kind"),
                              row.get("fetch_interval_days")),
                now=now)
+
+
+#: Wie der naechtliche Zeitplan seine eigene Frequenz meint, in Tagen. Stand
+#: bis jetzt als FREQUENCY_GAP_DAYS in kefiya_schedule.py -- und das war der
+#: Grund, warum der Rhythmus oben zunaechst nichts aenderte.
+SCHEDULE_DAYS = {"Daily": 1, "Weekly": 7, "Monthly": 30}
+
+
+def schedule_interval_days(import_frequency, account_kind, setting=None):
+    """Der Abstand fuer den naechtlichen Lauf -- derselbe Rhythmus, ein Gatter.
+
+    Am 27.09.2026, am Morgen nach dem Deploy des Rhythmus, rief kefiya
+    zwischen 06:01 und 08:00 trotzdem wieder alle dreissig Volksbank-Zugaenge
+    ab (30 Kefiya Imports, angelegt von Administrator). Der Sammelabruf war
+    es nicht: der fragt seit dem Deploy `due_now` und haette sechzehn davon
+    geschont. Es war der Zeitplan, der seine eigene Frequenz mitbringt --
+    alle 57 Zeilen der `Kefiya Schedule` stehen auf "Daily" -- und
+    `fetch_rhythm` nie gefragt hat. Zwei Regeln fuer dieselbe Frage, und die
+    aeltere gewann jede Nacht.
+
+    Also entscheidet hier der GROESSERE der beiden Abstaende: die Zeile im
+    Zeitplan sagt, wie oft sie das Konto haben will, die Kontoart sagt, wie
+    oft das Konto es ueberhaupt wert ist. "Daily" auf einem Geschaeftsanteil
+    heisst danach alle 30 Tage, "Monthly" auf einem Girokonto bleibt
+    monatlich. Beide Wege koennen ein Konto nur seltener abrufen, nie
+    oefter -- eine Schonung, die sich nicht aus Versehen aufheben laesst.
+
+    :param import_frequency: was in der Zeitplan-Zeile steht
+    :param account_kind: was die Bank ueber das Konto gesagt hat
+    :param setting: was am Zugang eingetragen ist (ab 1 gilt es)
+    """
+    aus_dem_plan = SCHEDULE_DAYS.get((import_frequency or "").strip(), 1)
+    return max(aus_dem_plan, interval_days(account_kind, setting))

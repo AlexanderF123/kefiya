@@ -155,3 +155,98 @@ class TestNurDerSammellauf(unittest.TestCase):
         self.assertEqual(felder["fetch_interval_days"]["fieldtype"], "Int")
         # Neben "Vom Abruf ausnehmen": beides entscheidet, ob abgerufen wird.
         self.assertIn("skip_fetch", felder)
+
+
+class TestAuchInDerNacht(unittest.TestCase):
+    """Der naechtliche Zeitplan muss denselben Rhythmus kennen.
+
+    Am Morgen des 27.09.2026 -- der Rhythmus war am Abend zuvor ausgerollt --
+    standen wieder dreissig frische Volksbank-Importe da, angelegt von
+    Administrator zwischen 06:01:07 und 08:00:59. Der Sammelabruf war es
+    nicht: nachgerechnet haette er an diesem Tag 14 abgerufen und 16
+    geschont. Es war `scheduled_import_fints_payments`, das seine eigene
+    Tabelle mitbrachte:
+
+        Kefiya-Schedule-Zeilen: 57
+        Frequenzen gesamt: {'(Daily, 1)': 57}
+
+    Alle 57 Zeilen "Daily", alle aktiv, die 36 Volksbank-Zeilen auf 06, 07
+    und 08 Uhr verteilt. Zwei Regeln fuer dieselbe Frage -- und die aeltere
+    gewann jede Nacht. Seither entscheidet der groessere der beiden
+    Abstaende.
+    """
+
+    def _quelle(self, *teile):
+        with open(os.path.join(WURZEL, *teile), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_der_groessere_abstand_gewinnt(self):
+        # Ein Geschaeftsanteil bleibt ein Geschaeftsanteil, auch wenn im
+        # Plan "taeglich" steht.
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Daily", "Cooperative Shares"), 30)
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Daily", "Guarantee / Credit Line"),
+            30)
+        # Und ein monatlicher Plan wird durch ein Girokonto nicht taeglich.
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Monthly", "Current Account"), 30)
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Weekly", "Current Account"), 7)
+
+    def test_ein_zahlungskonto_bleibt_taeglich(self):
+        """Ohne eigene Angabe aendert sich fuer die arbeitenden Konten
+        nichts: "Daily" heisst weiter ein Tag Abstand."""
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Daily", "Current Account"), 1)
+        self.assertEqual(fetch_rhythm.schedule_interval_days("Daily", None), 1)
+
+    def test_die_angabe_am_zugang_gilt_auch_hier(self):
+        """Die neun ruhenden Girokonten stehen auf 7 Tage. Das galt bisher
+        nur fuer den Sammelabruf -- die Nacht holte sie trotzdem taeglich."""
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Daily", "Current Account", 7), 7)
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Weekly", "Current Account", 30), 30)
+
+    def test_eine_null_hebt_nichts_auf(self):
+        """Die 0 heisst "keine eigene Angabe" -- hier wie dort. Sie darf den
+        Plan nicht unterbieten."""
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Weekly", "Current Account", 0), 7)
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("Monthly", "Cooperative Shares", 0),
+            30)
+
+    def test_unbekanntes_heisst_ein_tag(self):
+        """Wie bisher: was nicht in der Tabelle steht, bekommt einen Tag."""
+        self.assertEqual(fetch_rhythm.schedule_interval_days(None, None), 1)
+        self.assertEqual(fetch_rhythm.schedule_interval_days("", None), 1)
+        self.assertEqual(
+            fetch_rhythm.schedule_interval_days("was Neues", None), 1)
+
+    def test_der_zeitplan_fragt_den_rhythmus(self):
+        quelle = self._quelle("kefiya", "doctype", "kefiya_schedule",
+                              "kefiya_schedule.py")
+        self.assertIn("fetch_rhythm.schedule_interval_days(", quelle)
+        # Und er holt sich die beiden Felder, die dafuer noetig sind.
+        self.assertIn("account_kind", quelle)
+        self.assertIn("fetch_interval_days", quelle)
+
+    def test_die_alte_tabelle_steht_nur_noch_an_einer_stelle(self):
+        """Zwei Tabellen waren der Fehler. FREQUENCY_GAP_DAYS ist nach
+        fetch_rhythm gewandert und darf im Zeitplan nicht wieder
+        auftauchen."""
+        quelle = self._quelle("kefiya", "doctype", "kefiya_schedule",
+                              "kefiya_schedule.py")
+        self.assertNotIn("FREQUENCY_GAP_DAYS", quelle)
+        self.assertEqual(fetch_rhythm.SCHEDULE_DAYS,
+                         {"Daily": 1, "Weekly": 7, "Monthly": 30})
+
+    def test_von_hand_bleibt_von_hand(self):
+        """`manual=1` ueberspringt das Gatter weiterhin komplett -- der
+        Rhythmus schont, er sperrt nicht."""
+        quelle = self._quelle("kefiya", "doctype", "kefiya_schedule",
+                              "kefiya_schedule.py")
+        gatter = quelle.split("if not manual:")[1].split("# Default fetch")[0]
+        self.assertIn("fetch_rhythm.schedule_interval_days(", gatter)

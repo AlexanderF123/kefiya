@@ -13,6 +13,7 @@ from kefiya.utils.client import import_fints_transactions
 from kefiya.utils.fints_controller import FinTSController
 from kefiya.utils.fints_controller_legacy import FinTSController as FinTSControllerLegacy
 from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
+from kefiya.utils import fetch_rhythm
 
 
 class KefiyaSchedule(Document):
@@ -127,9 +128,6 @@ def scheduled_import_fints_payments(manual=None):
     today = now_datetime().date()
     current_hour = now_datetime().strftime("%H")
 
-    # Minimum number of days between two scheduled runs of the same login.
-    FREQUENCY_GAP_DAYS = {'Daily': 1, 'Weekly': 7, 'Monthly': 30}
-
     # Minimum number of days before a login that FAILED is tried again. Kept at
     # one day regardless of the configured frequency: long enough to stop the
     # every-20-minutes retry loop, short enough that a bank in maintenance does
@@ -145,12 +143,14 @@ def scheduled_import_fints_payments(manual=None):
                 continue
 
             login_name = child_item.kefiya_login
-            bank_account, allowed_days, skip_fetch, last_attempt = (
+            (bank_account, allowed_days, skip_fetch, last_attempt,
+             account_kind, fetch_interval_days) = (
                 frappe.db.get_value(
                     "Kefiya Login", login_name,
                     ["bank_account", "allowed_sync_days_in_past",
-                     "skip_fetch", "last_fetch_attempt"]
-                ) or (None, None, 0, None))
+                     "skip_fetch", "last_fetch_attempt",
+                     "account_kind", "fetch_interval_days"]
+                ) or (None, None, 0, None, None, None))
 
             # Loan and clearing accounts are never offered for statement
             # retrieval, so fetching them fails every single run. Skipping them
@@ -176,7 +176,15 @@ def scheduled_import_fints_payments(manual=None):
                     order_by="creation desc",
                     limit=1,
                 )
-                gap = FREQUENCY_GAP_DAYS.get(child_item.import_frequency, 1)
+                # Der Abstand kommt aus beidem: was die Zeile im Plan
+                # will, und was die Kontoart hergibt. Der groessere gewinnt
+                # -- siehe fetch_rhythm.schedule_interval_days. Solange hier
+                # nur der Plan stand, rief die Nacht alle dreissig
+                # Volksbank-Zugaenge ab, obwohl der Sammelabruf sechzehn
+                # davon laengst schonte: 57 Zeilen, alle "Daily".
+                gap = fetch_rhythm.schedule_interval_days(
+                    child_item.import_frequency, account_kind,
+                    fetch_interval_days)
 
                 # A successful run closes the gate for the configured frequency.
                 if last and (today - getdate(last[0].creation)).days < gap:
