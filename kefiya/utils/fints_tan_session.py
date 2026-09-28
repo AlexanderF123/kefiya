@@ -43,6 +43,7 @@ from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import gateway_session
 from kefiya.utils import release_outcome
+from kefiya.utils import release_pacing
 from kefiya.utils import tan_challenge
 from kefiya.utils.decoupled_budget import decoupled_wait, job_budget_seconds
 from kefiya.utils.fints_errors import (
@@ -56,8 +57,16 @@ class TanSession:
 
     #: Wie lange ein Lauf auf eine in der App gegebene Freigabe wartet. Die
     #: Bank nennt ihre eigenen Grenzen in HITANS und die gelten, wo sie
-    #: lesbar sind -- das hier ist die Obergrenze, nicht der Fahrplan.
-    DECOUPLED_MAX_WAIT_SECONDS = 120
+    #: lesbar sind -- das hier ist der Rueckfallwert, nicht der Fahrplan.
+    #:
+    #: Zwei Minuten waren zu knapp, sobald ein Lauf mehrere Freigaben
+    #: verlangt: am 28.09.2026 standen sieben davon in vier Minuten an, und
+    #: wer waehrenddessen das Telefon sucht, hat die zweite schon verpasst.
+    #: Eine verpasste Freigabe kostet den ganzen Zugang -- die Kette haelt
+    #: an, und der naechste Versuch fragt erneut. Jetzt gilt hier dieselbe
+    #: Zahl wie in DECOUPLED_WAIT_CEILING_SECONDS: fuenf Minuten, das
+    #: Aeusserste, das man jemandem vor einem Fortschrittsbalken zumutet.
+    DECOUPLED_MAX_WAIT_SECONDS = 300
     DECOUPLED_POLL_SECONDS = 2
 
     def _settle_tan(self, response):
@@ -291,6 +300,11 @@ class TanSession:
             if not isinstance(answer, NeedTANResponse):
                 # Released. The library has already resumed the command, so
                 # this is the answer the caller was waiting for all along.
+                #
+                # Und die Uhrzeit wird notiert: das naechste Konto desselben
+                # Zugangs laesst danach Luft, statt in der Sekunde der
+                # Freigabe die naechste zu verlangen. Siehe release_pacing.
+                release_pacing.note_release()
                 self._persist_fints_state()
                 self._tell_the_browser_it_can_stop_waiting()
                 return answer
