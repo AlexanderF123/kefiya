@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import frappe
 import json
+import time
 
 # Every user-facing message in this module goes through _(). It was never
 # imported here: the transfer endpoints are the only callers and had not run in
@@ -14,6 +15,7 @@ from frappe import _
 from kefiya.utils import account_classification, account_kind
 from kefiya.utils import fetch_rhythm
 from kefiya.utils import release_outcome
+from kefiya.utils import release_pacing
 
 
 def _use_tan_authentication() -> bool:
@@ -276,6 +278,18 @@ def fetch_group(logins, user_scope=None, run=None):
                 results[name] = _not_attempted(held)
                 _say(run, name, results[name])
                 continue
+
+            # Hat das vorige Konto eine Freigabe gekostet, bekommt der Nutzer
+            # Luft, bevor dieses die naechste verlangt. Ohne das folgte die
+            # naechste Anfrage in der Sekunde der vorigen Freigabe -- am
+            # 28.09.2026 zwoelf Sekunden nach der letzten, waehrend das
+            # Telefon noch in der Hand lag. Siehe release_pacing; ohne
+            # Freigabe im Lauf ist die Wartezeit null und hier passiert
+            # nichts.
+            luft = release_pacing.seconds_to_wait(release_pacing.last_release())
+            if luft > 0:
+                time.sleep(luft)
+
             try:
                 results[name] = fetch_all(name, user_scope)
                 if results[name].get("tan_required"):
