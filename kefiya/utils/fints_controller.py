@@ -35,6 +35,7 @@ from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import pain_payee
 from kefiya.utils import release_outcome
+from kefiya.utils import resume_point
 from kefiya.utils import sepa_descriptor
 from kefiya.utils import vop_report
 from kefiya.utils import vop_rule
@@ -2163,10 +2164,38 @@ class FinTSController(TanSession):
         transfers -- the caller turns that into "your bank will not hold this
         one, so we will".
         """
-        from kefiya.utils.fints_segments import HKCME1, HKCSE1, read_task_id
+        from kefiya.utils.fints_segments import HKCME1, HKCSE1
 
         conn = self.fints_connection
         pain_descriptor = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
+
+        # Wo dieser Auftrag weitermacht, wenn die Bank ihn zurueckhaelt -- als
+        # gebundene METHODE. Hier stand eine Closure, und die konnte die
+        # Bibliothek nicht aufschreiben: sie merkt sich den Wiederaufnahme-
+        # Punkt als Namen und sucht ihn spaeter mit getattr(self, name)
+        # wieder. Der erste Terminauftrag endete deshalb mit "Object of type
+        # function is not JSON serializable", mitten im Parken der
+        # Empfaengerbestaetigung -- nachdem die Bank die pain-Nachricht schon
+        # hatte. Siehe resume_point.
+        #
+        # Ohne den VoP-faehigen Client bleibt die Statusabbildung der
+        # Bibliothek; dann fehlt nur der Auftragsbezeichner, den ein
+        # Terminauftrag mitbringt.
+        resume = getattr(conn, "_continue_scheduled_transfer", None) \
+            or conn._continue_sepa_transfer
+
+        # Gefragt wird, bevor auch nur der Dialog aufgeht. Ein Auftrag, dessen
+        # Wiederaufnahme sich nicht aufschreiben laesst, kann nicht geparkt
+        # werden -- und was nicht geparkt ist, kann der Nutzer nicht
+        # freigeben, waehrend die Bank den Auftrag laengst kennt. Hier ist
+        # noch nichts bei der Bank.
+        if not resume_point.can_be_written_down(resume):
+            frappe.throw(_(
+                "This dated order cannot be prepared for a release, so it was"
+                " NOT sent and nothing has reached the bank. Please report"
+                " this -- the resume point {0} cannot be written down."
+            ).format(getattr(resume, "__name__", repr(resume))),
+                title=_("Not sent"))
 
         with conn._get_dialog() as dialog:
             command_class = HKCME1 if multiple else HKCSE1
@@ -2192,17 +2221,7 @@ class FinTSController(TanSession):
                 # being able to read single_booking_allowed from the bank's
                 # parameters is how a whole payment run gets rejected.
 
-            def _resume(command_seg, response):
-                # The library's own status mapping, so a dated order reports
-                # success and failure like an immediate one; only the order
-                # identifier is added on top.
-                result = conn._continue_sepa_transfer(command_seg, response)
-                task_id = read_task_id(response)
-                if task_id:
-                    result.data["task_id"] = task_id
-                return result
-
-            return conn._send_pay_with_possible_retry(dialog, seg, _resume)
+            return conn._send_pay_with_possible_retry(dialog, seg, resume)
 
     def import_fints_transactions(self, kefiya_import):
         """Create payment entries by FinTS transactions.
