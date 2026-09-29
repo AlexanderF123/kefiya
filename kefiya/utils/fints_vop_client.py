@@ -230,6 +230,38 @@ def _build(parts):
                 resume_func = getattr(self, challenge.resume_method)
                 return resume_func(challenge.command_seg, response)
 
+        def _continue_scheduled_transfer(self, command_seg, response):
+            """Wo ein Terminauftrag weitermacht, nachdem er freigegeben wurde.
+
+            Eine METHODE und keine Closure, und darin liegt der ganze Zweck.
+            Die Bibliothek schreibt den Wiederaufnahme-Punkt als NAMEN auf
+            (``resume_method.__func__.__name__``) und sucht ihn spaeter mit
+            ``getattr(self, name)`` wieder. Eine Closure hat keinen Namen: sie
+            bleibt als Funktionsobjekt im geparkten Zustand stehen, und der
+            zerbricht beim Aufschreiben::
+
+                TypeError: Object of type function is not JSON serializable
+
+            Gemessen am 29.09.2026 an KEF-TRF-2026-00014 ueber 20.000,00 EUR,
+            dem ersten Terminauftrag. Die Bank hatte die pain-Nachricht schon
+            und fragte nach der Empfaengerbestaetigung; die Ausnahme nahm die
+            Transaktion mit, und damit die geparkte Anforderung. Siehe
+            resume_point.
+
+            Was sie ueber _continue_sepa_transfer hinaus tut: den
+            Auftragsbezeichner mitnehmen, den die Bank fuer einen
+            Terminauftrag vergibt. Die Statusabbildung selbst bleibt die der
+            Bibliothek, damit ein datierter Auftrag Erfolg und Misserfolg
+            genauso meldet wie ein sofortiger.
+            """
+            from kefiya.utils.fints_segments import read_task_id
+
+            result = self._continue_sepa_transfer(command_seg, response)
+            task_id = read_task_id(response)
+            if task_id:
+                result.data["task_id"] = task_id
+            return result
+
         def _await_vop_result(self, dialog, vop_standard, hivpp,
                               response=None, asked=None):
             """Keep asking until the bank has finished checking the payee.
