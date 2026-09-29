@@ -120,6 +120,44 @@ def canonical(bank_account, date, amount, iban, name, purpose):
     ])
 
 
+def of_row(row, bank_account=None):
+    """Der Fingerabdruck einer Zeile, wie sie in der Datenbank steht.
+
+    Damit laesst sich fragen "ist das dieselbe Buchung?", ohne den
+    gespeicherten Fingerabdruck zu glauben -- und genau darauf kam es an.
+
+    Gemessen am 29.09.2026 auf der Instanz, je 40 Zeilen je Importtag::
+
+        Import 28./29.09.   canonical trifft   40 von 40
+        Import 24.09.       canonical trifft   40 von 40
+        Import 01./02.08.   canonical trifft    0 von 40
+        Import 12.07.       canonical trifft    0 von 40
+        Import 25./26.06.   canonical trifft    0 von 40
+        Import 21.05.       canonical trifft    0 von 40
+
+    Die Form des Fingerabdrucks hat sich also mehrfach geaendert, und keine
+    Liste alter Formen hat sie eingeholt. Jede Aenderung kostete eine Welle
+    Doppelbuchungen: der naechste Abruf holt den Ueberschneidungstag noch
+    einmal, findet die gespeicherte Form nicht wieder und schreibt alles neu.
+    38 Gruppen auf 13 Konten, 47 Zeilen, 26.497,75 EUR.
+
+    Deshalb wird nicht mehr nur nach dem gespeicherten Fingerabdruck
+    gesucht, sondern der Fingerabdruck der vorhandenen Zeile aus ihrem
+    INHALT neu gebildet. Was die Bank geschickt hat, aendert sich nicht,
+    wenn wir unsere Hash-Funktion aendern.
+
+    :param row: eine Zeile als dict -- date, withdrawal/deposit,
+        bank_party_iban, bank_party_name, description
+    :param bank_account: das Konto, falls es nicht in der Zeile steht
+    """
+    row = row or {}
+    konto = bank_account if bank_account is not None else row.get("bank_account")
+    betrag = row.get("withdrawal") or row.get("deposit")
+    return canonical(konto, row.get("date"), betrag,
+                     row.get("bank_party_iban"), row.get("bank_party_name"),
+                     row.get("description"))
+
+
 def legacy(date, amount, name, posting_text, purpose):
     """The hash both importers wrote before this module existed.
 

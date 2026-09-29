@@ -28,7 +28,7 @@ from datetime import date as Date
 
 from kefiya.utils.booking_fingerprint import (FORMS, as_day, as_money,
                                               canonical, known_forms, legacy,
-                                              tidy)
+                                              of_row, tidy)
 
 
 class TestTidying(unittest.TestCase):
@@ -202,14 +202,98 @@ class TestTheImportUsesIt(unittest.TestCase):
 
     def test_the_lookup_covers_every_form(self):
         source = self._source()
-        body = source.split("def _identify(")[1]
-        self.assertIn('"reference_number": ["in", forms]', body)
-        self.assertIn("booking_fingerprint.known_forms(", body)
+        self.assertIn("booking_fingerprint.known_forms(",
+                      source.split("def _identify(")[1])
+        # Und der gespeicherte Fingerabdruck zaehlt weiter mit -- er findet
+        # auch eine Zeile wieder, deren Text jemand von Hand geaendert hat.
+        zaehlen = source.split("def _already_here(")[1].split("\n    def ")[0]
+        self.assertIn('row.get("reference_number") in bekannt', zaehlen)
+
+    def test_counted_by_content_not_only_by_the_stored_hash(self):
+        """Die Form des Fingerabdrucks hat sich seit Mai dreimal geaendert
+        (gemessen am 29.09.2026: 40/40 Treffer fuer Importe ab dem 24.09.,
+        0/40 fuer den 02.08., den 12.07., den 26.06. und den 21.05.). Wer
+        nur nach der gespeicherten Form sucht, erkennt den
+        Ueberschneidungstag nach jedem solchen Wechsel nicht wieder und
+        schreibt ihn neu -- 47 Zeilen auf 13 Konten, 26.497,75 EUR."""
+        source = self._source()
+        zaehlen = source.split("def _already_here(")[1].split("\n    def ")[0]
+        self.assertIn("booking_fingerprint.of_row(row, konto) == key", zaehlen)
+        # Und gezaehlt wird gegen den Stand VOR dem Lauf.
+        lesen = source.split("def _rows_of(")[1].split("\n    def ")[0]
+        self.assertIn("self._rows_by_day", lesen)
+        self.assertIn('"bank_account": self.kefiya_login.bank_account', lesen)
+
+    def test_the_old_global_count_is_gone(self):
+        """frappe.db.count(reference_number in forms) fragte ueber ALLE
+        Konten -- und die alte Form traegt das Konto nicht im Hash."""
+        source = self._source()
+        self.assertNotIn('"Bank Transaction", {"reference_number": ["in", forms]}',
+                         source)
 
     def test_the_account_is_handed_over(self):
         source = self._source()
         body = source.split("def _identify(")[1]
         self.assertIn("bank_account=self.kefiya_login.bank_account", body)
+
+
+class TestTheFingerprintOfAStoredRow(unittest.TestCase):
+    """of_row bildet den Fingerabdruck aus dem INHALT einer Zeile neu.
+
+    Was die Bank geschickt hat, aendert sich nicht, wenn wir unsere
+    Hash-Funktion aendern -- und genau daran ist die Erkennung dreimal
+    gescheitert.
+    """
+
+    ZEILE = {
+        "bank_account": "Sofienstr.GmbH&CoKG Mietkonto Sparkasse",
+        "date": "2026-06-26",
+        "withdrawal": 333.91,
+        "deposit": 0.0,
+        "bank_party_iban": "DE61200300000004007161",
+        "bank_party_name": "Minimax GmbH",
+        "description": "RNr. 9111122026 RDat.12.06.2026 KNr. 413936",
+    }
+
+    def test_it_is_the_same_hash_the_import_writes(self):
+        self.assertEqual(
+            of_row(self.ZEILE),
+            canonical(self.ZEILE["bank_account"], self.ZEILE["date"],
+                      self.ZEILE["withdrawal"], self.ZEILE["bank_party_iban"],
+                      self.ZEILE["bank_party_name"],
+                      self.ZEILE["description"]))
+
+    def test_a_stored_hash_of_another_era_does_not_matter(self):
+        """Die beiden Minimax-Zeilen vom 26.06. trugen 0da61ac9... und
+        f1a6e43b..., beide aus frueheren Formen. Aus dem Inhalt gebildet
+        sind sie dieselbe Buchung."""
+        zweite = dict(self.ZEILE)
+        zweite["reference_number"] = "f1a6e43bb6a151eeecc4cffcb7e9ce8b"
+        erste = dict(self.ZEILE)
+        erste["reference_number"] = "0da61ac934b8b5bb0610f35f765263ab"
+        self.assertEqual(of_row(erste), of_row(zweite))
+
+    def test_the_account_may_come_from_outside(self):
+        ohne = {k: v for k, v in self.ZEILE.items() if k != "bank_account"}
+        self.assertEqual(of_row(ohne, self.ZEILE["bank_account"]),
+                         of_row(self.ZEILE))
+
+    def test_a_credit_is_read_from_deposit(self):
+        gutschrift = dict(self.ZEILE)
+        gutschrift["withdrawal"] = 0.0
+        gutschrift["deposit"] = 333.91
+        self.assertEqual(of_row(gutschrift), of_row(self.ZEILE))
+
+    def test_another_account_is_another_booking(self):
+        """Eine Umbuchung zwischen zwei eigenen Konten ist zweimal
+        dasselbe und trotzdem nicht dieselbe Buchung."""
+        anderes = dict(self.ZEILE)
+        anderes["bank_account"] = "Brilu KG Mietkonto Sparkasse"
+        self.assertNotEqual(of_row(anderes), of_row(self.ZEILE))
+
+    def test_nothing_does_not_raise(self):
+        self.assertTrue(of_row(None))
+        self.assertTrue(of_row({}))
 
 
 if __name__ == "__main__":

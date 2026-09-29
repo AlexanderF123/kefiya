@@ -137,6 +137,51 @@ class ImportBankTransaction:
         """
         self._held = {}
         self._seen = {}
+        # Und die Zeilen, die vor diesem Lauf schon zu einem Tag standen --
+        # je Tag einmal gelesen. Siehe _rows_of.
+        self._rows_by_day = {}
+
+    def _rows_of(self, date):
+        """Die Buchungen, die zu diesem Tag schon auf dem Konto stehen.
+
+        Je Tag einmal gelesen, und zwar bevor dieser Lauf die erste Zeile
+        dieses Tages schreibt: was wir selbst gerade anlegen, darf nicht als
+        "war schon da" mitgezaehlt werden. Dieselbe Eigenschaft, die _held
+        hat, nur eine Ebene tiefer.
+        """
+        tag = booking_fingerprint.as_day(date)
+        if tag not in self._rows_by_day:
+            self._rows_by_day[tag] = frappe.get_all(
+                "Bank Transaction",
+                filters={"bank_account": self.kefiya_login.bank_account,
+                         "date": tag, "docstatus": ["<", 2]},
+                fields=["reference_number", "date", "withdrawal", "deposit",
+                        "bank_party_iban", "bank_party_name", "description"],
+                limit_page_length=0)
+        return self._rows_by_day[tag]
+
+    def _already_here(self, date, forms):
+        """Wie viele Kopien dieser Buchung standen vor dem Lauf schon da.
+
+        Gezaehlt wird am INHALT und nicht nur am gespeicherten
+        Fingerabdruck. Der Grund steht in booking_fingerprint.of_row: die
+        Form des Fingerabdrucks hat sich seit Mai dreimal geaendert, und
+        jede Aenderung liess den naechsten Abruf den Ueberschneidungstag
+        nicht wiedererkennen -- 47 Doppelbuchungen auf 13 Konten.
+
+        Der gespeicherte Fingerabdruck zaehlt weiter mit: er findet auch
+        eine Zeile wieder, deren Text jemand von Hand geaendert hat.
+        """
+        key = forms[0]
+        bekannt = set(forms)
+        konto = self.kefiya_login.bank_account
+        schon = 0
+        for row in self._rows_of(date):
+            if row.get("reference_number") in bekannt:
+                schon += 1
+            elif booking_fingerprint.of_row(row, konto) == key:
+                schon += 1
+        return schon
 
     def _identify(self, date, amount, iban, name, posting_text, purpose):
         """This booking's fingerprint, and whether it still has to be written.
@@ -181,8 +226,7 @@ class ImportBankTransaction:
         key = forms[0]
 
         if key not in self._held:
-            self._held[key] = frappe.db.count(
-                "Bank Transaction", {"reference_number": ["in", forms]})
+            self._held[key] = self._already_here(date, forms)
 
         self._seen[key] = self._seen.get(key, 0) + 1
         return key, self._seen[key] <= self._held[key]

@@ -130,11 +130,24 @@ class TestDerImportZaehltWirklich(unittest.TestCase):
         return methode.split('"""', 2)[2].split("\n    def ")[0]
 
     def test_es_wird_gezaehlt_statt_nachgesehen(self):
+        """Gezaehlt, nicht nachgesehen -- die Regel ist WIE VIELE, nicht OB.
+
+        Das Zaehlen ist am 29.09.2026 nach _already_here gewandert: die Form
+        des Fingerabdrucks hat sich seit Mai dreimal geaendert, und wer nur
+        nach der gespeicherten Form sucht, erkennt den Ueberschneidungstag
+        nach jedem Wechsel nicht wieder. Gezaehlt wird seither am Inhalt.
+        Dass gezaehlt und nicht nachgesehen wird, gilt unveraendert.
+        """
         rumpf = self._rumpf(
             "def _identify(self, date, amount, iban, name, posting_text,"
             " purpose):")
-        self.assertIn('frappe.db.count(', rumpf)
+        self.assertIn("self._already_here(date, forms)", rumpf)
         self.assertNotIn("frappe.db.exists(", rumpf)
+
+        zaehlen = self._rumpf("def _already_here(self, date, forms):")
+        self.assertIn("schon += 1", zaehlen)
+        self.assertIn("return schon", zaehlen)
+        self.assertNotIn("frappe.db.exists(", zaehlen)
 
     def test_die_regel_ist_k_groesser_m(self):
         rumpf = self._rumpf(
