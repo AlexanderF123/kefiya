@@ -4,9 +4,10 @@ from __future__ import unicode_literals
 import re
 import frappe
 from frappe import _
-from frappe.utils import now_datetime, getdate, add_days, cint
+from frappe.utils import now_datetime, getdate, cint
 
 from kefiya.utils import booking_fingerprint
+from kefiya.utils import fetch_window
 from kefiya.utils.auszug_pruefung import VORZEICHEN
 
 #: Welche Richtung ein Buchungskennzeichen bedeutet, kleingeschrieben wie
@@ -26,19 +27,21 @@ DEFAULT_SYNC_DAYS_IN_PAST = 90
 def resolve_incremental_from_date(bank_account, max_days_in_past=DEFAULT_SYNC_DAYS_IN_PAST):
     """Start date for an incremental FinTS fetch.
 
-    Returns the date of the most recently imported (submitted) Bank
-    Transaction for the given bank account (so the next fetch continues where
-    the last one ended), clamped to the login's allowed look-back window
-    (``max_days_in_past``). When there is no history yet, falls back to that
-    full window.
+    Continues where the last fetch ended -- but a few days BEFORE the most
+    recently imported booking, not on it. Why, and what it cost, is in
+    fetch_window: a booking the bank dates in the future moves the start past
+    entries that arrive later with an earlier date, and those are never asked
+    for again. On 30.09.2026 that was 20.000,00 EUR that the bank had booked
+    and kefiya never saw.
+
+    Clamped to the login's allowed look-back window (``max_days_in_past``).
+    When there is no history yet, falls back to that full window.
 
     :param bank_account: Bank Account name (kefiya_login.bank_account)
     :param max_days_in_past: Kefiya Login.allowed_sync_days_in_past
     :return: datetime.date
     """
     max_days_in_past = cint(max_days_in_past) or DEFAULT_SYNC_DAYS_IN_PAST
-    today = now_datetime().date()
-    earliest = getdate(add_days(today, -max_days_in_past))
 
     last_date = None
     if bank_account:
@@ -52,13 +55,10 @@ def resolve_incremental_from_date(bank_account, max_days_in_past=DEFAULT_SYNC_DA
             limit=1,
         )
         if rows and rows[0].date:
-            # never start in the future: value-dated / pre-booked entries can
-            # carry a date ahead of today; cap at today so from_date <= to_date.
-            last_date = min(getdate(rows[0].date), today)
+            last_date = getdate(rows[0].date)
 
-    if last_date and last_date > earliest:
-        return last_date
-    return earliest
+    return fetch_window.start_of_window(
+        last_date, now_datetime().date(), max_days_in_past)
 
 # IBAN total length per ISO 13616 for common SEPA countries (country code -> length)
 IBAN_LENGTHS = {
