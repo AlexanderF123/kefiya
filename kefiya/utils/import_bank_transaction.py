@@ -4,9 +4,10 @@ from __future__ import unicode_literals
 import re
 import frappe
 from frappe import _
-from frappe.utils import now_datetime, getdate, add_days, cint
+from frappe.utils import now_datetime, getdate, cint
 
 from kefiya.utils import booking_fingerprint
+from kefiya.utils import fetch_window
 from kefiya.utils.auszug_pruefung import VORZEICHEN
 
 #: Welche Richtung ein Buchungskennzeichen bedeutet, kleingeschrieben wie
@@ -26,19 +27,21 @@ DEFAULT_SYNC_DAYS_IN_PAST = 90
 def resolve_incremental_from_date(bank_account, max_days_in_past=DEFAULT_SYNC_DAYS_IN_PAST):
     """Start date for an incremental FinTS fetch.
 
-    Returns the date of the most recently imported (submitted) Bank
-    Transaction for the given bank account (so the next fetch continues where
-    the last one ended), clamped to the login's allowed look-back window
-    (``max_days_in_past``). When there is no history yet, falls back to that
-    full window.
+    Continues where the last fetch ended -- but a few days BEFORE the most
+    recently imported booking, not on it. Why, and what it cost, is in
+    fetch_window: a booking the bank dates in the future moves the start past
+    entries that arrive later with an earlier date, and those are never asked
+    for again. On 30.09.2026 that was 20.000,00 EUR that the bank had booked
+    and kefiya never saw.
+
+    Clamped to the login's allowed look-back window (``max_days_in_past``).
+    When there is no history yet, falls back to that full window.
 
     :param bank_account: Bank Account name (kefiya_login.bank_account)
     :param max_days_in_past: Kefiya Login.allowed_sync_days_in_past
     :return: datetime.date
     """
     max_days_in_past = cint(max_days_in_past) or DEFAULT_SYNC_DAYS_IN_PAST
-    today = now_datetime().date()
-    earliest = getdate(add_days(today, -max_days_in_past))
 
     last_date = None
     if bank_account:
@@ -52,13 +55,10 @@ def resolve_incremental_from_date(bank_account, max_days_in_past=DEFAULT_SYNC_DA
             limit=1,
         )
         if rows and rows[0].date:
-            # never start in the future: value-dated / pre-booked entries can
-            # carry a date ahead of today; cap at today so from_date <= to_date.
-            last_date = min(getdate(rows[0].date), today)
+            last_date = getdate(rows[0].date)
 
-    if last_date and last_date > earliest:
-        return last_date
-    return earliest
+    return fetch_window.start_of_window(
+        last_date, now_datetime().date(), max_days_in_past)
 
 # IBAN total length per ISO 13616 for common SEPA countries (country code -> length)
 IBAN_LENGTHS = {
@@ -137,6 +137,51 @@ class ImportBankTransaction:
         """
         self._held = {}
         self._seen = {}
+        # Und die Zeilen, die vor diesem Lauf schon zu einem Tag standen --
+        # je Tag einmal gelesen. Siehe _rows_of.
+        self._rows_by_day = {}
+
+    def _rows_of(self, date):
+        """Die Buchungen, die zu diesem Tag schon auf dem Konto stehen.
+
+        Je Tag einmal gelesen, und zwar bevor dieser Lauf die erste Zeile
+        dieses Tages schreibt: was wir selbst gerade anlegen, darf nicht als
+        "war schon da" mitgezaehlt werden. Dieselbe Eigenschaft, die _held
+        hat, nur eine Ebene tiefer.
+        """
+        tag = booking_fingerprint.as_day(date)
+        if tag not in self._rows_by_day:
+            self._rows_by_day[tag] = frappe.get_all(
+                "Bank Transaction",
+                filters={"bank_account": self.kefiya_login.bank_account,
+                         "date": tag, "docstatus": ["<", 2]},
+                fields=["reference_number", "date", "withdrawal", "deposit",
+                        "bank_party_iban", "bank_party_name", "description"],
+                limit_page_length=0)
+        return self._rows_by_day[tag]
+
+    def _already_here(self, date, forms):
+        """Wie viele Kopien dieser Buchung standen vor dem Lauf schon da.
+
+        Gezaehlt wird am INHALT und nicht nur am gespeicherten
+        Fingerabdruck. Der Grund steht in booking_fingerprint.of_row: die
+        Form des Fingerabdrucks hat sich seit Mai dreimal geaendert, und
+        jede Aenderung liess den naechsten Abruf den Ueberschneidungstag
+        nicht wiedererkennen -- 47 Doppelbuchungen auf 13 Konten.
+
+        Der gespeicherte Fingerabdruck zaehlt weiter mit: er findet auch
+        eine Zeile wieder, deren Text jemand von Hand geaendert hat.
+        """
+        key = forms[0]
+        bekannt = set(forms)
+        konto = self.kefiya_login.bank_account
+        schon = 0
+        for row in self._rows_of(date):
+            if row.get("reference_number") in bekannt:
+                schon += 1
+            elif booking_fingerprint.of_row(row, konto) == key:
+                schon += 1
+        return schon
 
     def _identify(self, date, amount, iban, name, posting_text, purpose):
         """This booking's fingerprint, and whether it still has to be written.
@@ -181,8 +226,7 @@ class ImportBankTransaction:
         key = forms[0]
 
         if key not in self._held:
-            self._held[key] = frappe.db.count(
-                "Bank Transaction", {"reference_number": ["in", forms]})
+            self._held[key] = self._already_here(date, forms)
 
         self._seen[key] = self._seen.get(key, 0) + 1
         return key, self._seen[key] <= self._held[key]
