@@ -2319,6 +2319,20 @@ class FinTSController(TanSession):
             # inside reconciliation can never revert the submitted import.
             frappe.db.commit()
 
+            # Jetzt -- und nicht eine Zeile frueher -- gilt der Abruf als
+            # erfolgreich: die Bank hat geantwortet UND was sie geschickt hat,
+            # steht in der Datenbank. Waere hier oben gestempelt, direkt nach
+            # der Antwort der Bank, wuerde ein spaeter gescheiterter Import
+            # einen Zeitstempel hinterlassen, der Daten behauptet, die es nicht
+            # gibt -- und genau darauf soll sich der Frischewaechter stuetzen
+            # koennen. Eine leere Antwort zaehlt mit: sie sagt "in diesem
+            # Fenster liegt nichts", siehe fetch_outcome. Importiert innerhalb
+            # der Methode, damit kein Ringimport entsteht (fetch_persistence
+            # haengt ueber statement_import an der Importstrecke).
+            from kefiya.utils import fetch_persistence as _persist
+            _persist.note_successful_fetch(
+                self.kefiya_login.name, delivered=tansactions)
+
             # Optional automatic reconciliation of the freshly imported window
             # (guarded so it can never break the import).
             try:
@@ -2347,6 +2361,18 @@ class FinTSController(TanSession):
             # through unchanged.
             raise
         except Exception as e:
+            # Ins Error Log, bevor geworfen wird. Der Weg ueber den Zeitplan
+            # protokollierte schon (kefiya_schedule._log_import_failure), der
+            # interaktive nicht: dort endete ein Fehlschlag in einer Meldung am
+            # Bildschirm, die niemand wiederfindet, und am Konto blieb nichts
+            # stehen. Hier ist der Trichter, durch den jeder Weg laeuft --
+            # Zeitplan, Sammelabruf, Formular.
+            #
+            # Nicht auf diesem Weg: TanInteractionRequired. Die Bank hat
+            # zurueckgefragt, nicht abgelehnt; das faengt der except-Zweig
+            # darueber ab und laesst es unveraendert durch.
+            from kefiya.utils import fetch_persistence as _persist
+            _persist.log_failed_fetch(self.kefiya_login.name, note=str(e))
             frappe.throw(_(
                 "Error parsing transactions<br>{0}"
             ).format(str(e)), frappe.get_traceback())
