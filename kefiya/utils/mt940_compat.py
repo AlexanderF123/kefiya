@@ -2,7 +2,7 @@
 # Copyright (c) 2026, Phamos GmbH and contributors
 # For license information, please see license.txt
 
-"""One repair for the mt940 parser, so pending entries can be read at all.
+"""Two repairs for the mt940 parser: the pending block, and the Verwendungszweck.
 
 The bank puts a date-and-time indication in the pending block of an MT940
 statement (tag :13D:), and the timezone offset in it is optional. The mt940
@@ -84,4 +84,89 @@ def ensure_optional_timezone_is_optional():
         return False
 
     _INSTALLED = True
+    return True
+
+
+_SPACES_INSTALLED = False
+
+
+def ensure_the_purpose_keeps_its_spaces():
+    """Install the Verwendungszweck repair once. Safe to call on every parse.
+
+    Die Teilfelder ``?20`` bis ``?29`` des Feldes :86: setzt die Bibliothek in
+    ``_join_result()`` zusammen::
+
+        value = ' '.join(result.get(key, [])) if space else ''.join(...)
+
+    und ``fints.utils.mt940_to_array()`` baut ``Transactions()`` ohne
+    Argumente, also mit ``space=False``. Deshalb steht auf jedem
+    Rechnungsabschluss dieser Instanz::
+
+        RechnungKosten SRZDauerrechnungsnummer.20250908-BW035-00038612361
+
+    Der Schalter ``space`` gilt fuer den ganzen Lauf, die richtige Antwort
+    aber je Buchung: Zeilen der Bank brauchen den Trenner, hart umbrochener
+    SEPA-Text darf ihn nicht bekommen. Welcher Fall vorliegt, entscheidet
+    verwendungszweck.mit_leerzeichen() an den DK-Schluesselwoertern.
+
+    Angesetzt wird am Eintrag in ``Transactions.DEFAULT_PROCESSORS``, nicht am
+    Modulnamen: der Eintrag ist eine direkte Referenz auf die Funktion, und
+    jede neue ``Transactions``-Instanz teilt sich dieselbe Liste. Ein Ersatz
+    von ``processors.transaction_details_post_processor`` wuerde deshalb
+    nichts bewirken -- nachgesehen auf der Instanz, nicht angenommen.
+
+    :return: True, wenn der Verwendungszweck danach seine Leerzeichen behaelt
+    """
+    global _SPACES_INSTALLED
+    if _SPACES_INSTALLED:
+        return True
+
+    try:
+        from mt940 import models, processors
+
+        from kefiya.utils import verwendungszweck
+    except Exception:
+        return False
+
+    try:
+        kette = models.Transactions.DEFAULT_PROCESSORS["post_transaction_details"]
+    except Exception:
+        return False
+
+    original = processors.transaction_details_post_processor
+
+    def je_buchung(transactions, tag, tag_dict, result, space=False):
+        # Der rohe :86:-Inhalt dieser einen Buchung. Faellt er aus, bleibt es
+        # beim Verhalten der Bibliothek -- ein Verwendungszweck ohne
+        # Leerzeichen ist schlechter lesbar, ein abgebrochener Abruf ist
+        # schlimmer.
+        try:
+            roh = tag_dict.get("transaction_details") or ""
+            space = verwendungszweck.mit_leerzeichen(str(roh))
+        except Exception:
+            pass
+        return original(transactions, tag, tag_dict, result, space=space)
+
+    ersetzt = 0
+    try:
+        for index, vorhanden in enumerate(list(kette)):
+            if vorhanden is original:
+                kette[index] = je_buchung
+                ersetzt += 1
+    except Exception:
+        return False
+
+    if not ersetzt:
+        # Eine Bibliotheksfassung, die das selbst entscheidet oder ihre Kette
+        # anders haelt, braucht von uns nichts. Still nichts tun ist richtig;
+        # der Verwendungszweck ist dann entweder schon in Ordnung oder diese
+        # Stelle ist nicht mehr die richtige.
+        try:
+            frappe.logger("kefiya").info(
+                "Kefiya: mt940 purpose processor not found, left untouched")
+        except Exception:
+            pass
+        return False
+
+    _SPACES_INSTALLED = True
     return True

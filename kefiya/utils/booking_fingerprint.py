@@ -56,17 +56,33 @@ _WHITESPACE = re.compile(r"\s+")
 def tidy(value):
     """Text as the bank meant it, not as its line width left it.
 
-    Collapses runs of whitespace and folds case. That is the whole trick for
-    the fixed-width wrapping: "Fin  keissen" and "Finkeissen" still differ,
-    but "Datum 28.02.20 26" and "Datum 28.02.2026" no longer differ by a
-    space, and the same purpose line read through two formats lands on the
-    same text.
+    Drops whitespace entirely and folds case. Nothing here is ever shown to
+    anyone -- it goes straight into a hash -- so the only question is whether
+    two spellings mean the same booking, and where the bank's line ended
+    never does.
+
+    This collapsed runs of whitespace into one space at first, and that was
+    half a rule. It fixed "Datum 28.02.20 26" against "Datum 28.02.2026", but
+    left "Fin keissen" different from "Finkeissen" -- and the fixed-width
+    wrapping of MT940 produces exactly that, in the name as in the purpose.
+
+    What settled it was the repair in verwendungszweck.py. The ``?20``-``?29``
+    subfields of :86: were being glued without a separator, so every
+    Rechnungsabschluss read "RechnungKosten SRZDauerrechnungsnummer.". Putting
+    the separator back changes the purpose of every future booking -- and with
+    a hash that counts spaces, not one of the bookings already in the database
+    would have been recognised again. The next overlap day would have imported
+    them all a second time. That is the wave this module exists to prevent,
+    and it would have been caused by the fix for a display defect.
+
+    So: where a line broke is not part of what the bank said. Two bookings
+    that differ only in whitespace are one booking.
     """
     if value is None:
         return ""
     if isinstance(value, (bytes, bytearray)):
         value = value.decode("utf-8", "replace")
-    return _WHITESPACE.sub(" ", str(value)).strip().casefold()
+    return _WHITESPACE.sub("", str(value)).casefold()
 
 
 def as_day(value):

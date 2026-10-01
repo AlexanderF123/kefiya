@@ -659,6 +659,19 @@ def mt940_entries(text):
     # app either way -- it is how every FinTS fetch reads its statements.
     from fints.utils import mt940_to_array
 
+    # Derselbe Parser, dieselbe Reparatur: ohne sie kleben die Teilfelder des
+    # Verwendungszwecks aneinander. Hier wie beim Abruf, damit eine eingelesene
+    # .sta-Datei nicht anders aussieht als derselbe Umsatz vom Abruf -- sonst
+    # waeren es fuer den Fingerabdruck zwei verschiedene Buchungen.
+    try:
+        from kefiya.utils.mt940_compat import ensure_the_purpose_keeps_its_spaces
+        ensure_the_purpose_keeps_its_spaces()
+    except Exception:
+        # Dieses Modul ist die reine Formatschicht und laeuft in Tests ohne
+        # Bench; die Reparatur haengt an frappe. Ohne sie wird gelesen wie
+        # bisher.
+        pass
+
     own = mt940_own_iban(text)
     entries = []
     for row in mt940_to_array(str(text or "")):

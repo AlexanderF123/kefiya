@@ -34,10 +34,23 @@ from kefiya.utils.booking_fingerprint import (FORMS, as_day, as_money,
 class TestTidying(unittest.TestCase):
 
     def test_fixed_width_wrapping_collapses(self):
-        self.assertEqual(tidy("Datum 28.02.20  26"), "datum 28.02.20 26")
+        """Die Umbruchstelle verschwindet jetzt ganz, nicht nur halb.
+
+        Vorher wurden Leerraum-Laeufe auf EIN Leerzeichen eingedampft, und
+        damit blieb "Datum 28.02.20 26" von "Datum 28.02.2026" verschieden --
+        genau die Buchung, um die es ging. Seit die Teilfelder des
+        Verwendungszwecks wieder getrennt werden (verwendungszweck.py), muss
+        der Fingerabdruck Leerraum vollstaendig ignorieren; sonst waere jede
+        bereits gespeicherte Buchung nicht mehr wiederzuerkennen.
+        """
+        self.assertEqual(tidy("Datum 28.02.20  26"), "datum28.02.2026")
+        self.assertEqual(tidy("Datum 28.02.20  26"), tidy("Datum 28.02.2026"))
 
     def test_case_and_edges(self):
-        self.assertEqual(tidy("  MIETE Nr. 7 "), "miete nr. 7")
+        self.assertEqual(tidy("  MIETE Nr. 7 "), "mietenr.7")
+
+    def test_every_kind_of_whitespace(self):
+        self.assertEqual(tidy("a\tb\nc\r\nd  e"), "abcde")
 
     def test_nothing(self):
         self.assertEqual(tidy(None), "")

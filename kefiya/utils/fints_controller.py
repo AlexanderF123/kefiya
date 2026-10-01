@@ -1337,6 +1337,13 @@ class FinTSController(TanSession):
                 )
             )
 
+        # Ohne das klebt der Verwendungszweck zusammen: die Bibliothek fuegt
+        # die Teilfelder ?20-?29 des Feldes :86: ohne Trenner aneinander, und
+        # auf dem Kontoauszug steht dann "RechnungKosten SRZDauerrechnungs-
+        # nummer.". Siehe mt940_compat und verwendungszweck.
+        from kefiya.utils.mt940_compat import ensure_the_purpose_keeps_its_spaces
+        ensure_the_purpose_keeps_its_spaces()
+
         with self.client_session():
             account = self._require_fints_account()
             return json.loads(
