@@ -27,7 +27,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, now_datetime
 
-from kefiya.utils import account_kind, fetch_outcome, statement_import
+from kefiya.utils import (account_kind, fetch_outcome, saldo_historie,
+                          statement_import)
 
 
 def _as_dict(entry):
@@ -212,6 +213,33 @@ def store_balance(kefiya_login, rows):
         line = balance
     if meta.has_field("custom_credit_line") and line is not None:
         values["custom_credit_line"] = flt(line)
+
+    # Und die Reihe, in der dieser Saldo steht. Ohne sie gibt es genau einen
+    # Wert ohne Datum, und mit einem Wert laesst sich nichts vergleichen --
+    # das von der Bank mitgelieferte balance_date wurde bisher verworfen.
+    #
+    # Nur fuer Konten, die Guthaben fuehren. Eine Buergschaft nennt die
+    # eingeraeumte Linie, keinen Kontostand; eine Differenz darauf hiesse
+    # nichts. Dieselbe Unterscheidung wie eine Zeile hoeher.
+    #
+    # Die Regel steht in saldo_historie und nicht hier, weil sie eine Falle
+    # hat: wer bei jedem Abruf den bisherigen Stand nach hinten schiebt,
+    # macht nach dem zweiten Abruf eines Tages "vorher" und "jetzt" gleich,
+    # und die Differenz ist fuer immer 0,00 EUR -- ohne dass es auffaellt.
+    if not is_a_line and meta.has_field("custom_balance_as_of"):
+        weiter = saldo_historie.naechster_stand(
+            {"balance_at": flt(account.get("custom_account_balance")),
+             "as_of": account.get("custom_balance_as_of"),
+             "previous": account.get("custom_previous_balance"),
+             "previous_as_of": account.get("custom_previous_balance_as_of")},
+            flt(balance), row.get("balance_date"))
+        feld = {"as_of": "custom_balance_as_of",
+                "previous": "custom_previous_balance",
+                "previous_as_of": "custom_previous_balance_as_of"}
+        for schluessel, wert in weiter.items():
+            name = feld.get(schluessel)
+            if name and wert is not None and meta.has_field(name):
+                values[name] = wert
 
     # db_set, not save(): a full save runs Bank Account.validate(), and its
     # update_default_bank_account() issues an UPDATE over every account of the
