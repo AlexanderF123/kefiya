@@ -285,6 +285,10 @@ balance missing on the response,in der Antwort fehlt der Saldo
 no running balance for {0},{0} führt keinen fortlaufenden Saldo
 no bank account linked,kein Bankkonto verknüpft
 field bank_balance not installed,das Feld bank_balance ist nicht installiert
+the bank did not answer,die Bank hat nicht geantwortet
+field {0} not installed,das Feld {0} ist nicht installiert
+could not be written,konnte nicht geschrieben werden
+The bank said:,Die Bank sagt:
 no fetch window,kein Abrufzeitraum
 no bookings in the window,keine Buchungen im Zeitraum
 the bank sent no HIUPD,die Bank hat kein HIUPD gesendet

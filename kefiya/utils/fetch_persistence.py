@@ -13,6 +13,8 @@ home:
   pending entries  -> Kefiya Planned Payment (see planned_payment.py)
   credit card      -> Bank Transaction, same shape as a normal booking
   documents        -> File attached to the Bank Account
+  the fetch itself -> Bank Account.custom_last_successful_fetch, or an Error
+                      Log entry when the bank did not answer
 
 Every helper is idempotent and guarded: a fetch that already booked its
 transactions must never fail because a statement PDF could not be stored.
@@ -25,7 +27,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, now_datetime
 
-from kefiya.utils import account_kind, statement_import
+from kefiya.utils import account_kind, fetch_outcome, statement_import
 
 
 def _as_dict(entry):
@@ -44,6 +46,125 @@ def _first(mapping, keys, default=None):
         if key in mapping and mapping[key] not in (None, ""):
             return mapping[key]
     return default
+
+
+# --------------------------------------------------------------------------
+# Der Abruf selbst
+# --------------------------------------------------------------------------
+
+def note_successful_fetch(kefiya_login, delivered=None, challenged=False,
+                          verdict=None, when=None):
+    """Am Bankkonto festhalten, wann die Bank zuletzt geantwortet hat.
+
+    Bisher stand nur ``Kefiya Login.last_fetch_attempt`` zur Verfuegung, und
+    das wird auf beiden Wegen gestempelt -- dem gelungenen wie dem
+    gescheiterten; sein eigener Docstring sagt, dass es genau dafuer da ist,
+    die 20-Minuten-Wiederholschleife zu bremsen. Ein Versuch ist keine
+    Auskunft darueber, ob Daten vorliegen.
+
+    Ob dieser Abruf zaehlt, entscheidet fetch_outcome.the_bank_answered() --
+    ohne frappe, damit die Regel ohne Bank pruefbar ist. Die Kurzfassung:
+    keine Buchung ist eine Antwort, eine TAN-Aufforderung nicht, ein 9xxx
+    nicht.
+
+    Geschrieben wird mit ``db_set``, nicht ``save()``, aus demselben Grund wie
+    in store_balance(): ein voller Save laeuft durch
+    Bank Account.validate() und dessen update_default_bank_account() sperrt
+    mit einem UPDATE alle Konten derselben Firma auf einmal. Zwei parallel
+    abgerufene Zugaenge -- der Normalfall im Sammelabruf -- greifen dieselben
+    Zeilen in umgekehrter Reihenfolge, und MariaDB erschlaegt einen davon mit
+    1213 "Deadlock found when trying to get lock". Ein Zeitstempel in einem
+    Custom Field braucht von dieser Validierung nichts.
+
+    Wirft nie: ein nicht gesetzter Zeitstempel darf einen Abruf, der seine
+    Buchungen schon geschrieben hat, nicht nachtraeglich scheitern lassen.
+
+    :return: {"stored": bool, "reason"/"bank_account"/"at": ...}
+    """
+    if not fetch_outcome.the_bank_answered(
+            delivered, challenged=challenged, verdict=verdict):
+        return {"stored": False, "reason": _("the bank did not answer")}
+
+    try:
+        bank_account = frappe.db.get_value(
+            "Kefiya Login", kefiya_login, "bank_account")
+        if not bank_account:
+            return {"stored": False, "reason": _("no bank account linked")}
+
+        account = frappe.get_doc("Bank Account", bank_account)
+        if not account.meta.has_field(fetch_outcome.STAMP_FIELD):
+            # Custom Field auf dieser Instanz, wie custom_account_balance.
+            # Fehlt es, wird still nichts geschrieben -- ein Abruf, der
+            # gelungen ist, scheitert nicht an einem fehlenden Feld.
+            return {"stored": False, "reason": _("field {0} not installed")
+                    .format(fetch_outcome.STAMP_FIELD)}
+
+        at = when or now_datetime()
+        account.db_set({fetch_outcome.STAMP_FIELD: at}, update_modified=True)
+        return {"stored": True, "bank_account": bank_account, "at": at,
+                "count": fetch_outcome.how_many(delivered)}
+    except Exception:
+        try:
+            frappe.logger("kefiya").exception(
+                "Kefiya: could not stamp the successful fetch for %s",
+                kefiya_login)
+        except Exception:
+            pass
+        return {"stored": False, "reason": _("could not be written")}
+
+
+def log_failed_fetch(kefiya_login, verdict=None, note=None):
+    """Einen gescheiterten Abruf ins Error Log schreiben.
+
+    Der Weg ueber den Zeitplan protokollierte schon
+    (kefiya_schedule._log_import_failure), der interaktive nicht: dort endete
+    ein Fehlschlag in ``frappe.throw`` und damit in einer Meldung am
+    Bildschirm, die niemand wiederfindet. Auf dem Konto blieb nichts stehen,
+    woran man spaeter sehen konnte, dass etwas schiefging.
+
+    ``frappe.log_error(text)`` uebergibt sein einziges Argument als *title*,
+    und das ist das Feld ``method`` des Error Log -- eine Data-Spalte mit 140
+    Zeichen. Ein Traceback dort hinein hat schon einmal aus dem except-Block
+    heraus CharacterLengthExceededError geworfen und damit einen ganzen
+    Scheduler-Durchlauf beendet, statt nur dessen eine Iteration. Titel und
+    Meldung bleiben deshalb getrennt, und der Titel wird geschnitten.
+
+    Wirft nie -- aus demselben Grund.
+
+    :param verdict: falls vorhanden, das Urteil aus
+        fints_response.verdict_of(); die Bank kommt dann mit ihren eigenen
+        Worten und Codes in die Meldung. Das ist es, was ein Berater
+        wiedererkennt.
+    :param note: eine Zeile Zusatz des Aufrufers, etwa das Abruffenster.
+    :return: bool -- geschrieben oder nicht
+    """
+    try:
+        from kefiya.utils import fints_response
+
+        title = "Kefiya: bank fetch failed for {0}".format(kefiya_login)
+        teile = [frappe.get_traceback()]
+        said = fints_response.as_text(verdict) if verdict else ""
+        if said:
+            teile.append(_("The bank said:") + "\n" + said)
+        for hint in (fints_response.advice(verdict) if verdict else []):
+            teile.append(hint)
+        if note:
+            teile.append(str(note))
+
+        frappe.log_error(
+            title=title[:140],
+            message="\n\n".join(t for t in teile if t),
+            reference_doctype="Kefiya Login",
+            reference_name=kefiya_login,
+        )
+        return True
+    except Exception:
+        try:
+            frappe.logger("kefiya").exception(
+                "Kefiya: bank fetch failed for %s", kefiya_login)
+        except Exception:
+            pass
+        return False
 
 
 # --------------------------------------------------------------------------
