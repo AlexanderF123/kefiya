@@ -41,10 +41,22 @@ frappe.ui.form.on('Kefiya Login', {
 		}
 
 		if (frm.doc.stored_client_state) {
+			// Der Knopf raeumt den ganzen Bankzugang auf, nicht nur diese
+			// Zeile. Er muss das: der Verbindungszustand wird unter den
+			// Logins eines Zugangs weitergereicht, damit eine TAN alle
+			// Konten freischaltet -- wer nur eine Zeile leert, bekommt den
+			// verworfenen Zustand beim naechsten Abruf vom Nachbarn zurueck.
+			// Wer drueckt, soll wissen, dass es die anderen Konten
+			// desselben Zugangs mit trifft: die naechste TAN gilt fuer alle.
 			frm.add_custom_button(__("Reset Connection"), function() {
-				frm.call('reset_connection').then(() => {
-					frm.reload_doc();
-				});
+				frappe.confirm(
+					__("This resets the stored connection for the whole bank access, not just this account. The next fetch starts a fresh handshake and will ask for a TAN once."),
+					function() {
+						frm.call('reset_connection').then(() => {
+							frm.reload_doc();
+						});
+					}
+				);
 			});
 		}
 

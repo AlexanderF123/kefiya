@@ -84,6 +84,29 @@ def unclaimed(iban_list, already_used):
     return offen
 
 
+def same_access(name, blz, fints_login):
+    """Die Filter, die die ANDEREN Logins desselben Bankzugangs auswaehlen.
+
+    Derselbe Zugang heisst: dieselbe Bankleitzahl und dieselbe Kennung --
+    eine PIN, viele Konten. Zwei Stellen brauchen diese Auswahl, und sie
+    muessen dieselbe treffen: das automatische Verwerfen eines
+    unbrauchbaren Verbindungszustands und der Knopf "Verbindung
+    zuruecksetzen". Solange nur eine von beiden die Geschwister erreichte,
+    holte der naechste Abruf den weggeworfenen Zustand vom Nachbarn zurueck.
+
+    Fehlt BLZ oder Kennung, gibt es keinen Zugang, auf den sich etwas
+    beziehen liesse. Dann ist die Antwort None -- und nicht ein Filter, der
+    versehentlich jedes Login trifft.
+    """
+    if not (blz and fints_login):
+        return None
+    return {
+        "name": ("!=", name),
+        "blz": blz,
+        "fints_login": fints_login,
+    }
+
+
 def belongs_to_one_dialog(fieldname):
     """Gehoert das Feld einem laufenden Gespraech statt dem Zugang?
 

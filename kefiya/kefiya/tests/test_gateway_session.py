@@ -168,7 +168,14 @@ class TestJederPausierteDialogWirdWiedergefunden(unittest.TestCase):
         self.assertIn("stored_gateway_state", felder)
 
     def test_geloescht_wird_es_mit_dem_rest(self):
+        """Seit dem 05.10.2026 nennt clear_fints_caches die Felder nicht
+        mehr selbst: discard_connection_state schreibt die Liste aus
+        fints_state_fields, und die wird ohne Bench gegen kefiya_login.json
+        geprueft. Das haelt fester als diese eine Zeile -- ein neues
+        stored_*-Feld kommt dort nicht vorbei."""
+        from kefiya.utils import fints_state_fields
+        self.assertIn("stored_gateway_state", fints_state_fields.CLEARED)
         doc = _quelle("kefiya", "doctype", "kefiya_login", "kefiya_login.py")
         leeren = doc.split("    def clear_fints_caches(")[1] \
                     .split("\n    @")[0]
-        self.assertIn("self.stored_gateway_blob = None", leeren)
+        self.assertIn("self.discard_connection_state(", leeren)

@@ -166,15 +166,22 @@ class TestBothEndsAreWired(unittest.TestCase):
         self.assertGreaterEqual(forgets, 2)
 
     def test_and_the_third_place_forgets_it_through_the_shared_list(self):
-        """_forget_client_state no longer names the fields; the list does."""
+        """_forget_client_state no longer names the fields, and no longer
+        does the clearing: both live on the document, because the button
+        "Reset Connection" has to do exactly the same thing."""
         from kefiya.utils import fints_state_fields
         self.assertIn("stored_vop_id_state", fints_state_fields.CLEARED)
         self.assertIn("stored_tan_state_decoupled", fints_state_fields.CLEARED)
         body = _source("utils", "fints_controller.py")
         stelle = body.index("def _forget_client_state")
         bis = body.index("def _persist_fints_state")
-        self.assertIn("fints_state_fields.CLEARED", body[stelle:bis])
-        self.assertIn("fints_state_fields.cleared()", body[stelle:bis])
+        self.assertIn("self.kefiya_login.discard_connection_state()",
+                      body[stelle:bis])
+        doc = _source("kefiya", "doctype", "kefiya_login", "kefiya_login.py")
+        verwerfen = doc.split("def discard_connection_state(")[1] \
+                       .split("\n    def ")[0]
+        self.assertIn("fints_state_fields.CLEARED", verwerfen)
+        self.assertIn("fints_state_fields.cleared()", verwerfen)
 
     def test_resuming_puts_the_id_back_before_the_tan_is_sent(self):
         # Die TAN-Strecke wohnt seit ihrer Herausloesung in fints_tan_session.
@@ -217,9 +224,15 @@ class TestBothEndsAreWired(unittest.TestCase):
             "value)", body)
 
     def test_clearing_the_caches_clears_the_id(self):
+        """clear_fints_caches names no fields any more -- it hands the job
+        to discard_connection_state, and the list there is checked against
+        kefiya_login.json. That is a stronger guarantee than this line
+        used to be: a new stored_* field cannot slip past it."""
+        from kefiya.utils import fints_state_fields
+        self.assertIn("stored_vop_id_state", fints_state_fields.CLEARED)
         body = _source("kefiya", "doctype", "kefiya_login", "kefiya_login.py")
-        clearing = body.split("def clear_fints_caches(self):")[1][:600]
-        self.assertIn("self.stored_vop_id_blob = None", clearing)
+        clearing = body.split("def clear_fints_caches(")[1].split("\n    def ")[0]
+        self.assertIn("self.discard_connection_state(", clearing)
 
 
 if __name__ == "__main__":

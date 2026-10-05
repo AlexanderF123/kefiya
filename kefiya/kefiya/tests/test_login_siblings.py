@@ -158,3 +158,46 @@ class TestDerZugangWirdAufDemServerKopiert(unittest.TestCase):
                       ' throw=True)', self.anlegen)
         self.assertIn('frappe.has_permission("Kefiya Login",'
                       ' ptype="create", throw=True)', self.anlegen)
+
+
+class TestWelcheLoginsZumSelbenZugangGehoeren(unittest.TestCase):
+    """Dieselbe Bankleitzahl, dieselbe Kennung -- eine PIN, viele Konten.
+
+    Zwei Stellen stellen diese Frage: das automatische Verwerfen eines
+    unbrauchbaren Verbindungszustands und der Knopf "Verbindung
+    zuruecksetzen". Solange nur die erste die Geschwister erreichte, holte
+    der naechste Abruf den weggeworfenen Zustand vom Nachbarn zurueck --
+    der Knopf sah aus, als tue er nichts.
+    """
+
+    def test_die_anderen_desselben_zugangs(self):
+        self.assertEqual(
+            login_siblings.same_access("Konto A", "67250020", "afinkeissen"),
+            {"name": ("!=", "Konto A"),
+             "blz": "67250020",
+             "fints_login": "afinkeissen"})
+
+    def test_das_eigene_login_ist_kein_geschwister(self):
+        filter_ = login_siblings.same_access("Konto A", "672", "kennung")
+        self.assertEqual(filter_["name"], ("!=", "Konto A"))
+
+    def test_ohne_blz_gibt_es_keinen_zugang(self):
+        """Und damit keinen Filter. Einer ohne BLZ traefe jedes Login des
+        Hauses -- und wuerde fremde Zustaende wegwerfen."""
+        self.assertIsNone(
+            login_siblings.same_access("Konto A", None, "afinkeissen"))
+        self.assertIsNone(
+            login_siblings.same_access("Konto A", "", "afinkeissen"))
+
+    def test_ohne_kennung_auch_nicht(self):
+        self.assertIsNone(
+            login_siblings.same_access("Konto A", "67250020", None))
+        self.assertIsNone(
+            login_siblings.same_access("Konto A", "67250020", ""))
+
+    def test_eine_andere_kennung_ist_ein_anderer_zugang(self):
+        """Dasselbe Haus, zwei Kennungen: zwei Zugaenge mit je eigenem
+        Dialog. Deren Zustaende haben miteinander nichts zu tun."""
+        eine = login_siblings.same_access("A", "67250020", "afinkeissen")
+        andere = login_siblings.same_access("A", "67250020", "bfinkeissen")
+        self.assertNotEqual(eine["fints_login"], andere["fints_login"])
