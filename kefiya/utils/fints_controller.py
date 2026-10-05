@@ -20,6 +20,7 @@ from frappe.utils.file_manager import (
     get_content_hash,
 )
 from kefiya.utils import fints_response
+from kefiya.utils import fints_state_fields
 from kefiya.utils.fints_dialog_state import (
     dialog_is_usable, discard_unusable_dialog,
 )
@@ -705,13 +706,20 @@ class FinTSController(TanSession):
         The siblings matter: the state is shared across the logins of one bank
         access, so leaving theirs in place would hand the same unusable state
         straight back on the next attempt through any of them.
+
+        Both ends write the same field list -- fints_state_fields.CLEARED --
+        because they had drifted apart, and the raw one wrote None into a
+        Check column, which MariaDB refuses. See that module.
+
+        :return: True when the state is really gone, False when it could not
+            be written. The caller says different things in the two cases: a
+            message that promises a discard which did not happen sends the
+            user back into the same wall, and this one hid behind exactly
+            that sentence for a day.
         """
         try:
-            self.kefiya_login.stored_client_blob = None
-            self.kefiya_login.stored_tan_blob = None
-            self.kefiya_login.stored_tan_state_decoupled = None
-            self.kefiya_login.stored_vop_id_blob = None
-            self.kefiya_login.stored_dialog_blob = None
+            for field, value in fints_state_fields.CLEARED.items():
+                self.kefiya_login.set(field, value)
             self.kefiya_login.save()
 
             # The siblings share this state -- _seed_client_state_from_sibling
@@ -726,13 +734,11 @@ class FinTSController(TanSession):
                                           limit_page_length=0):
                     frappe.db.set_value(
                         "Kefiya Login", row["name"],
-                        {"stored_client_state": None,
-                         "stored_tan_state": None,
-                         "stored_tan_state_decoupled": None,
-                         "stored_dialog_state": None},
+                        fints_state_fields.cleared(),
                         update_modified=False)
 
             frappe.db.commit()
+            return True
         except Exception:
             frappe.log_error(
                 title="Kefiya: discarding the unusable client state failed",
@@ -740,6 +746,7 @@ class FinTSController(TanSession):
                 reference_doctype="Kefiya Login",
                 reference_name=self.kefiya_login.name,
             )
+            return False
 
     def _persist_fints_state(self, tan_state=None, clear:bool=False):
         """Persist the current client/dialog state to the database.
@@ -2010,16 +2017,29 @@ class FinTSController(TanSession):
                 # tells them.
                 if not _is_missing_bank_parameters(exc):
                     raise
-                self._forget_client_state()
+                # What happens next depends on whether the discard worked.
+                # It did not, on 05.10.2026: a Check column refused the None
+                # it was handed, the commit was never reached, and the user
+                # read that the state had been discarded while it sat there
+                # unchanged, blocking every further send on that access.
+                if self._forget_client_state():
+                    outcome = _(
+                        "The stored state has been discarded and the next"
+                        " attempt will start a fresh connection.")
+                else:
+                    outcome = _(
+                        "The stored state could NOT be discarded, so the next"
+                        " attempt would fail in the same way: open the bank"
+                        " access and press \"Reset Connection\" before trying"
+                        " again.")
                 frappe.throw(_(
                     "The bank connection for {0} could not be rebuilt from its"
                     " stored state, so this order was NOT sent as far as this"
-                    " app can tell. The stored state has been discarded and the"
-                    " next attempt will start a fresh connection."
+                    " app can tell. {1}"
                     "\n\nBefore sending again, look in your online banking:"
                     " if the transfer is there after all, cancel this order"
                     " instead of repeating it."
-                ).format(self.kefiya_login.name),
+                ).format(self.kefiya_login.name, outcome),
                     title=_("Connection could not be rebuilt"))
             response, parked = self._confirm_or_park_vop(
                 response, pain_xml, payment_reference)

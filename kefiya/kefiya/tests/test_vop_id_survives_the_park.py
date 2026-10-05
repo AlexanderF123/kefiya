@@ -146,6 +146,14 @@ class TestBothEndsAreWired(unittest.TestCase):
         challenge to park, __discard_parked_challenge, and
         _forget_client_state. Counted rather than sampled, because the one
         that gets missed is the one nobody wrote an assertion for.
+
+        Two of them write the two names out. The third stopped doing so on
+        05.10.2026: _forget_client_state writes the whole list from
+        fints_state_fields.CLEARED, because its second half -- the siblings
+        -- went through raw SQL with a None on a Check column and broke off
+        with error 1048 while an order was on the wire. Its guarantee is
+        checked where it now lives, below, rather than by a count that would
+        quietly drop to two.
         """
         body = _source("utils", "fints_controller.py")
         forgets = body.count(
@@ -155,7 +163,18 @@ class TestBothEndsAreWired(unittest.TestCase):
             forgets, clears,
             "{0} places clear the parked TAN state, {1} clear the VoP-ID"
             " with it".format(forgets, clears))
-        self.assertGreaterEqual(forgets, 3)
+        self.assertGreaterEqual(forgets, 2)
+
+    def test_and_the_third_place_forgets_it_through_the_shared_list(self):
+        """_forget_client_state no longer names the fields; the list does."""
+        from kefiya.utils import fints_state_fields
+        self.assertIn("stored_vop_id_state", fints_state_fields.CLEARED)
+        self.assertIn("stored_tan_state_decoupled", fints_state_fields.CLEARED)
+        body = _source("utils", "fints_controller.py")
+        stelle = body.index("def _forget_client_state")
+        bis = body.index("def _persist_fints_state")
+        self.assertIn("fints_state_fields.CLEARED", body[stelle:bis])
+        self.assertIn("fints_state_fields.cleared()", body[stelle:bis])
 
     def test_resuming_puts_the_id_back_before_the_tan_is_sent(self):
         # Die TAN-Strecke wohnt seit ihrer Herausloesung in fints_tan_session.
