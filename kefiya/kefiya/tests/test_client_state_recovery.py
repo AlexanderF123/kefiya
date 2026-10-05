@@ -95,8 +95,55 @@ class TestAPoisonedStateDiscardsItself(unittest.TestCase):
         self.assertIn("_sibling_login_filters()", body)
         self.assertIn("stored_client_state", body)
 
+    def test_both_ends_write_the_same_fields(self):
+        """They had drifted apart, and the raw one wrote None into a Check
+        column -- MariaDB refuses that, and the discard broke off with
+        error 1048 while an order was already on the wire. One list now, in
+        fints_state_fields, checked against the doctype without a bench."""
+        body = _block(self.py, "_forget_client_state")
+        self.assertIn("fints_state_fields.CLEARED", body)
+        self.assertIn("fints_state_fields.cleared()", body)
+        self.assertNotIn('"stored_tan_state_decoupled": None', body)
+
     def test_the_discard_is_committed(self):
         """The throw that follows rolls the transaction back; without its own
         commit the discarded state comes back with it."""
         body = _block(self.py, "_forget_client_state")
         self.assertIn("frappe.db.commit()", body)
+
+
+class TestTheMessageSaysWhatReallyHappened(unittest.TestCase):
+    """The discard can fail -- it did, on 05.10.2026. Saying it succeeded
+    anyway sends the user straight back into the same wall, and the wall is
+    a bank access that can no longer send."""
+
+    def setUp(self):
+        self.py = _read("utils", "fints_controller.py")
+
+    def test_the_discard_reports_whether_it_worked(self):
+        body = _block(self.py, "_forget_client_state")
+        self.assertIn("return True", body)
+        self.assertIn("return False", body)
+        # The False belongs to the except branch, not to some early exit.
+        self.assertGreater(body.index("return False"),
+                           body.index("except Exception:"))
+
+    def test_the_send_asks_before_it_promises(self):
+        send = _block(self.py, "submit_sepa_transfer")
+        self.assertIn("if self._forget_client_state():", send)
+
+    def test_and_names_the_way_out_when_it_failed(self):
+        send = _block(self.py, "submit_sepa_transfer")
+        self.assertIn("could NOT be discarded", send)
+        self.assertIn("Reset Connection", send)
+
+    def test_the_warning_stands_in_both_cases(self):
+        """Whatever became of the stored state, the segments were on the
+        wire. Looking before sending again is the part that must not depend
+        on it."""
+        send = _block(self.py, "submit_sepa_transfer")
+        self.assertEqual(
+            send.count("Before sending again, look in your online banking"), 1)
+        hint = send.index("Before sending again, look in your online banking")
+        self.assertLess(send.index("could NOT be discarded"), hint)
+        self.assertLess(send.index("has been discarded"), hint)

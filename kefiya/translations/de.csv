@@ -315,11 +315,14 @@ The session is then open: fetch this access once more and the bookings come thro
 The worker stopped reporting. Fetch this access again.,Der Hintergrundlauf meldet sich nicht mehr. Diesen Zugang bitte erneut abrufen.
 Release accepted — fetching the {0} accounts that were waiting for it.,"Freigabe angenommen — die {0} Konten, die darauf gewartet haben, werden jetzt abgerufen."
 Connection could not be rebuilt,Verbindung ließ sich nicht wiederherstellen
-"The bank connection for {0} could not be rebuilt from its stored state, so this order was NOT sent as far as this app can tell. The stored state has been discarded and the next attempt will start a fresh connection.
+"The bank connection for {0} could not be rebuilt from its stored state, so this order was NOT sent as far as this app can tell. {1}
 
-Before sending again, look in your online banking: if the transfer is there after all, cancel this order instead of repeating it.","Die Bankverbindung für {0} ließ sich aus dem gespeicherten Zustand nicht wiederherstellen. Nach allem, was diese App erkennen kann, wurde der Auftrag NICHT gesendet. Der gespeicherte Zustand wurde verworfen, der nächste Versuch baut die Verbindung neu auf.
+Before sending again, look in your online banking: if the transfer is there after all, cancel this order instead of repeating it.","Die Bankverbindung für {0} ließ sich aus dem gespeicherten Zustand nicht wiederherstellen. Nach allem, was diese App erkennen kann, wurde der Auftrag NICHT gesendet. {1}
 
 Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweisung doch dort, diesen Auftrag stornieren statt ihn zu wiederholen."
+The stored state has been discarded and the next attempt will start a fresh connection.,"Der gespeicherte Zustand wurde verworfen, der nächste Versuch baut die Verbindung neu auf."
+"The stored state could NOT be discarded, so the next attempt would fail in the same way: open the bank access and press ""Reset Connection"" before trying again.","Der gespeicherte Zustand konnte NICHT verworfen werden; der nächste Versuch würde genauso scheitern. Bitte zuerst den Bankzugang öffnen und dort „Verbindung zurücksetzen“ drücken."
+Reset Connection,Verbindung zurücksetzen
 {0}: the release did not arrive in time. Confirm it in your banking app and fetch this access again -- the challenge is still open.,{0}: Die Freigabe ist nicht rechtzeitig eingetroffen. Bitte in der Banking-App bestätigen und diesen Zugang erneut abrufen — die Anfrage ist noch offen.
 Release received — carrying on.,Freigabe eingegangen — es geht weiter.
 the bank refuses this query for this account,die Bank lehnt diese Abfrage für dieses Konto ab
