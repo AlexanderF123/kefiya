@@ -4,7 +4,7 @@
 
 """Text, den die Bank in einer pain.001 tragen kann -- schon bei der Erfassung.
 
-WOZU. Am 08. und 09.10.2026 lehnte die Sparkasse Heidelberg denselben
+WOZU. Am 08. und 09.10.2026 lehnte die Sparkasse denselben
 Auftrag dreimal ab, jedes Mal erst nach der Freigabe in der Banking-App::
 
     9050 Die Nachricht enthaelt Fehler.

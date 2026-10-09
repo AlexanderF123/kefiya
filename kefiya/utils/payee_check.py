@@ -78,8 +78,8 @@ def names_match(left, right):
     """How two payee names relate: "exact", "close" or "different".
 
     "close" is for the case that fills the history: one invoice says
-    "Sofienstraße GmbH & Co. KG", the next "Sofienstrasse GmbH", the bank
-    statement "SOFIENSTRASSE GMBH CO KG". All three are the same payee, and a
+    "Musterstraße GmbH & Co. KG", the next "Musterstrasse GmbH", the bank
+    statement "MUSTERSTRASSE GMBH CO KG". All three are the same payee, and a
     check that calls that a mismatch is a check that gets switched off.
 
     A subset counts as close; an overlap of one word out of five does not.

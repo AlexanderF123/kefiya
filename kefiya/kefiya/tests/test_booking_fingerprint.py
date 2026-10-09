@@ -7,8 +7,8 @@ The cases below are not invented. They are taken off the live instance, from
 the 57 pairs where kefiya imported the same booking twice, and from the shapes
 that made them differ:
 
-    "Alexander und Christina Fin keissen"   MT940, wrapped at a fixed width
-    "Alexander und Christina Finkeissen"    CAMT
+    "Max und Erika Muster mann"   MT940, wrapped at a fixed width
+    "Max und Erika Mustermann"    CAMT
 
     "KD 40039 RNR 26/0719 Datum 28.02.20 26"   one date, wrapped mid-year
     "KD 40039 RNR 26/0719 Datum 28.02.2026"
@@ -95,7 +95,7 @@ class TestOneBookingOneFingerprint(unittest.TestCase):
 
     def _print(self, **overrides):
         row = dict(
-            bank_account="Brilu KG Mietkonto Sparkasse - Sparkasse Heidelberg",
+            bank_account="Mietkonto Sparkasse - Sparkasse",
             date="2026-03-30", amount=222.39,
             iban="DE02120300000000202051",
             name="EHTW Service GmbH",
@@ -259,11 +259,11 @@ class TestTheFingerprintOfAStoredRow(unittest.TestCase):
     """
 
     ZEILE = {
-        "bank_account": "Sofienstr.GmbH&CoKG Mietkonto Sparkasse",
+        "bank_account": "Zweitkonto Sparkasse",
         "date": "2026-06-26",
         "withdrawal": 333.91,
         "deposit": 0.0,
-        "bank_party_iban": "DE61200300000004007161",
+        "bank_party_iban": "DE58888888880009999999",
         "bank_party_name": "Minimax GmbH",
         "description": "RNr. 9111122026 RDat.12.06.2026 KNr. 413936",
     }
@@ -301,7 +301,7 @@ class TestTheFingerprintOfAStoredRow(unittest.TestCase):
         """Eine Umbuchung zwischen zwei eigenen Konten ist zweimal
         dasselbe und trotzdem nicht dieselbe Buchung."""
         anderes = dict(self.ZEILE)
-        anderes["bank_account"] = "Brilu KG Mietkonto Sparkasse"
+        anderes["bank_account"] = "Mietkonto Sparkasse"
         self.assertNotEqual(of_row(anderes), of_row(self.ZEILE))
 
     def test_nothing_does_not_raise(self):

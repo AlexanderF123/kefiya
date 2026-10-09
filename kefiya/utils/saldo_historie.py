@@ -11,9 +11,8 @@ nicht erst gespeichert. Damit gibt es genau einen Wert ohne Datum -- und mit
 einem Wert laesst sich nichts vergleichen.
 
 WOZU. Der Frischewaechter schaetzt heute aus dem Buchungsrhythmus, ob ein
-Konto zu lange still ist, und hat damit dreimal falsch gemeldet (AEX-2026-
-35782, -31297, -31309). Die Bank koennte die Frage beantworten statt sie zu
-schaetzen::
+Konto zu lange still ist, und hat damit dreimal falsch gemeldet. Die
+Bank koennte die Frage beantworten statt sie zu schaetzen::
 
     Saldo_neu - Saldo_alt  ==  Summe der Umsaetze dazwischen?
 

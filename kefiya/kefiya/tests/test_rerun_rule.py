@@ -36,7 +36,7 @@ def row(name, offset_seconds, **overrides):
     data = {
         "name": name,
         "creation": BASE + timedelta(seconds=offset_seconds),
-        "bank_account": "SKL Sparkasse - Sparkasse Heidelberg",
+        "bank_account": "Stiftungskonto Sparkasse - Sparkasse",
         "date": "2025-06-30",
         "deposit": 780.0,
         "withdrawal": 0.0,

@@ -3,7 +3,7 @@
 
 """The release must always have something to unlock.
 
-What happened to KEF-TRF-2026-00007, measured from the Error Log and the
+What happened to Auftrag A, measured from the Error Log and the
 stored state afterwards:
 
   1. The order reached the Sparkasse. The bank asked for the release in the

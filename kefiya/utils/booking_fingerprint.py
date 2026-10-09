@@ -19,8 +19,8 @@ and three of those five come out differently depending on the route:
                      'AdditionalEntryInformation'. Different fields, often
                      different words for one booking.
     applicant_name   wrapped at a fixed width in MT940, so the live data has
-                     "Alexander und Christina Fin keissen" next to
-                     "Dr. Alexander Finkeissen und Christina Finkeissen".
+                     "Max und Erika Muster mann" next to
+                     "Dr. Max Mustermann und Erika Mustermann".
     purpose          wrapped the same way -- "Datum 28.02.20 26" is one date
                      with a line break in the middle of the year.
 
@@ -63,7 +63,7 @@ def tidy(value):
 
     This collapsed runs of whitespace into one space at first, and that was
     half a rule. It fixed "Datum 28.02.20 26" against "Datum 28.02.2026", but
-    left "Fin keissen" different from "Finkeissen" -- and the fixed-width
+    left "Muster mann" different from "Mustermann" -- and the fixed-width
     wrapping of MT940 produces exactly that, in the name as in the purpose.
 
     What settled it was the repair in verwendungszweck.py. The ``?20``-``?29``

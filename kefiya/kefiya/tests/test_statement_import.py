@@ -591,12 +591,12 @@ class TestTheBanksOwnFormatIsRead(unittest.TestCase):
 
     STATEMENT = (
         ":20:REFSTARMONEY\n"
-        ":25:67250020/9281703\n"
+        ":25:99999999/3333333\n"
         ":28C:00000\n"
         ":60F:C180503EUR0,00\n"
         ":61:1805030503CR8053,56NMSCNONREF\n"
         ":86:166?00GUTSCHRIFT?109251?20Miete Mai?30PBNKDEFF"
-        "?31DE68440100460000208468?32Deutsche Postbank AG?34000\n"
+        "?31DE34777777770001234567?32Deutsche Musterbank AG?34000\n"
         ":62F:C180503EUR8053,56\n"
     )
 
@@ -611,7 +611,7 @@ class TestTheBanksOwnFormatIsRead(unittest.TestCase):
 class TestAStatementNamesItsOwnAccount(unittest.TestCase):
     """The second line of the file is the fact the old importer never read.
 
-        :25:67250020/9281703
+        :25:99999999/3333333
 
     It booked every row of a portfolio-wide export onto the one account picked
     on the form instead, which is how 21.252 payments came to stand on accounts
@@ -620,22 +620,22 @@ class TestAStatementNamesItsOwnAccount(unittest.TestCase):
 
     def test_the_german_iban_is_a_rule_not_a_lookup(self):
         """DE, two check digits, eight-digit bank code, ten-digit account."""
-        self.assertEqual(si.german_iban("67250020", "9281703"),
-                         "DE67672500200009281703")
-        self.assertEqual(si.german_iban("67250020", "9355367"),
-                         "DE27672500200009355367")
-        self.assertEqual(si.german_iban("67092300", "33108982"),
-                         "DE02670923000033108982")
+        self.assertEqual(si.german_iban("99999999", "3333333"),
+                         "DE27999999990003333333")
+        self.assertEqual(si.german_iban("99999999", "1111111"),
+                         "DE89999999990001111111")
+        self.assertEqual(si.german_iban("88888888", "7777777"),
+                         "DE23888888880007777777")
 
     def test_parts_that_cannot_be_an_account_give_nothing(self):
-        for blz, account in (("672500", "9281703"), ("67250020", ""),
-                             ("67250020", "12345678901"), (None, None)):
+        for blz, account in (("672500", "3333333"), ("99999999", ""),
+                             ("99999999", "12345678901"), (None, None)):
             self.assertIsNone(si.german_iban(blz, account), (blz, account))
 
     def test_the_account_is_read_from_the_statement(self):
         self.assertEqual(
             si.mt940_own_iban(TestTheBanksOwnFormatIsRead.STATEMENT),
-            "DE67672500200009281703")
+            "DE27999999990003333333")
 
     def test_a_statement_that_names_an_iban_directly_is_taken_as_it_is(self):
         text = ":20:REF\n:25:DE02120300000000202051\n:28C:0\n"
@@ -645,21 +645,21 @@ class TestAStatementNamesItsOwnAccount(unittest.TestCase):
 class TestTheCounterpartyIsSplitFromItsIban(unittest.TestCase):
     """The mt940 library hands over IBAN and name glued together:
 
-        DE68440100460000208468Deutsche Postbank AG
+        DE34777777770001234567Deutsche Musterbank AG
 
     Left alone, the IBAN ends up inside the name on every single booking.
     """
 
     def test_the_two_are_separated(self):
         iban, name = si._split_iban_and_name(
-            "DE68440100460000208468Deutsche Postbank AG")
-        self.assertEqual(iban, "DE68440100460000208468")
-        self.assertEqual(name, "Deutsche Postbank AG")
+            "DE34777777770001234567Deutsche Musterbank AG")
+        self.assertEqual(iban, "DE34777777770001234567")
+        self.assertEqual(name, "Deutsche Musterbank AG")
 
     def test_a_plain_name_stays_a_plain_name(self):
-        iban, name = si._split_iban_and_name("Milorad Vrban")
+        iban, name = si._split_iban_and_name("Jan Novak")
         self.assertIsNone(iban)
-        self.assertEqual(name, "Milorad Vrban")
+        self.assertEqual(name, "Jan Novak")
 
     def test_nothing_is_not_a_name(self):
         iban, name = si._split_iban_and_name(None)
@@ -704,25 +704,25 @@ class TestAnIbanVerifiesItself(unittest.TestCase):
     then matches no party at all. The check digits decide instead."""
 
     def test_real_ibans_pass(self):
-        for iban in ("DE67672500200009281703", "DE27672500200009355367",
-                     "DE79200411110679723700", "DE68440100460000208468"):
+        for iban in ("DE27999999990003333333", "DE89999999990001111111",
+                     "DE50777777770007654321", "DE34777777770001234567"):
             self.assertTrue(si.iban_checksum_ok(iban), iban)
 
     def test_one_wrong_character_fails(self):
-        self.assertFalse(si.iban_checksum_ok("DE67672500200009281704"))
+        self.assertFalse(si.iban_checksum_ok("DE27999999990003333334"))
 
     def test_the_swallowed_letter_case_fails(self):
         """"DE68…468D" -- the split that ate the D of "Deutsche"."""
-        self.assertFalse(si.iban_checksum_ok("DE68440100460000208468D"))
+        self.assertFalse(si.iban_checksum_ok("DE34777777770001234567D"))
 
     def test_what_is_not_an_iban_fails(self):
-        for value in ("", None, "Milorad Vrban", "DE68", "1234567890123456"):
+        for value in ("", None, "Jan Novak", "DE68", "1234567890123456"):
             self.assertFalse(si.iban_checksum_ok(value), value)
 
     def test_the_generated_german_ibans_verify(self):
         """german_iban() computes the check digits; this proves it right
         rather than merely consistent."""
-        for blz, account in (("67250020", "9281703"), ("67092300", "33108982"),
-                             ("67250020", "9355367"), ("60050101", "4339272")):
+        for blz, account in (("99999999", "3333333"), ("88888888", "7777777"),
+                             ("99999999", "1111111"), ("60050101", "4339272")):
             self.assertTrue(si.iban_checksum_ok(si.german_iban(blz, account)),
                             (blz, account))

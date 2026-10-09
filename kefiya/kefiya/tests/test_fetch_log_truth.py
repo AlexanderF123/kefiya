@@ -149,7 +149,7 @@ class TestPendingEntriesCanBeReadAtAll(unittest.TestCase):
 
         mt940_compat.ensure_optional_timezone_is_optional()
         message = "\n".join([
-            ":20:STARTUMSE", ":25:67250020/0009289240", ":28C:0",
+            ":20:STARTUMSE", ":25:99999999/0009289240", ":28C:0",
             ":60F:C260731EUR22433,33",
             ":13D:2607310900",
             ":61:2607310731DR345,10NMSCNONREF",

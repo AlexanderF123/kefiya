@@ -367,7 +367,7 @@ class TestWhenTheExecutionOrderTravels(unittest.TestCase):
     nicht benoetigt" and a VoP-ID both. The VoP-ID alone used to decide, so
     HKVPA went out on each poll of the release and the bank answered "0020
     Ausfuehrungsbestaetigung erhalten" for it and "9010 Der Auftrag wurde
-    nicht ausgefuehrt" for the order. KEF-TRF-2026-00007, twice.
+    nicht ausgefuehrt" for the order. Auftrag A, twice.
     """
 
     def _answer(self, *codes):

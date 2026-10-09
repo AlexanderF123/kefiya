@@ -95,7 +95,7 @@ class TanSession:
             # Park it, then ask. NOT poll-then-park, which is what this did
             # and what cost the user the order.
             #
-            # Measured, on KEF-TRF-2026-00007: the order reached the
+            # Measured, on Auftrag A: the order reached the
             # Sparkasse, the bank asked for the release in the app, and the
             # first status query came back 9010 -- which python-fints reports
             # as "could not fetch BPD", a sentence about something else

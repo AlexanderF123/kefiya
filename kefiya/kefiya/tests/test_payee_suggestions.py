@@ -83,10 +83,16 @@ class TestTheSuggestionsComeFromTheApp(unittest.TestCase):
     def test_it_answers_with_the_ibans_as_well(self):
         self.assertIn('"ibans"', self._endpoint())
 
-    def test_the_page_no_longer_asks_a_stored_script(self):
+    def test_the_page_asks_this_app_and_not_a_stored_script(self):
+        """Ein gespeichertes Server Script gehoert einer Instanz, der
+        Endpunkt gehoert der App. Geprueft wird der Endpunkt -- und dass
+        keine Methode ohne Modulpfad gerufen wird, denn genau so ruft man
+        ein gespeichertes Skript: frappe.call({method: 'name'}).
+        """
         body = _controller("transfer_form.js") + _controller("payee_check.js")
-        self.assertNotIn("zk_payees", body)
         self.assertIn("kefiya.utils.payee_check.known_payees", body)
+        for treffer in re.finditer(r"method:\s*'([^']+)'", body):
+            self.assertIn(".", treffer.group(1), treffer.group(1))
 
 
 class TestAnUnknownNameStaysTypeable(unittest.TestCase):
@@ -137,7 +143,7 @@ class TestAnUnknownNameStaysTypeable(unittest.TestCase):
 
 class TestAPayeeIsMatchedByTheRuleTheCheckUses(unittest.TestCase):
     """A plain lowercased comparison was not that rule. The history holds
-    "Sofienstraße GmbH & Co. KG", this invoice says "Sofienstrasse GmbH",
+    "Musterstraße GmbH & Co. KG", this invoice says "Musterstrasse GmbH",
     and check_payee calls those the same payee -- so a suggestion list that
     disagreed offered no IBAN for a payee it had just called known."""
 

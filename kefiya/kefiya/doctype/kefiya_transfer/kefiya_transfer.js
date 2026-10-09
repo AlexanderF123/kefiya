@@ -199,7 +199,7 @@ frappe.ui.form.on("Kefiya Transfer Item", {
  *
  * The name of an access is not enough to tell two accounts of one bank apart,
  * and it says nothing at all about whose money it is. A colleague preparing a
- * transfer saw "Brilu KG Mietkonto" above "axessio Hausverwaltung GmbH" and
+ * transfer saw "Mietkonto" above "Musterverwaltung GmbH" and
  * asked whether that could be right. It could not -- and the form had shown
  * both without a word about the contradiction.
  *

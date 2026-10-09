@@ -3,7 +3,7 @@
 
 """Ein Eurozeichen hat einen Auftrag dreimal scheitern lassen.
 
-Die Sparkasse Heidelberg lehnte KEF-TRF-2026-00015 am 08. und 09.10.2026
+Die Sparkasse lehnte Auftrag D am 08. und 09.10.2026
 dreimal ab, jedes Mal erst nach der Freigabe in der Banking-App::
 
     9050 Die Nachricht enthaelt Fehler.
@@ -35,10 +35,10 @@ ABGELEHNT = "1 TZ. Kaution abzügl. 400€ für BK25/BK26"
 #: Echte Texte aus den 14 Auftraegen dieser Instanz. Die Umlaute bleiben
 #: stehen -- die Bank hat sie dreizehnmal ausgefuehrt.
 GELAUFEN = {
-    "Reisekosten BT-0001 Alexander Finkeißen":
-        "Reisekosten BT-0001 Alexander Finkeißen",
-    "Teilrückzahlung Darlehen AF an Sofienstraße GmbH u Co KG":
-        "Teilrückzahlung Darlehen AF an Sofienstraße GmbH u Co KG",
+    "Reisekosten BT-0001 Max Mustermann":
+        "Reisekosten BT-0001 Max Mustermann",
+    "Teilrückzahlung Darlehen MM an Musterstraße GmbH u Co KG":
+        "Teilrückzahlung Darlehen MM an Musterstraße GmbH u Co KG",
     "1. TZ Kaution, abzüglich Mietschulden 24,25,26":
         "1. TZ Kaution, abzüglich Mietschulden 24,25,26",
     # Der eine mit einem Zeilenumbruch -- die Volksbank hat ihn geschluckt,

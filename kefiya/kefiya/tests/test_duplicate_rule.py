@@ -24,16 +24,16 @@ from kefiya.utils.duplicate_rule import (
     BY_ACCOUNT, BY_PAYEE, PURPOSE_CUT, UNDECIDED, fingerprint, pick_home,
 )
 
-BRILU = "Brilu KG Mietkonto Sparkasse"
-SOFIE = "Sofienstr. Mietkonto Sparkasse"
-BAU = "Sofienstr. Baukonto Sparkasse"
+MIET = "Mietkonto Sparkasse"
+SOFIE = "Zweitkonto Sparkasse"
+BAU = "Baukonto Sparkasse"
 
 
 def _copy(account, **rest):
     row = {"name": account[:5] + "-1", "bank_account": account,
            "date": "2026-02-17", "withdrawal": 895.48, "deposit": 0,
            "description": "ONLINE-UEBERWEISUNG | RNr. 2026/10",
-           "bank_party_name": "Milorad Vrban"}
+           "bank_party_name": "Jan Novak"}
     row.update(rest)
     return row
 
@@ -41,28 +41,28 @@ def _copy(account, **rest):
 class TestTwoRowsAreOneBooking(unittest.TestCase):
 
     def test_the_same_payment_on_two_accounts_has_one_fingerprint(self):
-        self.assertEqual(fingerprint(_copy(BRILU)), fingerprint(_copy(BAU)))
+        self.assertEqual(fingerprint(_copy(MIET)), fingerprint(_copy(BAU)))
 
     def test_a_different_amount_is_a_different_booking(self):
-        self.assertNotEqual(fingerprint(_copy(BRILU)),
-                            fingerprint(_copy(BRILU, withdrawal=895.49)))
+        self.assertNotEqual(fingerprint(_copy(MIET)),
+                            fingerprint(_copy(MIET, withdrawal=895.49)))
 
     def test_a_different_day_is_a_different_booking(self):
-        self.assertNotEqual(fingerprint(_copy(BRILU)),
-                            fingerprint(_copy(BRILU, date="2026-02-18")))
+        self.assertNotEqual(fingerprint(_copy(MIET)),
+                            fingerprint(_copy(MIET, date="2026-02-18")))
 
     def test_an_incoming_and_an_outgoing_amount_are_not_the_same(self):
         """A transfer between two own accounts appears on both -- once as a
         withdrawal, once as a deposit. That is two bookings, not a duplicate,
         and deleting one of them would lose a real payment."""
         self.assertNotEqual(
-            fingerprint(_copy(BRILU, withdrawal=100, deposit=0)),
+            fingerprint(_copy(MIET, withdrawal=100, deposit=0)),
             fingerprint(_copy(SOFIE, withdrawal=0, deposit=100)))
 
     def test_the_purpose_is_compared_but_not_endlessly(self):
         long_one = "X" * (PURPOSE_CUT + 40)
         other = "X" * PURPOSE_CUT + "Y" * 40
-        self.assertEqual(fingerprint(_copy(BRILU, description=long_one)),
+        self.assertEqual(fingerprint(_copy(MIET, description=long_one)),
                          fingerprint(_copy(BAU, description=other)))
 
 
@@ -71,36 +71,36 @@ class TestThePayeeDecides(unittest.TestCase):
     counterparty and the other has not."""
 
     def test_the_account_that_really_pays_him_keeps_the_booking(self):
-        copies = [_copy(BRILU), _copy(SOFIE), _copy(BAU)]
+        copies = [_copy(MIET), _copy(SOFIE), _copy(BAU)]
         keeper, why = pick_home(
-            copies, ("MILORAD", "VRBAN"),
-            {(("MILORAD", "VRBAN"), BRILU): 74,
-             (("MILORAD", "VRBAN"), SOFIE): 2},
-            {BRILU: 2054, SOFIE: 227, BAU: 0})
+            copies, ("JAN", "NOVAK"),
+            {(("JAN", "NOVAK"), MIET): 74,
+             (("JAN", "NOVAK"), SOFIE): 2},
+            {MIET: 2054, SOFIE: 227, BAU: 0})
         self.assertEqual(why, BY_PAYEE)
-        self.assertEqual(keeper["bank_account"], BRILU)
+        self.assertEqual(keeper["bank_account"], MIET)
 
     def test_a_busy_account_does_not_beat_a_relevant_one(self):
         """An account that is merely large is not evidence about THIS
         payment. The payee is."""
-        copies = [_copy(BRILU), _copy(SOFIE)]
+        copies = [_copy(MIET), _copy(SOFIE)]
         keeper, why = pick_home(
             copies, ("EINE", "FIRMA"),
             {(("EINE", "FIRMA"), SOFIE): 12},
-            {BRILU: 2054, SOFIE: 227})
+            {MIET: 2054, SOFIE: 227})
         self.assertEqual(why, BY_PAYEE)
         self.assertEqual(keeper["bank_account"], SOFIE)
 
     def test_an_equal_number_of_real_payments_decides_nothing_by_payee(self):
-        copies = [_copy(BRILU), _copy(SOFIE)]
+        copies = [_copy(MIET), _copy(SOFIE)]
         keeper, why = pick_home(
-            copies, ("MILORAD", "VRBAN"),
-            {(("MILORAD", "VRBAN"), BRILU): 5,
-             (("MILORAD", "VRBAN"), SOFIE): 5},
-            {BRILU: 2054, SOFIE: 227})
+            copies, ("JAN", "NOVAK"),
+            {(("JAN", "NOVAK"), MIET): 5,
+             (("JAN", "NOVAK"), SOFIE): 5},
+            {MIET: 2054, SOFIE: 227})
         # It falls through to the weaker rule rather than tossing a coin.
         self.assertEqual(why, BY_ACCOUNT)
-        self.assertEqual(keeper["bank_account"], BRILU)
+        self.assertEqual(keeper["bank_account"], MIET)
 
 
 class TestAnAccountWithNoHistoryAtAll(unittest.TestCase):
@@ -108,11 +108,11 @@ class TestAnAccountWithNoHistoryAtAll(unittest.TestCase):
     it, and it held 29,693 copies of payments that live elsewhere."""
 
     def test_it_never_keeps_a_booking(self):
-        copies = [_copy(BRILU), _copy(BAU)]
+        copies = [_copy(MIET), _copy(BAU)]
         keeper, why = pick_home(copies, ("UNBEKANNT",), {},
-                                {BRILU: 2054, BAU: 0})
+                                {MIET: 2054, BAU: 0})
         self.assertEqual(why, BY_ACCOUNT)
-        self.assertEqual(keeper["bank_account"], BRILU)
+        self.assertEqual(keeper["bank_account"], MIET)
 
     def test_two_silent_accounts_decide_nothing(self):
         """Zero is the absence of evidence, not evidence. Letting an
@@ -129,23 +129,23 @@ class TestNothingIsGuessed(unittest.TestCase):
     def test_a_tie_leaves_the_booking_alone(self):
         """A duplicate that is visibly a duplicate is better than a payment
         filed on the wrong account with nothing to show it was a guess."""
-        keeper, why = pick_home([_copy(BRILU), _copy(SOFIE)], ("UNBEKANNT",),
-                                {}, {BRILU: 500, SOFIE: 500})
+        keeper, why = pick_home([_copy(MIET), _copy(SOFIE)], ("UNBEKANNT",),
+                                {}, {MIET: 500, SOFIE: 500})
         self.assertEqual(why, UNDECIDED)
         self.assertIsNone(keeper)
 
     def test_a_single_copy_is_not_a_duplicate(self):
-        keeper, why = pick_home([_copy(BRILU)], ("MILORAD", "VRBAN"),
-                                {(("MILORAD", "VRBAN"), BRILU): 74},
-                                {BRILU: 2054})
+        keeper, why = pick_home([_copy(MIET)], ("JAN", "NOVAK"),
+                                {(("JAN", "NOVAK"), MIET): 74},
+                                {MIET: 2054})
         self.assertEqual(why, UNDECIDED)
         self.assertIsNone(keeper)
 
     def test_a_payee_nobody_knows_falls_through_rather_than_failing(self):
-        keeper, why = pick_home([_copy(BRILU), _copy(BAU)], (), {},
-                                {BRILU: 2054, BAU: 0})
+        keeper, why = pick_home([_copy(MIET), _copy(BAU)], (), {},
+                                {MIET: 2054, BAU: 0})
         self.assertEqual(why, BY_ACCOUNT)
-        self.assertEqual(keeper["bank_account"], BRILU)
+        self.assertEqual(keeper["bank_account"], MIET)
 
 
 def _repair_source():

@@ -224,7 +224,7 @@ frappe.provide("kefiya");
     // because only the fetch polled. On the transfer path nobody asked the
     // bank anything: the user confirmed in the app, the box sat there, the
     // order stayed "Due", and there was not even an error to report --
-    // KEF-TRF-2026-00007, 02.09.2026, 16:50.
+    // Auftrag A, 02.09.2026, 16:50.
     //
     // Each ask is send_transfer_tan with an empty TAN, which resumes the
     // parked dialog and sends a status query (TAN process 'S'). "tan_required"

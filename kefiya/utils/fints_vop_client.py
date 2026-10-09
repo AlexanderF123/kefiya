@@ -145,7 +145,7 @@ def _build(parts):
 
             The check is unconditional, so a 9010 answering a TAN status query
             mid-dialog -- which is what the Sparkasse sent, and what stopped
-            KEF-TRF-2026-00007 -- is reported as a wrong bank URL. The URL was
+            Auftrag A -- is reported as a wrong bank URL. The URL was
             right. Nobody could have got from that message to the cause, and
             the whole run had to be reconstructed from the outside.
 
@@ -242,7 +242,7 @@ def _build(parts):
 
                 TypeError: Object of type function is not JSON serializable
 
-            Gemessen am 29.09.2026 an KEF-TRF-2026-00014 ueber 20.000,00 EUR,
+            Gemessen am 29.09.2026 an Auftrag C ueber 20.000,00 EUR,
             dem ersten Terminauftrag. Die Bank hatte die pain-Nachricht schon
             und fragte nach der Empfaengerbestaetigung; die Ausnahme nahm die
             Transaktion mit, und damit die geparkte Anforderung. Siehe
