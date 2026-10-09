@@ -29,6 +29,7 @@ from frappe.utils import cint, flt, getdate, now_datetime
 from kefiya.utils import four_eyes
 from kefiya.utils import own_transfer
 from kefiya.utils import pain_dk
+from kefiya.utils import sepa_text
 
 
 def normalize_iban(value):
@@ -468,6 +469,29 @@ def build_pain001_for(docs):
             frappe.throw(_(
                 "{0} row {1}: amount must be greater than zero."
             ).format(doc.name, row.idx))
+        # Zeichen, die die Bank in der Nachricht nicht tragen kann. Die
+        # pain.001 ist dann gueltiges ISO-XML -- Max140Text laesst jedes
+        # Unicode-Zeichen zu -- und die Bank lehnt sie am Schalter ab:
+        # "9050 Die Nachricht enthaelt Fehler", nachdem die Freigabe in der
+        # App schon gegeben war. Dreimal fuer denselben Auftrag am 08. und
+        # 09.10.2026, und das unterscheidende Zeichen war ein Eurozeichen.
+        #
+        # Abgelehnt, nicht umgeschrieben: der Vorschlag steht in der
+        # Meldung, die Entscheidung bleibt bei dem, der den Auftrag
+        # freigegeben hat. Siehe sepa_text, auch dafuer, warum Umlaute
+        # durchgehen.
+        for feld, wert in (("purpose", row.purpose),
+                           ("recipient_name", row.recipient_name)):
+            beanstandet = sepa_text.complaint(wert)
+            if not beanstandet:
+                continue
+            frappe.throw(_(
+                "{0} row {1}: the bank cannot carry these characters in"
+                " {2}: {3}"
+                "\n\nThe order was NOT sent. Suggested text:\n{4}"
+            ).format(doc.name, row.idx, feld, beanstandet,
+                     sepa_text.repaired(wert)),
+                title=_("The bank cannot carry this text"))
         payment = {
             "name": (row.recipient_name or "")[:70],
             "IBAN": normalize_iban(row.recipient_iban),
