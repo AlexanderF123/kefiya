@@ -2,64 +2,107 @@
 # Copyright (c) 2026, Phamos GmbH and contributors
 # For license information, please see license.txt
 
-"""Text, den die Bank in einer pain.001 auch tragen kann.
+"""Text, den die Bank in einer pain.001 tragen kann -- schon bei der Erfassung.
 
 WOZU. Am 08. und 09.10.2026 lehnte die Sparkasse Heidelberg denselben
-Auftrag dreimal ab, jedes Mal nach der Freigabe in der App::
+Auftrag dreimal ab, jedes Mal erst nach der Freigabe in der Banking-App::
 
     9050 Die Nachricht enthaelt Fehler.
     9010 Der Auftrag wurde nicht ausgefuehrt.
 
 ``9050`` beanstandet die NACHRICHT, nicht die Auftragsdaten -- das waere
 9210. Die Nachricht war gueltiges ISO-XML; ``sepa.export(validate=True)``
-hatte sie gegen das Schema geprueft und durchgelassen. Max140Text laesst
+hatte sie gegen das Schema geprueft und durchgelassen. ``Max140Text`` laesst
 jedes Unicode-Zeichen zu, die Regeln der Deutschen Kreditwirtschaft nicht.
+Das unterscheidende Zeichen war ein Eurozeichen.
 
-WAS DIE MESSUNG SAGT, und darauf beruht die Regel hier. Von 14 Auftraegen
-dieser Instanz trugen 13 Zeichen, die die DK-Liste streng genommen nicht
-kennt -- "ue", "ss" --, und alle 13 hat die Bank ausgefuehrt, zwei davon
-auf demselben Konto wie der abgelehnte. Einer trug ein Eurozeichen. Genau
-der eine wurde abgelehnt.
+KORRIGIERT, NICHT ABGELEHNT. Die erste Fassung dieses Moduls lehnte den
+Auftrag ab und nannte den Vorschlag in der Meldung -- aus der Haltung, dass
+aus einem Zeichen, das jemand freigegeben hat, nicht stillschweigend ein
+anderes wird. Der Nutzer hat anders entschieden: korrigiert wird
+automatisch, und zwar bei der Erfassung.
 
-Umlaute zu verbieten waere also eine Vermutung gegen die eigene Messung.
-Verboten wird, was sich im Zeichensatz der Nachricht ueberhaupt nicht
-abbilden laesst: das Eurozeichen liegt bei U+20AC und damit ausserhalb von
-Latin-1. Dazu Steuerzeichen -- ein Zeilenumbruch ist kein Text, den ein
-Verwendungszweck tragen kann, auch wenn eine Bank ihn einmal geschluckt
-hat.
+Das ist die Stelle, an der es auch hingehoert. Korrigiert wird, WAEHREND der
+Auftrag noch ein Entwurf ist und der Text vor den Augen dessen steht, der
+ihn freigibt -- nicht zwischen Freigabe und Bank. Was geaendert wurde, wird
+beim Speichern gemeldet; stillschweigend ist hier nichts.
 
-WARUM VORHER UND NICHT HINTERHER. Die Bank lehnt es selbst ab -- aber erst,
-nachdem der Auftrag gesendet und eine TAN darauf verbraucht ist. Das ist
-dieselbe Begruendung, aus der refuse_paying_yourself existiert, und dieselbe
-Haltung wie beim vergangenen Ausfuehrungsdatum: abgelehnt, nicht
-stillschweigend umgeschrieben. Aus "400EUR" ein "400 EUR" zu machen waere
-harmlos; aus einem Zeichen, das jemand geprueft und freigegeben hat, etwas
-anderes zu machen, ist es nicht.
+DIE REGEL. Erlaubt ist der Zeichensatz der DK:
+
+    a-z A-Z 0-9 und  / - ? : ( ) . , ' +  und das Leerzeichen
+
+Alles andere wird ersetzt. Wofuer es einen Namen gibt, bekommt den Namen --
+"ue" fuer "ue", "EUR" fuer das Eurozeichen; was keinen hat, wird ein
+Leerzeichen, so wie gewuenscht. Mehrfache Leerzeichen fallen danach
+zusammen, damit aus einem geloeschten Zeichen keine Luecke bleibt.
+
+WAS DIE MESSUNG DAZU SAGT. Von 14 Auftraegen dieser Instanz trugen 13
+Umlaute oder ein scharfes s, und alle 13 hat die Bank ausgefuehrt -- die
+Umlaute MUESSEN also nicht weg. Sie werden trotzdem umgeschrieben, weil es
+so gewuenscht ist und weil es dem DK-Zeichensatz entspricht. Nur das
+Eurozeichen musste weg; es liegt bei U+20AC und damit ausserhalb von
+Latin-1.
+
+EIN PUNKT ZUM EMPFAENGERNAMEN. Die Bank prueft ihn gegen den Namen des
+Kontoinhabers (Verification of Payee). "Mueller" gegen "Mueller" ist eine
+Annaeherung, keine Gleichheit -- die Bank kann daraufhin eine Bestaetigung
+verlangen. Das tut sie auch sonst, und fints_vop beantwortet es; siehe
+payee_check, das Umlaute aus genau diesem Grund NICHT zusammenfaltet.
 
 Ohne frappe, aus demselben Grund wie fints_response: die Regel entscheidet
 mit, ob eine Zahlung herausgeht, und eine Regel, die nur gegen eine echte
 Bank laeuft, laeuft nie.
 """
 
-#: Zeichen, fuer die es einen Namen gibt, den die Bank tragen kann. Kurz
-#: gehalten: was hier steht, ist dieser Instanz begegnet. Eine Tabelle aller
-#: Sonderzeichen waere eine Tabelle, die niemand pflegt.
+#: Der Zeichensatz der Deutschen Kreditwirtschaft fuer pain.001-Texte.
+ERLAUBT = frozenset(
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789"
+    "/-?:().,'+ "
+)
+
+#: Zeichen, fuer die es einen Namen gibt, den die Bank tragen kann. Laenger
+#: als ein Zeichen sein zu duerfen ist der Punkt: "ue" ist die Antwort auf
+#: "ue", nicht "u".
 ERSATZ = {
-    "€": "EUR",   # Eurozeichen -- der Fund vom 09.10.2026
+    "ä": "ae", "ö": "oe", "ü": "ue",
+    "Ä": "Ae", "Ö": "Oe", "Ü": "Ue",
+    "ß": "ss",
+    "á": "a", "à": "a", "â": "a", "å": "a", "ã": "a",
+    "é": "e", "è": "e", "ê": "e", "ë": "e",
+    "í": "i", "ì": "i", "î": "i", "ï": "i",
+    "ó": "o", "ò": "o", "ô": "o", "õ": "o", "ø": "o",
+    "ú": "u", "ù": "u", "û": "u",
+    "ý": "y", "ÿ": "y",
+    "ç": "c", "ñ": "n",
+    "Á": "A", "À": "A", "Â": "A", "Å": "A", "Ã": "A",
+    "É": "E", "È": "E", "Ê": "E", "Ë": "E",
+    "Í": "I", "Ì": "I", "Î": "I", "Ï": "I",
+    "Ó": "O", "Ò": "O", "Ô": "O", "Õ": "O", "Ø": "O",
+    "Ú": "U", "Ù": "U", "Û": "U",
+    "Ç": "C", "Ñ": "N",
+    "æ": "ae", "Æ": "Ae",
+    "€": "EUR",   # der Fund vom 09.10.2026
     "£": "GBP",
-    "–": "-",     # Halbgeviertstrich, kommt aus Office-Texten
-    "—": "-",
-    "‘": "'",
-    "’": "'",
-    "‚": "'",
-    "“": '"',
-    "”": '"',
-    "„": '"',
+    "$": "USD",
+    "&": "und",
+    "%": "Prozent",
+    "§": "Par.",
+    "–": "-", "—": "-", "−": "-",
+    "‘": "'", "’": "'", "‚": "'", "´": "'", "`": "'",
+    "“": "'", "”": "'", "„": "'", '"': "'",
+    "«": "'", "»": "'",
     "…": "...",
-    " ": " ",     # geschuetztes Leerzeichen
+    "°": "Grad",
+    "•": "-",
+    "½": "1/2", "¼": "1/4", "¾": "3/4",
+    "²": "2", "³": "3",
+    " ": " ", " ": " ", " ": " ", "​": " ",
 }
 
-#: Wie ein Steuerzeichen heisst, wenn es in einer Meldung auftaucht.
+#: Wie ein Steuerzeichen heisst, wenn eine Meldung es nennen muss. Es
+#: unsichtbar in Anfuehrungszeichen zu zeigen hilft niemandem.
 STEUERZEICHEN = {
     "\n": "Zeilenumbruch",
     "\r": "Zeilenumbruch",
@@ -67,78 +110,73 @@ STEUERZEICHEN = {
 }
 
 
-def _nicht_abbildbar(zeichen):
-    """Laesst sich das Zeichen im Zeichensatz der Nachricht ueberhaupt
-    darstellen?
+def _ersetzung(zeichen):
+    """Was aus einem Zeichen wird, das nicht erlaubt ist."""
+    if zeichen in ERSATZ:
+        return ERSATZ[zeichen]
+    # Notfalls ein Leerzeichen -- nichts wird einfach weggelassen, denn ein
+    # fehlendes Zeichen faellt niemandem auf, eine Luecke schon.
+    return " "
 
-    Latin-1 ist die Grenze, an der die Praxis haengt: Umlaute liegen darin
-    und gehen durch, das Eurozeichen liegt bei U+20AC und nicht.
+
+def clean(text):
+    """Derselbe Text, wie die Bank ihn tragen kann.
+
+    Zweimal angewandt kommt dasselbe heraus wie einmal: der Auftrag wird bei
+    jedem Speichern geprueft, und ein Text, der sich dabei jedes Mal weiter
+    veraendert, waere nicht mehr der, den jemand freigegeben hat.
     """
-    try:
-        zeichen.encode("latin-1")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        return True
-    return False
+    raus = []
+    for zeichen in str(text or ""):
+        if zeichen in ERLAUBT:
+            raus.append(zeichen)
+        else:
+            raus.append(_ersetzung(zeichen))
+    # Aus einem ersetzten Zeichen soll keine Luecke bleiben, und ein
+    # Zeilenumbruch hinterlaesst sonst zwei Leerzeichen.
+    return " ".join("".join(raus).split())
+
+
+def changed(text):
+    """Hat clean() etwas zu tun? Ohne den Text zweimal zu bauen."""
+    text = str(text or "")
+    return clean(text) != text
 
 
 def unsendable(text):
     """Die Zeichen in ``text``, die die Bank nicht tragen kann.
 
     :return: Liste von dicts ``{"char", "name", "replacement"}``, in der
-        Reihenfolge ihres ersten Auftretens und ohne Wiederholung. Leer,
-        wenn der Text in Ordnung ist.
+        Reihenfolge ihres ersten Auftretens und ohne Wiederholung.
     """
     gefunden = []
     gesehen = set()
     for zeichen in str(text or ""):
-        if zeichen in gesehen:
+        if zeichen in ERLAUBT or zeichen in gesehen:
             continue
-        name = STEUERZEICHEN.get(zeichen)
-        if name is None:
-            if not _nicht_abbildbar(zeichen):
-                continue
-            name = "U+{0:04X}".format(ord(zeichen))
         gesehen.add(zeichen)
-        gefunden.append({"char": zeichen, "name": name,
-                         "replacement": ERSATZ.get(zeichen, "")})
+        gefunden.append({
+            "char": zeichen,
+            "name": STEUERZEICHEN.get(zeichen,
+                                      "U+{0:04X}".format(ord(zeichen))),
+            "replacement": _ersetzung(zeichen),
+        })
     return gefunden
 
 
-def repaired(text):
-    """Derselbe Text mit den Zeichen, die einen Namen haben, ersetzt.
-
-    Wird dem Nutzer VORGESCHLAGEN, nicht fuer ihn eingesetzt. Was keinen
-    Ersatz hat, bleibt stehen -- der Vorschlag soll nicht heimlich etwas
-    weglassen, sondern zeigen, was gemeint sein koennte.
-    """
-    raus = []
-    for zeichen in str(text or ""):
-        if zeichen in ERSATZ:
-            raus.append(ERSATZ[zeichen])
-        elif zeichen in STEUERZEICHEN:
-            raus.append(" ")
-        else:
-            raus.append(zeichen)
-    return "".join(raus)
-
-
 def complaint(text):
-    """Die Beanstandung in einem Satz, oder "" wenn es keine gibt.
+    """Was geaendert wurde, in einem Satz; leer, wenn nichts.
 
-    Nennt die Zeichen beim Namen und den Vorschlag dazu. Ein Nutzer, der
-    "9050 Die Nachricht enthaelt Fehler" liest, erfaehrt daraus nichts; ein
-    Nutzer, der "das Eurozeichen -- schreiben Sie EUR" liest, ist fertig.
+    Nennt die Zeichen beim Namen und das, was an ihre Stelle tritt. Ein
+    Nutzer, der "9050 Die Nachricht enthaelt Fehler" liest, erfaehrt daraus
+    nichts; "das Eurozeichen wurde EUR" ist eine Auskunft.
     """
-    treffer = unsendable(text)
-    if not treffer:
-        return ""
     teile = []
-    for eintrag in treffer:
-        if eintrag["replacement"]:
-            teile.append("{0} (statt dessen: {1})".format(
-                eintrag["char"] if eintrag["char"].strip() else eintrag["name"],
-                eintrag["replacement"]))
-        else:
-            teile.append(eintrag["char"] if eintrag["char"].strip()
-                         else eintrag["name"])
+    for eintrag in unsendable(text):
+        sichtbar = (eintrag["char"] if eintrag["char"].strip()
+                    else eintrag["name"])
+        ersatz = eintrag["replacement"]
+        teile.append("{0} -> {1}".format(
+            sichtbar, ersatz if ersatz.strip() else "Leerzeichen"))
     return ", ".join(teile)
+
