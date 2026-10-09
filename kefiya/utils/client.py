@@ -1496,8 +1496,14 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
                     "A send is already in progress for: {0}"
                 ).format(key.split(":", 1)[1])}
 
-    from kefiya.utils.fints_controller import FinTSController
+    from kefiya.utils.fints_controller import (
+        FinTSController,
+        TanInteractionRequired,
+    )
     interactive = {"docname": user_scope, "enabled": True}
+    # None until the handshake stands. The TAN branch below reads it as its
+    # proof that nothing can have gone to the bank yet.
+    controller = None
     try:
         controller = FinTSController(kefiya_login, interactive)
         result = controller.submit_sepa_transfer(
@@ -1511,6 +1517,37 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
     except Exception as exc:
         for key in lock_keys:
             frappe.cache().delete_value(key)
+        # A TAN the bank wants for the LOGIN, asked for before any order went
+        # out. trusted_client_context asks the user over the socket and then
+        # raises to skip its body -- which is a signal, not a failure. Nobody
+        # caught it here, so it reached the browser as a raw traceback
+        # ("kefiya.utils.fints_errors.TanInteractionRequired") and the send
+        # could not be finished at all.
+        #
+        # Which TAN this is decides what has to happen next, and the two
+        # directions are not interchangeable: get it wrong one way and the
+        # order is never paid, wrong the other way and it is paid twice.
+        #
+        #   before the handshake   answer it, then SEND AGAIN -- nothing has
+        #                          left this machine
+        #   on the order itself    never send again. That one does not come
+        #                          through here at all: submit_sepa_transfer
+        #                          parks the challenge and returns
+        #                          {"status": "tan_required"} as a value.
+        #
+        # controller is None is the proof, not an assumption about which
+        # call raises: it is only unset while the constructor is still
+        # running. Anything raising later keeps the old behaviour and falls
+        # through to the re-raise, which claims nothing.
+        if controller is None and isinstance(exc, TanInteractionRequired):
+            return {"status": "tan_required", "stage": "authentication",
+                    "docname": kefiya_login, "approved": approved,
+                    "refused": refused,
+                    "message": _(
+                        "{0} asks for a TAN before it accepts an order."
+                        " Confirm it and send again -- nothing has been sent"
+                        " yet."
+                    ).format(kefiya_login)}
         if scheduled and _is_unsupported_schedule(exc):
             for doc in docs:
                 doc.db_set("manage_due_date", 1)

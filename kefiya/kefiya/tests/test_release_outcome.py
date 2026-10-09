@@ -89,7 +89,14 @@ class TestDerControllerSagtEs(unittest.TestCase):
         notiz = _funktion(self.controller, "    def __note_the_failed_release(")
         self.assertIn("what_the_bank_said(self.fints_connection)", notiz)
         self.assertIn("frappe.log_error(", notiz)
-        self.assertIn("is NOT sent", notiz)
+        # Hier stand "is NOT sent". Das war eine Behauptung aus einer
+        # Abfrage, die gescheitert ist -- und am 09.10.2026 stand daneben,
+        # was die Bank gesagt hatte, und beides passte nicht zusammen. Die
+        # sichere Richtung bleibt: nicht als gesendet verbuchen. Nur das
+        # wird noch zugesagt, und das Nichtwissen wird benannt.
+        self.assertIn("not marked as sent", notiz)
+        self.assertIn("is NOT known from", notiz)
+        self.assertNotIn("it belonged to is NOT sent", notiz)
 
     def test_freigegeben_erst_nach_der_pruefung_der_antwort(self):
         antwort = _funktion(self.session,

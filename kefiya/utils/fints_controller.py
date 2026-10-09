@@ -675,9 +675,11 @@ class FinTSController(TanSession):
                 title="Kefiya: the parked release could not be answered",
                 message=(
                     "login={0}\n\nThe status query on the parked challenge"
-                    " failed. The challenge has been discarded; the order"
-                    " it belonged to is NOT sent.\n\nWhat the bank said:\n"
-                    "{1}\n\n{2}"
+                    " failed, so what became of the order is NOT known from"
+                    " here. The challenge has been discarded and the order is"
+                    " not marked as sent; whether the bank carried it out has"
+                    " to be read in the online banking."
+                    "\n\nWhat the bank said:\n{1}\n\n{2}"
                 ).format(self.kefiya_login.name, said, frappe.get_traceback()),
                 reference_doctype="Kefiya Login",
                 reference_name=self.kefiya_login.name,

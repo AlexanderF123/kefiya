@@ -173,3 +173,126 @@ class TestTheCodesWeHaveMetAreExplained(unittest.TestCase):
 
     def test_nothing_said_needs_no_advice(self):
         self.assertEqual(fr.advice(fr.verdict_of(object())), [])
+
+
+class Message:
+    """What python-fints hands out at the other place: responses is a METHOD.
+
+    FinTSInstituteMessage.responses(segment=None) returns the HIRMS lines for
+    a segment. The read here was ``getattr(x, "responses", None) or []``,
+    which lets a method through because a method is truthy.
+    """
+
+    def __init__(self, lines, status=None):
+        self._lines = lines
+        if status is not None:
+            self.status = Status(status)
+
+    def responses(self, segment=None):
+        return self._lines
+
+
+class Angry:
+    """A response whose lines cannot be read at all."""
+
+    @property
+    def responses(self):
+        raise RuntimeError("nope")
+
+
+class Refusing:
+    def responses(self):
+        raise RuntimeError("nope")
+
+
+class Lying:
+    """responses is neither a list nor callable."""
+    responses = 42
+
+
+class Prickly:
+    """One line that objects to being read."""
+
+    def __init__(self):
+        self.responses = [Line("0010", "gut"), _Unreadable()]
+
+
+class _Unreadable:
+    @property
+    def code(self):
+        raise RuntimeError("nope")
+
+
+class TestBothShapesOfResponsesAreRead(unittest.TestCase):
+    """The crash that cost half a day, on 08. and 09.10.2026:
+
+        TypeError: 'method' object is not iterable
+
+    in verdict_of, inside the question "did the bank refuse this order?".
+    The caller read the crash as "the status query failed" and told the user
+    the order was NOT sent -- four times, while the bank's own answer sat
+    next to it in the same log entry.
+    """
+
+    def test_a_list(self):
+        v = fr.verdict_of(Answer([Line("9010", "Der Auftrag wurde nicht"
+                                               " ausgefuehrt")]))
+        self.assertTrue(fr.refused(v))
+
+    def test_a_method(self):
+        v = fr.verdict_of(Message([Line("9010", "Der Auftrag wurde nicht"
+                                                " ausgefuehrt")]))
+        self.assertTrue(fr.refused(v))
+        self.assertEqual(len(v["lines"]), 1)
+
+    def test_a_method_reads_the_accepting_lines_too(self):
+        v = fr.verdict_of(Message([Line("0020", "Der Auftrag wurde"
+                                                " ausgefuehrt")]))
+        self.assertEqual(v["status"], fr.SUCCESS)
+        self.assertFalse(fr.refused(v))
+
+
+class TestNothingInHereMayRaise(unittest.TestCase):
+    """What reads this decides whether a payment is reported as sent, so an
+    exception on the way gets read as a failure of the bank dialog. The
+    module header has promised UNKNOWN-and-block-nothing from the start; it
+    was prose, not code."""
+
+    def test_an_attribute_that_objects(self):
+        v = fr.verdict_of(Angry())
+        self.assertEqual(v["status"], fr.UNKNOWN)
+        self.assertFalse(fr.refused(v))
+
+    def test_a_method_that_objects(self):
+        self.assertEqual(fr.verdict_of(Refusing())["status"], fr.UNKNOWN)
+
+    def test_neither_list_nor_method(self):
+        self.assertEqual(fr.verdict_of(Lying())["status"], fr.UNKNOWN)
+
+    def test_one_unreadable_line_is_one_line_less(self):
+        v = fr.verdict_of(Prickly())
+        self.assertEqual([line["code"] for line in v["lines"]], ["0010"])
+        self.assertEqual(v["status"], fr.SUCCESS)
+
+
+class TestWhichSegmentTheCodeIsAbout(unittest.TestCase):
+    """"0020 Der Auftrag wurde ausgefuehrt" reads like the transfer and can
+    mean the status query. On 09.10.2026 I read it as the transfer and
+    raised an alarm about money that had not moved. The code alone cannot
+    tell them apart; the reference element can."""
+
+    def test_it_is_kept(self):
+        line = Line("0020", "Der Auftrag wurde ausgefuehrt")
+        line.reference_element = "5"
+        v = fr.verdict_of(Answer([line]))
+        self.assertEqual(v["lines"][0]["reference"], "5")
+
+    def test_and_it_is_shown(self):
+        line = Line("0020", "Der Auftrag wurde ausgefuehrt")
+        line.reference_element = "5"
+        self.assertIn("[Segment 5]", fr.as_text(fr.verdict_of(Answer([line]))))
+
+    def test_a_line_without_one_reads_as_before(self):
+        v = fr.verdict_of(Answer([Line("0010", "Nachricht entgegengenommen")]))
+        self.assertEqual(v["lines"][0]["reference"], "")
+        self.assertEqual(fr.as_text(v), "0010 Nachricht entgegengenommen")

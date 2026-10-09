@@ -323,6 +323,7 @@ Bitte vor einem erneuten Senden im Online-Banking nachsehen: steht die Überweis
 The stored state has been discarded and the next attempt will start a fresh connection.,"Der gespeicherte Zustand wurde verworfen, der nächste Versuch baut die Verbindung neu auf."
 "The stored state could NOT be discarded, so the next attempt would fail in the same way: open the bank access and press ""Reset Connection"" before trying again.","Der gespeicherte Zustand konnte NICHT verworfen werden; der nächste Versuch würde genauso scheitern. Bitte zuerst den Bankzugang öffnen und dort „Verbindung zurücksetzen“ drücken."
 Reset Connection,Verbindung zurücksetzen
+"{0} asks for a TAN before it accepts an order. Confirm it and send again -- nothing has been sent yet.","{0} verlangt eine TAN, bevor die Bank einen Auftrag annimmt. Bitte bestätigen und erneut senden — gesendet wurde noch nichts."
 "This resets the stored connection for the whole bank access, not just this account. The next fetch starts a fresh handshake and will ask for a TAN once.","Das setzt die gespeicherte Verbindung des ganzen Bankzugangs zurück, nicht nur die dieses Kontos. Der nächste Abruf baut die Verbindung neu auf und fragt einmal nach einer TAN."
 {0}: the release did not arrive in time. Confirm it in your banking app and fetch this access again -- the challenge is still open.,{0}: Die Freigabe ist nicht rechtzeitig eingetroffen. Bitte in der Banking-App bestätigen und diesen Zugang erneut abrufen — die Anfrage ist noch offen.
 Release received — carrying on.,Freigabe eingegangen — es geht weiter.
