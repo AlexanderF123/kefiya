@@ -20,7 +20,6 @@ from frappe.utils.file_manager import (
     get_content_hash,
 )
 from kefiya.utils import fints_response
-from kefiya.utils import fints_state_fields
 from kefiya.utils.fints_dialog_state import (
     dialog_is_usable, discard_unusable_dialog,
 )
@@ -34,6 +33,7 @@ from kefiya.utils import accepted_payee
 from kefiya.utils import camt_shape, gateway_session
 from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
+from kefiya.utils import login_siblings
 from kefiya.utils import pain_payee
 from kefiya.utils import release_outcome
 from kefiya.utils import resume_point
@@ -675,9 +675,11 @@ class FinTSController(TanSession):
                 title="Kefiya: the parked release could not be answered",
                 message=(
                     "login={0}\n\nThe status query on the parked challenge"
-                    " failed. The challenge has been discarded; the order"
-                    " it belonged to is NOT sent.\n\nWhat the bank said:\n"
-                    "{1}\n\n{2}"
+                    " failed, so what became of the order is NOT known from"
+                    " here. The challenge has been discarded and the order is"
+                    " not marked as sent; whether the bank carried it out has"
+                    " to be read in the online banking."
+                    "\n\nWhat the bank said:\n{1}\n\n{2}"
                 ).format(self.kefiya_login.name, said, frappe.get_traceback()),
                 reference_doctype="Kefiya Login",
                 reference_name=self.kefiya_login.name,
@@ -703,13 +705,14 @@ class FinTSController(TanSession):
     def _forget_client_state(self):
         """Drop the stored connection state of this login and its siblings.
 
-        The siblings matter: the state is shared across the logins of one bank
-        access, so leaving theirs in place would hand the same unusable state
-        straight back on the next attempt through any of them.
+        The siblings matter: the state belongs to the bank access, not to
+        the one login, and _seed_client_state_from_sibling hands the
+        freshest copy to whichever login has none. Clearing one row would
+        fetch the same unusable state straight back from the one next door.
 
-        Both ends write the same field list -- fints_state_fields.CLEARED --
-        because they had drifted apart, and the raw one wrote None into a
-        Check column, which MariaDB refuses. See that module.
+        Which fields that is, and the discard itself, live on the document:
+        the button "Reset Connection" has to do exactly the same thing, and
+        for a while it did not -- it cleared one row of fifteen.
 
         :return: True when the state is really gone, False when it could not
             be written. The caller says different things in the two cases: a
@@ -718,25 +721,10 @@ class FinTSController(TanSession):
             that sentence for a day.
         """
         try:
-            for field, value in fints_state_fields.CLEARED.items():
-                self.kefiya_login.set(field, value)
+            self.kefiya_login.discard_connection_state()
             self.kefiya_login.save()
-
-            # The siblings share this state -- _seed_client_state_from_sibling
-            # hands the freshest one to whichever login has none. Clearing only
-            # this login would fetch the same unusable state straight back from
-            # the one next door.
-            filters = self._sibling_login_filters()
-            if filters:
-                filters["stored_client_state"] = ("is", "set")
-                for row in frappe.get_all("Kefiya Login", filters=filters,
-                                          fields=["name"],
-                                          limit_page_length=0):
-                    frappe.db.set_value(
-                        "Kefiya Login", row["name"],
-                        fints_state_fields.cleared(),
-                        update_modified=False)
-
+            # The throw that follows rolls the transaction back; without
+            # this the discarded state comes back with it.
             frappe.db.commit()
             return True
         except Exception:
@@ -805,18 +793,16 @@ class FinTSController(TanSession):
 
     def _sibling_login_filters(self):
         """Filters selecting the OTHER Kefiya Logins that share this login's
-        bank credentials (same BLZ + FinTS login) -- i.e. the same online-banking
-        access, just mapped to different bank accounts. Returns None when this
-        login has no usable credentials yet."""
-        blz = self.kefiya_login.blz
-        fints_login = self.kefiya_login.fints_login
-        if not (blz and fints_login):
-            return None
-        return {
-            "name": ("!=", self.kefiya_login.name),
-            "blz": blz,
-            "fints_login": fints_login,
-        }
+        bank credentials (same BLZ + FinTS login) -- i.e. the same
+        online-banking access, just mapped to different bank accounts.
+        Returns None when this login has no usable credentials yet.
+
+        The rule itself is in login_siblings, frappe-free, because the
+        document needs the same one for "Reset Connection".
+        """
+        return login_siblings.same_access(
+            self.kefiya_login.name, self.kefiya_login.blz,
+            self.kefiya_login.fints_login)
 
     def _seed_client_state_from_sibling(self):
         """If this login has no stored FinTS client state, borrow the freshest

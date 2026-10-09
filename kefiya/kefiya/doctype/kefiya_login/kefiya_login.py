@@ -11,17 +11,59 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils.password import decrypt, encrypt
 
-from kefiya.utils import login_siblings
+from kefiya.utils import fints_state_fields, login_siblings
 
 class KefiyaLogin(Document):
-    def clear_fints_caches(self):
-        self.stored_client_blob = None
-        self.stored_dialog_blob = None
-        self.stored_tan_blob = None
-        self.stored_tan_state_decoupled = None
-        self.stored_vop_id_blob = None
-        self.stored_gateway_blob = None
-        self.clear_vop_state()
+    def sibling_logins(self):
+        """Die anderen Logins desselben Bankzugangs.
+
+        Ein Zugang -- eine Kennung, eine PIN -- traegt in kefiya je Konto
+        ein eigenes Login. Der gespeicherte Verbindungszustand gehoert aber
+        dem Zugang und nicht dem einzelnen Login: er wird unter den
+        Geschwistern weitergereicht, damit eine TAN alle Konten freischaltet.
+        """
+        filters = login_siblings.same_access(
+            self.name, self.blz, self.fints_login)
+        if not filters:
+            return []
+        return [row["name"] for row in frappe.get_all(
+            "Kefiya Login", filters=filters, fields=["name"],
+            limit_page_length=0)]
+
+    def discard_connection_state(self, siblings=True):
+        """Den gespeicherten Verbindungszustand wegwerfen.
+
+        Bei den Geschwistern mit, denn dort liegt derselbe. Wer nur diese
+        eine Zeile leert, bekommt beim naechsten Abruf denselben Zustand
+        vom Nachbarn zurueckgereicht -- _seed_client_state_from_sibling
+        holt die frischeste Kopie, die es findet. Genau darum ging
+        "Verbindung zuruecksetzen" ins Leere, solange es ein Login anfasste
+        und der Zustand fuenfzehn gehoerte.
+
+        Welche Felder das sind, steht in fints_state_fields.CLEARED, mit
+        den Werten, die die Spalte auch annimmt. Was dem Konto gehoert --
+        account_iban, iban_list -- bleibt stehen: sonst verloere ein
+        Geschwister-Login, welches Konto es abruft.
+
+        Gespeichert wird hier nichts. Das eigene Dokument braucht noch ein
+        save(); die Geschwister sind bereits geschrieben.
+        """
+        for fieldname, value in fints_state_fields.CLEARED.items():
+            self.set(fieldname, value)
+        if not siblings:
+            return
+        for name in self.sibling_logins():
+            frappe.db.set_value("Kefiya Login", name,
+                                fints_state_fields.cleared(),
+                                update_modified=False)
+
+    def clear_fints_caches(self, siblings=False):
+        """Den Verbindungszustand wegwerfen und dazu, was nur ein Mensch
+        wegwerfen darf: die Kontenliste der Bank und das Konto, das dieses
+        Login abruft. Die beiden bleiben bei den Geschwistern stehen, auch
+        wenn deren Zustand mitgeht.
+        """
+        self.discard_connection_state(siblings=siblings)
         self.iban_list = None
         self.account_iban = None
 
@@ -135,8 +177,11 @@ class KefiyaLogin(Document):
 
     @frappe.whitelist(allow_guest=False)
     def reset_connection(self):
+        """Der Knopf am Bankzugang. Er raeumt den ganzen Zugang auf, nicht
+        nur diese Zeile -- sonst reicht der naechste Abruf den verworfenen
+        Zustand vom Nachbar-Login zurueck."""
         frappe.has_permission(ptype="write", doc=self, throw=True)
-        self.clear_fints_caches()
+        self.clear_fints_caches(siblings=True)
         self.save()
 
     @frappe.whitelist(allow_guest=False)

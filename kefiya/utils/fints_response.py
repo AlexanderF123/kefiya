@@ -50,27 +50,83 @@ _RANK = {UNKNOWN: 0, SUCCESS: 1, WARNING: 2, ERROR: 3}
 _BY_FIRST_DIGIT = {"0": SUCCESS, "3": WARNING, "9": ERROR}
 
 
+def _entries_of(response):
+    """The HIRMS lines, however the library is handing them out.
+
+    python-fints keeps them in two places, and they do not look alike:
+
+        TransactionResponse.responses       a list
+        FinTSInstituteMessage.responses()   a METHOD
+
+    ``getattr(x, "responses", None) or []`` lets the method through, because
+    a method is truthy. On 08. and 09.10.2026 the question "did the bank
+    refuse this order?" then ended in
+
+        TypeError: 'method' object is not iterable
+
+    and the caller read that crash as "the status query failed" and told the
+    user the order was NOT sent -- four times, while the bank's own answer
+    sat next to it in the same log entry.
+
+    The module header promises that an answer this cannot read becomes
+    UNKNOWN and blocks nothing. Until here that promise was prose. This
+    returns a list in every case, an empty one included.
+    """
+    try:
+        # getattr itself, because .responses can be a property -- and a
+        # property is a piece of library code that may object to being
+        # read on the object in front of it.
+        raw = getattr(response, "responses", None)
+    except Exception:
+        return []
+    if callable(raw):
+        try:
+            raw = raw()
+        except Exception:
+            return []
+    if raw is None:
+        return []
+    try:
+        return list(raw)
+    except TypeError:
+        return []
+
+
 def verdict_of(response):
     """Everything the bank said, as plain data.
 
     Defensive by design: a NeedTANResponse carries none of this, and a future
     library version may name it differently. An answer this cannot read is
     UNKNOWN, which the caller treats exactly as it treated every response
-    before this module existed -- it blocks nothing.
+    before this module existed -- it blocks nothing. Nothing in here may
+    raise: what reads this decides whether a payment is reported as sent, and
+    an exception on the way is read as a failure of the bank dialog.
 
-    :return: {"status", "lines": [{"code", "text"}]}
+    :return: {"status", "lines": [{"code", "reference", "text", "detail"}]}
     """
     lines = []
-    for entry in (getattr(response, "responses", None) or []):
-        code = _text(getattr(entry, "code", None))
-        text = _text(getattr(entry, "text", None))
-        # A HIRMS line is code / reference_element / text / parameters, and
-        # the parameters are where an institute puts the part that actually
-        # helps -- which field it objected to, which limit was exceeded. The
-        # text alone is often only "Ungueltige Auftragsdaten".
-        detail = _text(getattr(entry, "parameters", None))
+    for entry in _entries_of(response):
+        try:
+            code = _text(getattr(entry, "code", None))
+            text = _text(getattr(entry, "text", None))
+            # A HIRMS line is code / reference_element / text / parameters,
+            # and the parameters are where an institute puts the part that
+            # actually helps -- which field it objected to, which limit was
+            # exceeded. The text alone is often only "Ungueltige
+            # Auftragsdaten".
+            detail = _text(getattr(entry, "parameters", None))
+            # WHICH segment the code is about. Kept because leaving it out
+            # cost half a day: a release answered "0020 Der Auftrag wurde
+            # ausgefuehrt", which was read as the transfer having gone
+            # through. It belonged to the status query segment. The code
+            # alone cannot say which; the reference element can.
+            reference = _text(getattr(entry, "reference_element", None))
+        except Exception:
+            # A line this cannot read is one line less, not a failed dialog.
+            continue
         if code or text:
-            lines.append({"code": code, "text": text, "detail": detail})
+            lines.append({"code": code, "text": text, "detail": detail,
+                          "reference": reference})
 
     return {"status": _worst(response, lines), "lines": lines}
 
@@ -128,6 +184,12 @@ def as_text(verdict, limit=6):
         detail = line.get("detail")
         if detail and detail not in said:
             said = "{0} ({1})".format(said, detail)
+        # Which segment it is about, where the bank said so. "0020 Der
+        # Auftrag wurde ausgefuehrt" reads like the transfer and can mean
+        # the status query; without this there is no way to tell them apart.
+        reference = line.get("reference")
+        if reference:
+            said = "{0} [Segment {1}]".format(said, reference)
         out.append(said)
     return "\n".join(o for o in out if o)
 

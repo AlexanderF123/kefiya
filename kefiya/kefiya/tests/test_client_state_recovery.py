@@ -92,24 +92,69 @@ class TestAPoisonedStateDiscardsItself(unittest.TestCase):
     def test_the_siblings_lose_it_too(self):
         """They share the state, so clearing one hands it straight back."""
         body = _block(self.py, "_forget_client_state")
-        self.assertIn("_sibling_login_filters()", body)
-        self.assertIn("stored_client_state", body)
+        self.assertIn("self.kefiya_login.discard_connection_state()", body)
+        doc = _read("kefiya", "doctype", "kefiya_login", "kefiya_login.py")
+        self.assertIn("self.sibling_logins()",
+                      _block(doc, "discard_connection_state"))
 
-    def test_both_ends_write_the_same_fields(self):
+    def test_one_list_for_both_ends(self):
         """They had drifted apart, and the raw one wrote None into a Check
         column -- MariaDB refuses that, and the discard broke off with
         error 1048 while an order was already on the wire. One list now, in
         fints_state_fields, checked against the doctype without a bench."""
-        body = _block(self.py, "_forget_client_state")
-        self.assertIn("fints_state_fields.CLEARED", body)
-        self.assertIn("fints_state_fields.cleared()", body)
-        self.assertNotIn('"stored_tan_state_decoupled": None', body)
+        doc = _read("kefiya", "doctype", "kefiya_login", "kefiya_login.py")
+        verwerfen = _block(doc, "discard_connection_state")
+        self.assertIn("fints_state_fields.CLEARED", verwerfen)
+        self.assertIn("fints_state_fields.cleared()", verwerfen)
+        self.assertNotIn('"stored_tan_state_decoupled": None', verwerfen)
+
 
     def test_the_discard_is_committed(self):
         """The throw that follows rolls the transaction back; without its own
         commit the discarded state comes back with it."""
         body = _block(self.py, "_forget_client_state")
         self.assertIn("frappe.db.commit()", body)
+
+
+class TestTheButtonDoesTheSameThing(unittest.TestCase):
+    """"Reset Connection" cleared one row of fifteen. The state belongs to
+    the bank access, so the next fetch borrowed the discarded one back from
+    a sibling (_seed_client_state_from_sibling) and the button looked like
+    it had done nothing. Both ends now take the same route."""
+
+    def setUp(self):
+        self.doc = _read("kefiya", "doctype", "kefiya_login",
+                         "kefiya_login.py")
+
+    def test_the_button_reaches_the_siblings(self):
+        self.assertIn("siblings=True", _block(self.doc, "reset_connection"))
+
+    def test_and_the_selection_rule_is_shared(self):
+        """One rule for what a sibling is -- in login_siblings, frappe-free,
+        so the document and the controller ask the same question."""
+        self.assertIn("login_siblings.same_access(",
+                      _block(self.doc, "sibling_logins"))
+        controller = _read("utils", "fints_controller.py")
+        self.assertIn("login_siblings.same_access(",
+                      _block(controller, "_sibling_login_filters"))
+
+    def test_but_the_account_of_a_sibling_stays(self):
+        """account_iban says which account a login fetches. Pulling it out
+        from under a sibling would break it. clear_fints_caches may do it
+        to this one row, because a person pressed the button -- and that is
+        why it lives there and not in discard_connection_state."""
+        from kefiya.utils import fints_state_fields
+        self.assertNotIn("account_iban", fints_state_fields.CLEARED)
+        self.assertNotIn("iban_list", fints_state_fields.CLEARED)
+        leeren = _block(self.doc, "clear_fints_caches")
+        self.assertIn("self.account_iban = None", leeren)
+        self.assertIn("self.iban_list = None", leeren)
+        # Auf die Zuweisung, nicht auf den Namen: der Docstring dort
+        # erklaert gerade, warum account_iban stehen bleibt, und ein Test,
+        # der den Namen sucht, findet die Erklaerung statt des Codes.
+        verwerfen = _block(self.doc, "discard_connection_state")
+        self.assertNotIn("self.account_iban =", verwerfen)
+        self.assertNotIn("self.iban_list =", verwerfen)
 
 
 class TestTheMessageSaysWhatReallyHappened(unittest.TestCase):
