@@ -13,92 +13,116 @@ Auftrag dreimal ab, jedes Mal erst nach der Freigabe in der Banking-App::
 ``9050`` beanstandet die NACHRICHT, nicht die Auftragsdaten -- das waere
 9210. Die Nachricht war gueltiges ISO-XML; ``sepa.export(validate=True)``
 hatte sie gegen das Schema geprueft und durchgelassen. ``Max140Text`` laesst
-jedes Unicode-Zeichen zu, die Regeln der Deutschen Kreditwirtschaft nicht.
-Das unterscheidende Zeichen war ein Eurozeichen.
+jedes Unicode-Zeichen zu, die Bank nicht.
 
-KORRIGIERT, NICHT ABGELEHNT. Die erste Fassung dieses Moduls lehnte den
-Auftrag ab und nannte den Vorschlag in der Meldung -- aus der Haltung, dass
-aus einem Zeichen, das jemand freigegeben hat, nicht stillschweigend ein
-anderes wird. Der Nutzer hat anders entschieden: korrigiert wird
-automatisch, und zwar bei der Erfassung.
+WAS WIRKLICH ERLAUBT IST. Die erste Fassung dieser Regel nahm den
+Zeichensatz der Spezifikation und schrieb Umlaute zu "ae oe ue" um. Das war
+falsch -- nicht gefaehrlich, aber unnoetig, und es verunstaltete jeden
+zweiten Verwendungszweck. Entschieden hat es die Bank, nicht die
+Spezifikation: 60.000 Buchungen dieser Instanz, Zeichen fuer Zeichen
+gezaehlt, und zwar getrennt nach Richtung. Was in einem EINGEHENDEN
+Verwendungszweck steht, hat die Bank eines Fremden durch das SEPA-Netz
+geschickt und unsere Bank zugestellt -- ein Zeuge, den niemand
+herbeigeredet hat::
 
-Das ist die Stelle, an der es auch hingehoert. Korrigiert wird, WAEHREND der
-Auftrag noch ein Entwurf ist und der Text vor den Augen dessen steht, der
-ihn freigibt -- nicht zwischen Freigabe und Bank. Was geaendert wurde, wird
-beim Speichern gemeldet; stillschweigend ist hier nichts.
+    Zeichen   Eingang   Ausgang   Gegenseitenname
+    ---------------------------------------------
+    Ue          1728      4011         53
+    ss          1261      1112       2784
+    ue          1446      1942       1044
+    ae           580       388        986
+    oe           175       117        445
+    Ae           114       477         50
+    Oe            25        13         55
+    &             23        26       1136
+    %            169      1030          0
+    *              1        13          0
+    =              0        12          0
+    _              0         2          0
+    >              0         2          0
 
-DIE REGEL. Erlaubt ist der Zeichensatz der DK:
+Und das Eurozeichen: **null** von 60.000. Steuerzeichen ebenfalls null. Der
+eine Auftrag, der ein Eurozeichen trug, ist der eine, den die Bank abgelehnt
+hat.
+
+DIE REGEL, die daraus folgt. Erlaubt ist der SEPA-Grundzeichensatz
 
     a-z A-Z 0-9 und  / - ? : ( ) . , ' +  und das Leerzeichen
 
-Alles andere wird ersetzt. Wofuer es einen Namen gibt, bekommt den Namen --
-"ue" fuer "ue", "EUR" fuer das Eurozeichen; was keinen hat, wird ein
-Leerzeichen, so wie gewuenscht. Mehrfache Leerzeichen fallen danach
-zusammen, damit aus einem geloeschten Zeichen keine Luecke bleibt.
+und dazu, was die Messung in BEIDEN Richtungen tausendfach zeigt: die
+deutschen Umlaute, das scharfe s, das Kaufmanns-Und und das Prozentzeichen.
+Die bleiben stehen, wie sie sind.
 
-WAS DIE MESSUNG DAZU SAGT. Von 14 Auftraegen dieser Instanz trugen 13
-Umlaute oder ein scharfes s, und alle 13 hat die Bank ausgefuehrt -- die
-Umlaute MUESSEN also nicht weg. Sie werden trotzdem umgeschrieben, weil es
-so gewuenscht ist und weil es dem DK-Zeichensatz entspricht. Nur das
-Eurozeichen musste weg; es liegt bei U+20AC und damit ausserhalb von
-Latin-1.
+WARUM * = _ > TROTZDEM NICHT. Sie sind aufgetaucht, aber nur in unseren
+eigenen abgehenden Texten und zwolf-, zwei-, zweimal. Hier sind die beiden
+Fehler nicht gleich teuer: ein Zeichen zu Unrecht durchzulassen kostet einen
+abgelehnten Auftrag, nachdem eine TAN darauf verbraucht ist -- genau der
+Schmerz, um den es hier geht. Ein Zeichen zu Unrecht zu ersetzen kostet
+einen leicht veraenderten Verwendungszweck. Wo der Zeuge duenn ist, wird der
+billigere Fehler gemacht.
 
-EIN PUNKT ZUM EMPFAENGERNAMEN. Die Bank prueft ihn gegen den Namen des
-Kontoinhabers (Verification of Payee). "Mueller" gegen "Mueller" ist eine
-Annaeherung, keine Gleichheit -- die Bank kann daraufhin eine Bestaetigung
-verlangen. Das tut sie auch sonst, und fints_vop beantwortet es; siehe
-payee_check, das Umlaute aus genau diesem Grund NICHT zusammenfaltet.
+KORRIGIERT, NICHT ABGELEHNT, und zwar bei der Erfassung -- waehrend der
+Auftrag ein Entwurf ist und der Text vor den Augen dessen steht, der ihn
+freigibt. Nicht beim Senden: dort laege die Aenderung zwischen Freigabe und
+Bank. Was geaendert wurde, meldet validate beim Speichern; automatisch
+heisst nicht stillschweigend.
 
 Ohne frappe, aus demselben Grund wie fints_response: die Regel entscheidet
 mit, ob eine Zahlung herausgeht, und eine Regel, die nur gegen eine echte
 Bank laeuft, laeuft nie.
 """
 
-#: Der Zeichensatz der Deutschen Kreditwirtschaft fuer pain.001-Texte.
-ERLAUBT = frozenset(
+#: Der SEPA-Grundzeichensatz.
+_GRUND = (
     "abcdefghijklmnopqrstuvwxyz"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "0123456789"
     "/-?:().,'+ "
 )
 
+#: Was die Messung dazu erlaubt: beide Richtungen, tausendfach.
+#: Umlaute und scharfes s 21.000-mal, das Und 2.400-mal (davon 1.136 in
+#: Namen von Gegenseiten), das Prozentzeichen 1.200-mal.
+_GEMESSEN = "\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df&%"
+
+ERLAUBT = frozenset(_GRUND + _GEMESSEN)
+
 #: Zeichen, fuer die es einen Namen gibt, den die Bank tragen kann. Laenger
-#: als ein Zeichen sein zu duerfen ist der Punkt: "ue" ist die Antwort auf
-#: "ue", nicht "u".
+#: als ein Zeichen sein zu duerfen ist der Punkt: "EUR" ist die Antwort auf
+#: das Eurozeichen, nicht "E".
+#:
+#: Keines davon kommt in 60.000 Buchungen vor -- es gibt also keinen Zeugen
+#: dafuer, dass das Netz sie traegt. Die Buchstaben mit Akzent bekommen den
+#: Buchstaben ohne; das ist naeher am Gemeinten als ein Leerzeichen.
 ERSATZ = {
-    "ä": "ae", "ö": "oe", "ü": "ue",
-    "Ä": "Ae", "Ö": "Oe", "Ü": "Ue",
-    "ß": "ss",
-    "á": "a", "à": "a", "â": "a", "å": "a", "ã": "a",
-    "é": "e", "è": "e", "ê": "e", "ë": "e",
-    "í": "i", "ì": "i", "î": "i", "ï": "i",
-    "ó": "o", "ò": "o", "ô": "o", "õ": "o", "ø": "o",
-    "ú": "u", "ù": "u", "û": "u",
-    "ý": "y", "ÿ": "y",
-    "ç": "c", "ñ": "n",
-    "Á": "A", "À": "A", "Â": "A", "Å": "A", "Ã": "A",
-    "É": "E", "È": "E", "Ê": "E", "Ë": "E",
-    "Í": "I", "Ì": "I", "Î": "I", "Ï": "I",
-    "Ó": "O", "Ò": "O", "Ô": "O", "Õ": "O", "Ø": "O",
-    "Ú": "U", "Ù": "U", "Û": "U",
-    "Ç": "C", "Ñ": "N",
-    "æ": "ae", "Æ": "Ae",
-    "€": "EUR",   # der Fund vom 09.10.2026
-    "£": "GBP",
+    "\u20ac": "EUR",   # null von 60.000, und der eine abgelehnte Auftrag
+    "\u00a3": "GBP",
     "$": "USD",
-    "&": "und",
-    "%": "Prozent",
-    "§": "Par.",
-    "–": "-", "—": "-", "−": "-",
-    "‘": "'", "’": "'", "‚": "'", "´": "'", "`": "'",
-    "“": "'", "”": "'", "„": "'", '"': "'",
-    "«": "'", "»": "'",
-    "…": "...",
-    "°": "Grad",
-    "•": "-",
-    "½": "1/2", "¼": "1/4", "¾": "3/4",
-    "²": "2", "³": "3",
-    " ": " ", " ": " ", " ": " ", "​": " ",
+    "\u00a7": "Par.",
+    "\u00b0": "Grad",
+    "\u00e1": "a", "\u00e0": "a", "\u00e2": "a", "\u00e5": "a", "\u00e3": "a",
+    "\u00e9": "e", "\u00e8": "e", "\u00ea": "e", "\u00eb": "e",
+    "\u00ed": "i", "\u00ec": "i", "\u00ee": "i", "\u00ef": "i",
+    "\u00f3": "o", "\u00f2": "o", "\u00f4": "o", "\u00f5": "o", "\u00f8": "o",
+    "\u00fa": "u", "\u00f9": "u", "\u00fb": "u",
+    "\u00fd": "y", "\u00ff": "y",
+    "\u00e7": "c", "\u00f1": "n",
+    "\u00c1": "A", "\u00c0": "A", "\u00c2": "A", "\u00c5": "A", "\u00c3": "A",
+    "\u00c9": "E", "\u00c8": "E", "\u00ca": "E", "\u00cb": "E",
+    "\u00cd": "I", "\u00cc": "I", "\u00ce": "I", "\u00cf": "I",
+    "\u00d3": "O", "\u00d2": "O", "\u00d4": "O", "\u00d5": "O", "\u00d8": "O",
+    "\u00da": "U", "\u00d9": "U", "\u00db": "U",
+    "\u00c7": "C", "\u00d1": "N",
+    "\u00e6": "ae", "\u00c6": "Ae",
+    "\u2013": "-", "\u2014": "-", "\u2212": "-",
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u00b4": "'", "`": "'",
+    "\u201c": "'", "\u201d": "'", "\u201e": "'", '"': "'",
+    "\u00ab": "'", "\u00bb": "'",
+    "\u2026": "...",
+    "\u2022": "-",
+    "\u00bd": "1/2", "\u00bc": "1/4", "\u00be": "3/4",
+    "\u00b2": "2", "\u00b3": "3",
+    "\u00a0": " ", "\u2009": " ", "\u202f": " ", "\u200b": " ",
 }
 
 #: Wie ein Steuerzeichen heisst, wenn eine Meldung es nennen muss. Es
@@ -124,7 +148,8 @@ def clean(text):
 
     Zweimal angewandt kommt dasselbe heraus wie einmal: der Auftrag wird bei
     jedem Speichern geprueft, und ein Text, der sich dabei jedes Mal weiter
-    veraendert, waere nicht mehr der, den jemand freigegeben hat.
+    veraendert, waere nach dem dritten Speichern nicht mehr der, den jemand
+    freigegeben hat.
     """
     raus = []
     for zeichen in str(text or ""):
@@ -138,7 +163,7 @@ def clean(text):
 
 
 def changed(text):
-    """Hat clean() etwas zu tun? Ohne den Text zweimal zu bauen."""
+    """Hat clean() etwas zu tun?"""
     text = str(text or "")
     return clean(text) != text
 
@@ -179,4 +204,3 @@ def complaint(text):
         teile.append("{0} -> {1}".format(
             sichtbar, ersatz if ersatz.strip() else "Leerzeichen"))
     return ", ".join(teile)
-

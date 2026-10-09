@@ -32,30 +32,75 @@ TRANSFER = (WURZEL / "kefiya/kefiya/doctype/kefiya_transfer"
 #: Der Verwendungszweck, den die Bank dreimal abgelehnt hat.
 ABGELEHNT = "1 TZ. Kaution abzügl. 400€ für BK25/BK26"
 
-#: Echte Texte aus den 14 Auftraegen dieser Instanz.
+#: Echte Texte aus den 14 Auftraegen dieser Instanz. Die Umlaute bleiben
+#: stehen -- die Bank hat sie dreizehnmal ausgefuehrt.
 GELAUFEN = {
     "Reisekosten BT-0001 Alexander Finkeißen":
-        "Reisekosten BT-0001 Alexander Finkeissen",
+        "Reisekosten BT-0001 Alexander Finkeißen",
     "Teilrückzahlung Darlehen AF an Sofienstraße GmbH u Co KG":
-        "Teilrueckzahlung Darlehen AF an Sofienstrasse GmbH u Co KG",
+        "Teilrückzahlung Darlehen AF an Sofienstraße GmbH u Co KG",
+    "1. TZ Kaution, abzüglich Mietschulden 24,25,26":
+        "1. TZ Kaution, abzüglich Mietschulden 24,25,26",
+    # Der eine mit einem Zeilenumbruch -- die Volksbank hat ihn geschluckt,
+    # richtig wird er davon nicht: in 60.000 Buchungen kommt keiner vor.
     "St.-Nr.: 143-123-91024\nBauleistungssteuer\nSeptember 2026":
         "St.-Nr.: 143-123-91024 Bauleistungssteuer September 2026",
 }
 
 
 class TestDasEurozeichen(unittest.TestCase):
+    """Null von 60.000 Buchungen -- und der eine Auftrag, der es trug, ist
+    der eine, den die Bank abgelehnt hat."""
 
     def test_es_wird_EUR(self):
-        self.assertEqual(sepa_text.clean(ABGELEHNT),
-                         "1 TZ. Kaution abzuegl. 400EUR fuer BK25/BK26")
+        self.assertEqual(
+            sepa_text.clean(ABGELEHNT),
+            "1 TZ. Kaution abzügl. 400EUR für BK25/BK26")
+
+    def test_und_sonst_bleibt_der_text_wie_er_war(self):
+        """Nur das Eurozeichen war das Problem. Die Umlaute im selben Satz
+        hat dieselbe Bank auf demselben Konto zweimal ausgefuehrt."""
+        self.assertIn("abzügl.", sepa_text.clean(ABGELEHNT))
+        self.assertIn("für", sepa_text.clean(ABGELEHNT))
 
     def test_und_der_text_ist_danach_sendbar(self):
         self.assertEqual(sepa_text.unsendable(sepa_text.clean(ABGELEHNT)), [])
 
-    def test_die_meldung_nennt_beides(self):
-        satz = sepa_text.complaint(ABGELEHNT)
-        self.assertIn("€ -> EUR", satz)
-        self.assertIn("ü -> ue", satz)
+    def test_die_meldung_nennt_es(self):
+        self.assertEqual(sepa_text.complaint(ABGELEHNT), "€ -> EUR")
+
+
+class TestWasDieMessungErlaubt(unittest.TestCase):
+    """Beide Richtungen, tausendfach. Ein EINGEHENDER Verwendungszweck ist
+    der Zeuge, den niemand herbeigeredet hat: die Bank eines Fremden hat ihn
+    durch das Netz geschickt und unsere Bank hat ihn zugestellt."""
+
+    def test_umlaute_und_scharfes_s(self):
+        text = "äöüÄÖÜß"
+        self.assertEqual(sepa_text.clean(text), text)
+        self.assertEqual(sepa_text.unsendable(text), [])
+
+    def test_kaufmanns_und(self):
+        """1.136-mal allein in Namen von Gegenseiten."""
+        self.assertEqual(sepa_text.clean("Müller & Söhne GmbH"),
+                         "Müller & Söhne GmbH")
+
+    def test_prozentzeichen(self):
+        self.assertEqual(sepa_text.clean("Mietminderung 15 %"),
+                         "Mietminderung 15 %")
+
+
+class TestWoDerZeugeDuennIst(unittest.TestCase):
+    """* = _ > sind aufgetaucht, aber nur in unseren eigenen abgehenden
+    Texten und dreizehn-, zwoelf-, zwei-, zweimal. Hier sind die beiden
+    Fehler nicht gleich teuer: zu Unrecht durchgelassen kostet einen
+    abgelehnten Auftrag nach verbrauchter TAN, zu Unrecht ersetzt einen
+    leicht veraenderten Verwendungszweck. Der billigere Fehler gewinnt."""
+
+    def test_sie_werden_ersetzt(self):
+        for zeichen in "*=_>":
+            self.assertNotIn(zeichen, sepa_text.clean("a" + zeichen + "b"),
+                             zeichen)
 
 
 class TestDieEchtenTexte(unittest.TestCase):
@@ -107,6 +152,11 @@ class TestNotfallsEinLeerzeichen(unittest.TestCase):
         self.assertIn("Zeilenumbruch -> Leerzeichen",
                       sepa_text.complaint("a\nb"))
 
+    def test_und_akzente_bekommen_den_buchstaben(self):
+        """Naeher am Gemeinten als ein Leerzeichen -- und in 60.000
+        Buchungen kommt kein einziger Akzent vor."""
+        self.assertEqual(sepa_text.clean("Café Niño"), "Cafe Nino")
+
 
 class TestKeineLuecken(unittest.TestCase):
 
@@ -117,7 +167,7 @@ class TestKeineLuecken(unittest.TestCase):
         self.assertEqual(sepa_text.clean("  Miete  "), "Miete")
 
 
-class TestDerErlaubteZeichensatz(unittest.TestCase):
+class TestDerGrundzeichensatz(unittest.TestCase):
     """a-z A-Z 0-9 und / - ? : ( ) . , ' + und das Leerzeichen."""
 
     def test_was_erlaubt_ist_bleibt_unberuehrt(self):
@@ -129,6 +179,10 @@ class TestDerErlaubteZeichensatz(unittest.TestCase):
     def test_und_nichts_davon_wird_beanstandet(self):
         self.assertEqual(sepa_text.unsendable("Rg-Nr. 12/3 (A,B): 4+5 'x'?"),
                          [])
+
+    def test_auch_nicht_mit_umlauten(self):
+        self.assertEqual(
+            sepa_text.unsendable("Miete für Oktober, Straße 5"), [])
 
 
 class TestNichtsGesagtIstNichtsZuTun(unittest.TestCase):
