@@ -29,6 +29,7 @@ from frappe.utils import cint, flt, getdate, now_datetime
 from kefiya.utils import four_eyes
 from kefiya.utils import own_transfer
 from kefiya.utils import pain_dk
+from kefiya.utils import sepa_text
 
 
 def normalize_iban(value):
@@ -72,6 +73,9 @@ class KefiyaTransfer(Document):
             frappe.throw(_("Add at least one payment."))
 
         total = 0
+        # Was an den Texten geaendert wurde, fuer eine Meldung nach
+        # der Schleife: automatisch heisst nicht stillschweigend.
+        corrections = []
         for row in self.items:
             # A row that names one of our own accounts takes its IBAN from
             # there. Filled on the server too, not only in the form: a row can
@@ -93,6 +97,31 @@ class KefiyaTransfer(Document):
                     "Row {0}: amount must be greater than zero."
                 ).format(row.idx))
 
+            # Zeichen, die die Bank in der Nachricht nicht tragen kann,
+            # werden hier korrigiert: bei der Erfassung, solange der Auftrag
+            # ein Entwurf ist und der Text vor den Augen dessen steht, der
+            # ihn freigibt. Nicht beim Senden -- dort laege die Aenderung
+            # zwischen Freigabe und Bank.
+            #
+            # Warum ueberhaupt: die pain.001 ist mit einem Eurozeichen darin
+            # gueltiges ISO-XML, Max140Text laesst jedes Unicode-Zeichen zu.
+            # Die Sparkasse lehnte denselben Auftrag dreimal ab, jedes Mal
+            # erst nach der Freigabe in der App: "9050 Die Nachricht enthaelt
+            # Fehler". Siehe sepa_text.
+            #
+            # Vor dem Kuerzen, nicht danach: aus einem Zeichen koennen drei
+            # werden ("EUR"), und abgeschnitten wird, was am Ende zu lang ist.
+            for feld in ("purpose", "recipient_name"):
+                vorher = row.get(feld)
+                if not vorher:
+                    continue
+                nachher = sepa_text.clean(vorher)
+                if nachher == vorher:
+                    continue
+                row.set(feld, nachher)
+                corrections.append((row.idx, feld,
+                                    sepa_text.complaint(vorher)))
+
             # The SEPA purpose field is capped at 140 characters; truncate here
             # rather than letting the bank reject the whole order.
             if row.purpose:
@@ -102,6 +131,17 @@ class KefiyaTransfer(Document):
 
         self.total_amount = total
         self.payment_count = len(self.items)
+
+        # Gesagt, was geschehen ist. Ein Auftrag, dessen Verwendungszweck
+        # sich beim Speichern geaendert hat, ohne dass es jemand erfaehrt,
+        # ist ein Auftrag, den niemand mehr gelesen hat.
+        if corrections:
+            frappe.msgprint(
+                "<br>".join(
+                    _("Row {0}, {1}: {2}").format(idx, feld, geaendert)
+                    for idx, feld, geaendert in corrections),
+                title=_("Text adjusted for the bank"),
+                indicator="orange")
 
         # Paying the account the money is drawn from. The bank refuses it as
         # well -- but only after the order went out and a TAN was spent on it.
@@ -468,6 +508,29 @@ def build_pain001_for(docs):
             frappe.throw(_(
                 "{0} row {1}: amount must be greater than zero."
             ).format(doc.name, row.idx))
+        # Zeichen, die die Bank in der Nachricht nicht tragen kann. Die
+        # pain.001 ist dann gueltiges ISO-XML -- Max140Text laesst jedes
+        # Unicode-Zeichen zu -- und die Bank lehnt sie am Schalter ab:
+        # "9050 Die Nachricht enthaelt Fehler", nachdem die Freigabe in der
+        # App schon gegeben war. Dreimal fuer denselben Auftrag am 08. und
+        # 09.10.2026, und das unterscheidende Zeichen war ein Eurozeichen.
+        #
+        # Abgelehnt, nicht umgeschrieben: der Vorschlag steht in der
+        # Meldung, die Entscheidung bleibt bei dem, der den Auftrag
+        # freigegeben hat. Siehe sepa_text, auch dafuer, warum Umlaute
+        # durchgehen.
+        for feld, wert in (("purpose", row.purpose),
+                           ("recipient_name", row.recipient_name)):
+            beanstandet = sepa_text.complaint(wert)
+            if not beanstandet:
+                continue
+            frappe.throw(_(
+                "{0} row {1}: the bank cannot carry these characters in"
+                " {2}: {3}"
+                "\n\nThe order was NOT sent. Open it and save it once --"
+                " the text is corrected on saving."
+            ).format(doc.name, row.idx, feld, beanstandet),
+                title=_("The bank cannot carry this text"))
         payment = {
             "name": (row.recipient_name or "")[:70],
             "IBAN": normalize_iban(row.recipient_iban),
