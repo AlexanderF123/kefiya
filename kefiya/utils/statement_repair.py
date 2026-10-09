@@ -12,14 +12,14 @@ have paid him.
 
 The shape of it is not "every row landed on one account". It is a cluster:
 
-    Sofienstr. Baukonto Sparkasse   37,418 drafts, 29,693 of them copies
-    Sofienstr. Mietkonto Sparkasse  19,804 drafts, every one a copy
-    Brilu KG Mietkonto Sparkasse     9,291 drafts, every one a copy
-    axessio Hausverwaltung x2       10,959 drafts, every one a copy
+    Baukonto Sparkasse    37,418 drafts, 29,693 of them copies
+    Zweitkonto Sparkasse  19,804 drafts, every one a copy
+    Mietkonto Sparkasse    9,291 drafts, every one a copy
+    two more Sparkasse     10,959 drafts, every one a copy
     ... and four smaller ones
 
-while the largest accounts -- Volksbank Ch & A Finkeissen with 54,647, SKL
-Sparkasse with 31,604, Privatkonto with 18,995 -- have no duplicates at all.
+while the largest accounts -- one Volksbank account with 54,647, a second
+with 31,604, a third with 18,995 -- have no duplicates at all.
 So a blanket deletion of the run would throw away some 130,000 rows that are
 probably right, and that is why this module exists instead.
 
@@ -43,10 +43,10 @@ Two things follow, and the first is not a judgement call at all:
     payments that also appear elsewhere. Its copies go, and every booking
     survives on the account that does have a history.
 
-    For what is left -- mostly Brilu KG Mietkonto against Sofienstrasse
+    For what is left -- mostly Mietkonto against Musterstrasse
     Mietkonto -- the payee decides: whichever of the two accounts has
-    submitted transactions with that counterparty keeps the copy. Vrban:
-    74 real payments from Brilu, 2 from Sofienstrasse. Brilu keeps them.
+    submitted transactions with that counterparty keeps the copy. Novak:
+    74 real payments from Muster, 2 from Musterstrasse. Muster keeps them.
 
 That second rule is an inference and this module says so wherever it reports.
 Where the evidence is silent it falls back to the account with the larger

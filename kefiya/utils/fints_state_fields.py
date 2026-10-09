@@ -21,7 +21,7 @@ hat: ``stored_tan_state_decoupled`` ist ein Check. In MariaDB ist das
     cannot be null")
 
 Am 05.10.2026 brach genau daran das Verwerfen ab, nachdem eine Ueberweisung
-der Brilu KG schon auf der Leitung war. Der Nutzer las "Der gespeicherte
+der Mietkonto schon auf der Leitung war. Der Nutzer las "Der gespeicherte
 Zustand wurde verworfen, der naechste Versuch baut die Verbindung neu auf" --
 verworfen war nichts. Das ``frappe.db.commit()`` am Ende wurde nie erreicht,
 und der ``frappe.throw`` danach drehte auch das zurueck, was das Dokument

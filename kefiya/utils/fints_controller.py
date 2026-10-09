@@ -392,7 +392,7 @@ class FinTSController(TanSession):
                     # fresh login -- but not silently, and not as a success.
                     # This branch wrote nothing anywhere, and send_transfer_tan
                     # then read a constructor that had not raised as a release
-                    # that had gone through: KEF-TRF-2026-00007, 03.09.2026,
+                    # that had gone through: Auftrag A, 03.09.2026,
                     # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
                     # ausgefuehrt". The word below is what the transfer path
                     # reads instead, and the log carries the bank's own
@@ -924,7 +924,7 @@ class FinTSController(TanSession):
                 self.fints_connection.set_tan_medium(m[1][0])
             elif len(m[1]) == 0:
                 # This is a workaround for when the dialog already contains return code 3955.
-                # This occurs with e.g. Sparkasse Heidelberg, which apparently does not require us to choose a
+                # This occurs with e.g. Sparkasse, which apparently does not require us to choose a
                 # medium for pushTAN but is totally fine with keeping "" as a TAN medium.
                 self.fints_connection.selected_tan_medium = ""
             elif tan_medium and tan_medium in [mm.tan_medium_name for mm in m[1]]:

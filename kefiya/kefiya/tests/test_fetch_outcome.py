@@ -6,7 +6,7 @@ stattgefunden hat.
 
 Drei Fehlalarme haben das gekostet. ``ax_bank_transaction_freshness`` meldete
 am 29./23.09.2026 "Bankabruf ohne frische Daten" fuer Privatkonto,
-Geschaeftskonto und Sofienstr. Volksbank. In allen drei Faellen lief der
+Geschaeftskonto und ein Volksbank-Konto. In allen drei Faellen lief der
 Abruf taeglich und einwandfrei -- es lag nur nichts auf den Konten. Der
 Waechter hatte nichts, woran er das haette sehen koennen: am Konto stand kein
 Zeitpunkt eines erfolgreichen Abrufs, nur ``last_fetch_attempt`` am Login, und

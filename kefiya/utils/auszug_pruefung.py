@@ -52,7 +52,7 @@ CENT = Decimal("0.005")
 #: lang fuer einen Block ist, geht mit :62M: zu Ende und mit :60M: im
 #: naechsten Block weiter. Beide Bloecke zusammen sind EIN Blatt -- wer den
 #: ersten wegen des fehlenden :62F: und den zweiten wegen des fehlenden
-#: :60F: verwirft, verliert das ganze Blatt. Auf Konto 33108982 war das der
+#: :60F: verwirft, verliert das ganze Blatt. Auf Konto 7777777 war das der
 #: Jahrgang 2020: 221 Buchungen, und der Auszug schien erst 2021 zu beginnen.
 _SALDO = re.compile(
     r"^:6(?P<art>[02])(?P<schluss>[FM]):(?P<vz>[CD])(?P<tag>\d{6})"
@@ -266,7 +266,7 @@ def fenster(lauf):
        Ob das so ist, sagt das Blatt selbst -- ``erster_tag``.
 
     Vor dieser Regel galt ``anfang_tag < Datum`` fuer jedes Blatt. Auf Konto
-    33108982 fielen damit die Buchungen jedes ersten Tages aus jedem Fenster,
+    7777777 fielen damit die Buchungen jedes ersten Tages aus jedem Fenster,
     und die Pruefung meldete sechs von sechs Jahrgaengen als falsch -- auch
     dort, wo die Buchhaltung stimmte.
 
@@ -336,7 +336,7 @@ def abschnitte(blaetter_eines_kontos):
     und kann fuer seinen eigenen Zeitraum entscheiden.
 
     Der Anlass ist nicht theoretisch: der Auszug des groessten Kontos
-    (33080697, 56.463 Buchungen, 2004 bis 2026) hat genau einen Bruch, und
+    (5555555, 56.463 Buchungen, 2004 bis 2026) hat genau einen Bruch, und
     zwar zwischen einem Fragment vom Dezember 2004 und dem Jahr 2005. Wer
     daraufhin den ganzen Auszug verwirft, wirft einundzwanzig lueckenlose
     Jahre weg, um ein Fragment von 93 Zeilen.

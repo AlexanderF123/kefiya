@@ -8,8 +8,8 @@ Not everything a bank shows under "accounts" is an account you can pay from,
 and the single number the bank reports for it does not always mean the same
 thing. Two entries of one customer make the point:
 
-    Sofie KG Aval VB Kpf ...750    -1.409.672,26
-    Sofie KG Aval VB Kpf ...769      -100.000,00
+    one customer, guarantee line    -1.409.672,26
+    the same customer, a second       -100.000,00
 
 Those are Avale -- guarantee lines. The number is the line, not money on an
 account. Nothing was ever booked there, nothing can be paid from there, and
@@ -19,8 +19,8 @@ loan: the balance moves on the bank's schedule, not through a statement.
 
 Cooperative shares are a third case, and a different one again. The two
 
-    Dr. Alexander Finkeissen ...310    Geschaeftsanteile
-    Maxi ...112                        Geschaeftsanteile
+    one member, share account    Geschaeftsanteile
+    a second member              Geschaeftsanteile
 
 do hold an amount that is really there -- but it is held, not available, and it
 is not the sum of any bookings either. So the amount is worth storing and worth

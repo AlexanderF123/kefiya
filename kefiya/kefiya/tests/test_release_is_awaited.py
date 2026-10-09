@@ -3,7 +3,7 @@
 
 """After a decoupled release, somebody has to ask the bank -- and write it down.
 
-KEF-TRF-2026-00007, 02.09.2026, 16:50:47, read off the stored state:
+Auftrag A, 02.09.2026, 16:50:47, read off the stored state:
 
   1. The Sparkasse accepted the order, passed the payee check, handed over
      a VoP-ID and asked for the release in the S-pushTAN app.
@@ -191,7 +191,7 @@ class TestAReleasedPayeeCheckIsWrittenDown(unittest.TestCase):
     """Der Empfaenger wurde freigegeben, die Bank nahm den Auftrag -- und
     im System stand er weiter als "Empfaengerpruefung offen".
 
-    KEF-TRF-2026-00010, 04.09.2026, 18:42: Die Volksbank nahm die Freigabe
+    Auftrag B, 04.09.2026, 18:42: Die Volksbank nahm die Freigabe
     an und fuehrte die Ueberweisung aus. approve_vop_transfer gab die
     Antwort der Bank zurueck und ruehrte sonst nichts an: Status blieb
     "Freigegeben", vop_pending blieb 1. Das ist genau der Zustand, der zu

@@ -252,7 +252,7 @@ class KefiyaTransfer(Document):
         This used to be filled only when the field was still empty, so a
         company already sitting there survived. A Company link picks up the
         user's session default, so it is rarely empty: an order drawn on the
-        Brilu-Stiftung's account went out carrying "axessio Hausverwaltung
+        Musterstiftung's account went out carrying "Musterverwaltung
         GmbH", and it was a colleague who noticed, not the software.
 
         That is not a label. build_pain001_for() takes the ordering party's

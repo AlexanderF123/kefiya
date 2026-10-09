@@ -77,10 +77,16 @@ class TestTheKeyMayLiveWhereTheInstanceKeepsItsKeys(unittest.TestCase):
 
     def test_this_app_names_nobodys_particular_setup(self):
         """Where the credentials live is a fact about the instance and
-        belongs in its configuration, not in this app."""
-        source = inspect.getsource(ds).lower()
-        for name in ("axessio", "propms"):
-            self.assertNotIn(name, source)
+        belongs in its configuration, not in this app.
+
+        Asked through the guard rather than against a list of names: the
+        list used to stand here in plain text, which put the names it
+        forbids into the repository. See test_no_tenant_data.
+        """
+        from kefiya.kefiya.tests.test_no_tenant_data import (
+            gesperrte_woerter,
+        )
+        self.assertEqual(gesperrte_woerter(inspect.getsource(ds)), [])
 
     def test_an_external_doctype_can_supply_the_key(self):
         source = inspect.getsource(ds._credentials)

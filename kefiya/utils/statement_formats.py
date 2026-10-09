@@ -478,7 +478,7 @@ def wiederholung(reference, ordinal):
     """The reference of the ordinal-th identical entry within one file.
 
     Two bookings can be the same to the last character -- on 30.03.2022 two
-    PayPal debits of 6,42 EUR with the same text, on account 33108982 -- and
+    PayPal debits of 6,42 EUR with the same text, on account 7777777 -- and
     they are two bookings. Under one reference the second read as a repeat
     of the first and was silently dropped: the rebuild booked 1.112 of the
     1.113 rows of that year, and the bank's balance said so.
@@ -506,7 +506,7 @@ def wiederholung(reference, ordinal):
 #
 # What makes it worth the branch is the second line of the file:
 #
-#     :25:67250020/9281703
+#     :25:99999999/3333333
 #
 # The statement names the account it belongs to. That is precisely the fact
 # the old importer did not read -- it booked every row of a portfolio-wide
@@ -524,7 +524,7 @@ _MT940_IBAN = re.compile(r":25:\s*([A-Z]{2}\d{2}[A-Z0-9]{10,30})")
 #: How long an IBAN is in each country. The split below needs it, because an
 #: IBAN and the name behind it are not separated by anything: without a length
 #: the pattern eats the first letters of the name, which is how "Deutsche
-#: Postbank AG" lost its D.
+#: Musterbank AG" lost its D.
 IBAN_LENGTH = {
     "AT": 20, "BE": 16, "BG": 22, "CH": 21, "CY": 28, "CZ": 24, "DE": 22,
     "DK": 18, "EE": 20, "ES": 24, "FI": 18, "FR": 27, "GB": 22, "GR": 27,
@@ -562,7 +562,7 @@ def german_iban(blz, account):
 
     Germany's IBAN is not a lookup, it is a rule: DE, two check digits, the
     eight-digit bank code, the ten-digit account number padded with zeros. So
-    ":25:67250020/9281703" is DE67672500200009281703 and nothing else -- which
+    ":25:99999999/3333333" is DE27999999990003333333 and nothing else -- which
     is what lets an MT940 file address its own Bank Account without anybody
     mapping account numbers by hand.
 
@@ -593,7 +593,7 @@ def mt940_own_iban(text):
 
 
 def _split_iban_and_name(value):
-    """"DE68…468Deutsche Postbank AG" -> ("DE68…468", "Deutsche Postbank AG").
+    """"DE68…468Deutsche Musterbank AG" -> ("DE68…468", "Deutsche Musterbank AG").
 
     The mt940 library concatenates the counterparty's IBAN and name into one
     field, with nothing between them. Left alone the IBAN ends up inside the

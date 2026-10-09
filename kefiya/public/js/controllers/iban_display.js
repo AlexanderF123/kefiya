@@ -3,7 +3,7 @@
 
 // An IBAN as people read it, and an IBAN as machines take it.
 //
-// DE27672500200009355367 is twenty-two characters with no landmarks. Nobody
+// DE89999999990001111111 is twenty-two characters with no landmarks. Nobody
 // checks that against a letter from the bank; the eye slides off it, and a
 // transposed digit pays a stranger. Printed in fours it becomes checkable:
 //

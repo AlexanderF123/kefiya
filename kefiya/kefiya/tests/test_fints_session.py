@@ -53,23 +53,23 @@ class TestAccessKey(unittest.TestCase):
 
     def test_same_access_shares_a_key(self):
         self.assertEqual(
-            fints_controller._access_key(self._login("67092300", "u1")),
-            fints_controller._access_key(self._login("67092300", "u1")),
+            fints_controller._access_key(self._login("88888888", "u1")),
+            fints_controller._access_key(self._login("88888888", "u1")),
         )
 
     def test_two_contracts_at_one_bank_do_not(self):
         """The BLZ alone would merge them and send one contract's requests
         over the other's credentials."""
         self.assertNotEqual(
-            fints_controller._access_key(self._login("67092300", "u1")),
-            fints_controller._access_key(self._login("67092300", "u2")),
+            fints_controller._access_key(self._login("88888888", "u1")),
+            fints_controller._access_key(self._login("88888888", "u2")),
         )
 
     def test_incomplete_credentials_are_never_grouped(self):
         self.assertIsNone(fints_controller._access_key(
             self._login(None, "u1")))
         self.assertIsNone(fints_controller._access_key(
-            self._login("67092300", None)))
+            self._login("88888888", None)))
 
 
 class TestDialogReuse(unittest.TestCase):
