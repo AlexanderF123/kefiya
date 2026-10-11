@@ -502,6 +502,9 @@ def build_pain001_for(docs):
     sepa = SepaTransfer(config, schema="pain.001.001.03", clean=False)
 
     control_sum = 0
+    # Was unterwegs an den Texten geaendert wurde, fuer die
+    # Meldung und die Spur nach der Schleife.
+    korrigiert = []
     for doc, row in rows:
         amount_cents = int(round(flt(row.amount) * 100))
         if amount_cents <= 0:
@@ -515,22 +518,43 @@ def build_pain001_for(docs):
         # App schon gegeben war. Dreimal fuer denselben Auftrag am 08. und
         # 09.10.2026, und das unterscheidende Zeichen war ein Eurozeichen.
         #
-        # Abgelehnt, nicht umgeschrieben: der Vorschlag steht in der
-        # Meldung, die Entscheidung bleibt bei dem, der den Auftrag
-        # freigegeben hat. Siehe sepa_text, auch dafuer, warum Umlaute
-        # durchgehen.
-        for feld, wert in (("purpose", row.purpose),
-                           ("recipient_name", row.recipient_name)):
-            beanstandet = sepa_text.complaint(wert)
-            if not beanstandet:
+        # Korrigiert, nicht zurueckgewiesen. Hier stand ein frappe.throw
+        # mit "Bitte einmal oeffnen und speichern", und das war UNMOEGLICH:
+        # Kefiya Transfer ist submittable, kein Feld der Positionen ist
+        # allow_on_submit, ein freigegebener Auftrag hat keinen
+        # Speichern-Knopf mehr -- nur noch "An die Bank senden". Der
+        # Auftrag war damit weder sendbar noch zu reparieren, und die
+        # Meldung schickte den Nutzer zu einer Tuer, die es nicht gibt.
+        #
+        # validate() faengt es bei der Erfassung. Was davor freigegeben
+        # wurde, kann nur noch hier gerichtet werden.
+        for feld in ("purpose", "recipient_name"):
+            vorher = row.get(feld)
+            if not vorher:
                 continue
-            frappe.throw(_(
-                "{0} row {1}: the bank cannot carry these characters in"
-                " {2}: {3}"
-                "\n\nThe order was NOT sent. Open it and save it once --"
-                " the text is corrected on saving."
-            ).format(doc.name, row.idx, feld, beanstandet),
-                title=_("The bank cannot carry this text"))
+            nachher = sepa_text.clean(vorher)
+            if nachher == vorher:
+                continue
+            row.set(feld, nachher)
+            # Auch in den Auftrag, nicht nur in die Nachricht: sonst steht
+            # im Beleg ein anderer Text als bei der Bank, und der Beleg ist
+            # die Spur. Ueber die Datenbank, weil das Dokument eingereicht
+            # ist -- die App richtet ihre eigenen Daten auf das, was die
+            # Bank tragen kann; sie laesst damit niemanden einen
+            # freigegebenen Auftrag umschreiben.
+            #
+            # Scheitert das Schreiben, geht der Auftrag trotzdem: die
+            # Nachricht an die Bank ist richtig, nur die Spur fehlt, und
+            # dafuer einen bezahlbaren Auftrag anzuhalten waere verkehrt.
+            if row.get("name"):
+                try:
+                    row.db_set(feld, nachher, update_modified=False)
+                except Exception:
+                    frappe.log_error(
+                        title="Kefiya: adjusted text could not be stored",
+                        message=frappe.get_traceback())
+            korrigiert.append((doc.name, row.idx, feld,
+                               sepa_text.complaint(vorher)))
         payment = {
             "name": (row.recipient_name or "")[:70],
             "IBAN": normalize_iban(row.recipient_iban),
@@ -544,6 +568,19 @@ def build_pain001_for(docs):
             payment["BIC"] = row.recipient_bic
         sepa.add_payment(payment)
         control_sum += amount_cents
+
+    # Gesagt UND aufgeschrieben. Zwischen Freigabe und Bank darf sich
+    # nichts aendern, ohne dass es jemand erfaehrt -- die Meldung erreicht
+    # den, der gerade sendet, der Logeintrag den, der spaeter sucht.
+    if korrigiert:
+        zeilen = [_("{0} row {1}, {2}: {3}").format(*eintrag)
+                  for eintrag in korrigiert]
+        frappe.msgprint("<br>".join(zeilen),
+                        title=_("Text adjusted for the bank"),
+                        indicator="orange")
+        frappe.log_error(
+            title="Kefiya: text adjusted so the bank can carry it",
+            message="\n".join(zeilen))
 
     try:
         xml = sepa.export(validate=True)
