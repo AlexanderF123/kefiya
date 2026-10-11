@@ -3,9 +3,8 @@
 
 """Ein Auftrag, der sich nicht parken laesst, geht gar nicht erst zur Bank.
 
-29.09.2026, 19:19 Uhr. KEF-TRF-2026-00014, 20.000,00 EUR an die axessio
-Hausverwaltung GmbH, der erste Terminauftrag -- einer, den die BANK bis zum
-30.09. halten sollte. Die Volksbank hatte die pain-Nachricht schon und fragte
+29.09.2026, 19:19 Uhr. Auftrag C, 20.000,00 EUR auf ein eigenes Konto, der
+erste Terminauftrag -- einer, den die BANK bis zum 30.09. halten sollte. Die Volksbank hatte die pain-Nachricht schon und fragte
 nach der Bestaetigung des Empfaengers. Beim Aufschreiben dieser Anforderung::
 
     File "kefiya/utils/fints_controller.py", line 1850, in _persist_vop_state

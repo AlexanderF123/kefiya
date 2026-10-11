@@ -29,13 +29,13 @@ EINE = """<?xml version="1.0" encoding="UTF-8"?>
   <OrgnlPmtInfAndSts>
    <OrgnlPmtInfId>P1</OrgnlPmtInfId>
    <TxInfAndSts>
-    <OrgnlEndToEndId>KEF-TRF-2026-00010-1</OrgnlEndToEndId>
+    <OrgnlEndToEndId>KEF-TRF-2026-00001-1</OrgnlEndToEndId>
     <TxSts>ACCP</TxSts>
     <StsRsnInf>
      <Rsn><Prtry>RVMC</Prtry></Rsn>
-     <AddtlInf>Alexander Finkeissen</AddtlInf>
+     <AddtlInf>Max Mustermann</AddtlInf>
     </StsRsnInf>
-    <OrgnlTxRef><Cdtr><Nm>Alexander Finkeissen</Nm></Cdtr></OrgnlTxRef>
+    <OrgnlTxRef><Cdtr><Nm>Max Mustermann</Nm></Cdtr></OrgnlTxRef>
    </TxInfAndSts>
   </OrgnlPmtInfAndSts>
  </CstmrPmtStsRpt>
@@ -49,7 +49,7 @@ OHNE_NS = EINE.replace(' xmlns="{0}"'.format(NS), "")
 ZWEI = EINE.replace(
     "</OrgnlPmtInfAndSts>",
     "<TxInfAndSts>"
-    "<OrgnlEndToEndId>KEF-TRF-2026-00010-2</OrgnlEndToEndId>"
+    "<OrgnlEndToEndId>KEF-TRF-2026-00001-2</OrgnlEndToEndId>"
     "<TxSts>RJCT</TxSts>"
     "<StsRsnInf><Rsn><Cd>RVNM</Cd></Rsn></StsRsnInf>"
     "</TxInfAndSts></OrgnlPmtInfAndSts>")
@@ -61,10 +61,10 @@ class TestWasDieBankSagt(unittest.TestCase):
         gelesen = read(EINE)
         self.assertEqual(gelesen["status"], "ACCP")
         self.assertEqual(gelesen["result"], "RVMC")
-        self.assertEqual(gelesen["bank_name"], "Alexander Finkeissen")
+        self.assertEqual(gelesen["bank_name"], "Max Mustermann")
 
     def test_auch_ohne_namensraum(self):
-        self.assertEqual(read(OHNE_NS)["bank_name"], "Alexander Finkeissen")
+        self.assertEqual(read(OHNE_NS)["bank_name"], "Max Mustermann")
 
     def test_auch_als_bytes(self):
         self.assertEqual(read(EINE.encode("utf-8"))["result"], "RVMC")
@@ -86,12 +86,12 @@ class TestWasKeinNameIst(unittest.TestCase):
     einen Satz ueber die Pruefung. Ein Code ist kein Name."""
 
     def test_ein_code_wird_nicht_als_name_gezeigt(self):
-        code = EINE.replace("<AddtlInf>Alexander Finkeissen</AddtlInf>",
+        code = EINE.replace("<AddtlInf>Max Mustermann</AddtlInf>",
                             "<AddtlInf>NOMATCH</AddtlInf>")
         # Der Rueckfall auf OrgnlTxRef traegt hier denselben Namen; ohne ihn
         # bliebe das Feld leer.
         ohne = code.replace(
-            "<OrgnlTxRef><Cdtr><Nm>Alexander Finkeissen</Nm></Cdtr>"
+            "<OrgnlTxRef><Cdtr><Nm>Max Mustermann</Nm></Cdtr>"
             "</OrgnlTxRef>", "")
         self.assertEqual(read(ohne)["bank_name"], "")
         self.assertIn("NOMATCH", read(ohne)["detail"])
@@ -113,9 +113,9 @@ class TestWennNichtsZuLesenIst(unittest.TestCase):
 
     def test_mit_angabe_die_richtige(self):
         self.assertEqual(
-            read(ZWEI, "KEF-TRF-2026-00010-2")["status"], "RJCT")
+            read(ZWEI, "KEF-TRF-2026-00001-2")["status"], "RJCT")
         self.assertEqual(
-            read(ZWEI, "KEF-TRF-2026-00010-1")["result"], "RVMC")
+            read(ZWEI, "KEF-TRF-2026-00001-1")["result"], "RVMC")
 
 
 class TestDerControllerZeigtEs(unittest.TestCase):

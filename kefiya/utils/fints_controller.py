@@ -392,7 +392,7 @@ class FinTSController(TanSession):
                     # fresh login -- but not silently, and not as a success.
                     # This branch wrote nothing anywhere, and send_transfer_tan
                     # then read a constructor that had not raised as a release
-                    # that had gone through: KEF-TRF-2026-00007, 03.09.2026,
+                    # that had gone through: Auftrag A, 03.09.2026,
                     # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
                     # ausgefuehrt". The word below is what the transfer path
                     # reads instead, and the log carries the bank's own
@@ -634,15 +634,37 @@ class FinTSController(TanSession):
             yield self.fints_connection
 
     def is_tan_required_and_requested(self, response) -> bool:
-        """Checks the given response, if a TAN is required. If so, it is requested from the user.
+        """Does the bank want a TAN -- and has somebody been asked for it?
+
+        Gefragt wird nur, wo jemand antworten kann. Der Zeitplan baut seinen
+        Controller mit interactive=False, und hier wurde trotzdem geparkt und
+        eine Aufforderung verschickt. Um 05:01 bestaetigt niemand eine
+        Freigabe in einer Banking-App: jede Nacht blieben zehn geparkte
+        Anfragen zurueck, eine je Konto des Zugangs, und die Bank haelt fuer
+        jede davon einen Dialog offen -- so steht es im Docstring von
+        _park_tan_challenge. Sie veralteten, und eine veraltete antwortet::
+
+            9050 Die Nachricht enthaelt Fehler.
+            9800 Dialog abgebrochen
+            9210 Auftrag abgelehnt - Auftrag auf Kundenwunsch abgebrochen.
+
+        Unbeaufsichtigt ist die Antwort dieselbe -- eine TAN ist noetig --,
+        aber nichts wird geparkt und niemand wird gefragt. Eine Anfrage, die
+        niemand beantwortet, ist Muell, fuer den ein Institut einen Dialog
+        offen haelt.
+
         :param response: The response object from the FinTS server
-        :return: True if a TAN is required (and requested), False otherwise
+        :return: True if a TAN is required (and, where somebody is there,
+            requested), False otherwise
         """
-        if isinstance(response, NeedTANResponse):
-            self.ask_for_tan(response)
+        if not isinstance(response, NeedTANResponse):
+            return False
+
+        if not self.interactive.enabled:
             return True
 
-        return False
+        self.ask_for_tan(response)
+        return True
 
     def __parked_challenge_is_stale(self):
         """Is the parked TAN challenge too old to still be worth replaying?
@@ -924,7 +946,7 @@ class FinTSController(TanSession):
                 self.fints_connection.set_tan_medium(m[1][0])
             elif len(m[1]) == 0:
                 # This is a workaround for when the dialog already contains return code 3955.
-                # This occurs with e.g. Sparkasse Heidelberg, which apparently does not require us to choose a
+                # This occurs with e.g. Sparkasse, which apparently does not require us to choose a
                 # medium for pushTAN but is totally fine with keeping "" as a TAN medium.
                 self.fints_connection.selected_tan_medium = ""
             elif tan_medium and tan_medium in [mm.tan_medium_name for mm in m[1]]:

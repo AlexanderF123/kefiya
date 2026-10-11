@@ -30,8 +30,8 @@ zerbricht es::
       serialized = json.dumps(data).encode('utf-8')
     TypeError: Object of type function is not JSON serializable
 
-Gemessen am 29.09.2026, 19:19 Uhr, KEF-TRF-2026-00014 ueber 20.000,00 EUR an
-die axessio Hausverwaltung GmbH: der erste Terminauftrag, den die Bank halten
+Gemessen am 29.09.2026, 19:19 Uhr, Auftrag C ueber 20.000,00 EUR an
+die Musterverwaltung GmbH: der erste Terminauftrag, den die Bank halten
 sollte. Die Volksbank hatte die pain-Nachricht da schon bekommen und nach der
 Empfaengerbestaetigung gefragt. Der Auftrag war nicht freigegeben -- kein TAN,
 kein HKVPA -- aber die Ausnahme nahm die ganze Transaktion mit, und damit die

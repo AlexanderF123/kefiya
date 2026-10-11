@@ -1785,7 +1785,7 @@ def send_transfer_tan(kefiya_login, tan, user_scope, transfer_names=None):
 
     # The constructor does not raise when the status query fails: it
     # discards the dead challenge and goes on, which is right for a fetch and
-    # was read here as a release. KEF-TRF-2026-00007 was marked "Sent" on the
+    # was read here as a release. Auftrag A was marked "Sent" on the
     # bank's "9010 Der Auftrag wurde nicht ausgefuehrt". So the word the
     # controller wrote down is what decides, and only one word does.
     if not release_outcome.may_mark_sent(controller.release_outcome):

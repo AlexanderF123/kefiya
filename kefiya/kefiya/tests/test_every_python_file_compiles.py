@@ -7,14 +7,15 @@ The release check compiles the whole tree, and a file it cannot parse fails
 the build with "Validation Failed: Invalid app release" -- no deploy, for
 anybody, until it is fixed.
 
-That is not hypothetical. A patch for the Finanzübersicht was committed as
-docs/finanzuebersicht/1-server-script-fc_cockpit_data.py. A patch is made of
-fragments from the middle of a function, so the file starts on an indented
-line; as a module that is an IndentationError, and it blocked a release. The
-fragments live in Markdown now.
+That is not hypothetical. A patch for a page on the instance was once
+committed as a .py file under docs/. A patch is made of fragments from the
+middle of a function, so the file starts on an indented line; as a module
+that is an IndentationError, and it blocked a release. Patches for the
+instance do not live in this repository at all any more -- see CLAUDE.md --
+but the lesson outlives them.
 
 So the test covers the WHOLE repository, not just the app package: the file
-that broke it was under docs/, which no test would otherwise have looked at.
+that broke it was outside the app, where no other test would have looked.
 
 Parsing is not enough, and that cost a transfer. When the TAN path moved into
 fints_tan_session.py, four names came along and their imports did not:

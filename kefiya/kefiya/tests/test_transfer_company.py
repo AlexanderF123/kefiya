@@ -3,10 +3,10 @@
 
 """Whose money leaves the account is not a choice on a form.
 
-A colleague preparing a transfer saw "Brilu KG Mietkonto Sparkasse" as the
-paying account and "axessio Hausverwaltung GmbH" as the company, and asked
+A colleague preparing a transfer saw "Mietkonto Sparkasse" as the
+paying account and "Musterverwaltung GmbH" as the company, and asked
 whether that could be right. It could not: that account belongs to the
-Brilu-Stiftung.
+Musterstiftung.
 
 The field was filled only when it was still empty -- and a Company link picks
 up the user's session default, so it almost never is. The wrong company then
@@ -112,7 +112,7 @@ class TestTheTwoFieldsPointAtEachOther(unittest.TestCase):
 
 
 class TestAnIbanIsShownInFours(unittest.TestCase):
-    """DE27672500200009355367 is twenty-two characters with no landmarks --
+    """DE89999999990001111111 is twenty-two characters with no landmarks --
     nobody checks that against a letter from the bank. In fours they do."""
 
     def test_the_display_rule_lives_in_one_place(self):

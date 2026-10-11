@@ -3,12 +3,12 @@
 
 """Der naechste Abruf faengt vor der letzten Buchung an, nicht auf ihr.
 
-30.09.2026, axessio Hausverwaltung GmbH Volksbank
-(DE25670923000033286660). Der Ablauf, Zeile fuer Zeile aus der Instanz:
+30.09.2026, Musterverwaltung GmbH Volksbank
+(DE19888888880004444444). Der Ablauf, Zeile fuer Zeile aus der Instanz:
 
     29.09. 18:42   ein Abruf von Hand holt zwei Zeilen mit Datum 30.09.
-                   (Stadt Mannheim 91,65; Rundfunk 3,46 -- Valuta voraus)
-    29.09. abends  20.000,00 EUR gehen von 33080697 ein
+                   (Stadtkasse 91,65; Rundfunk 3,46 -- Valuta voraus)
+    29.09. abends  20.000,00 EUR gehen von 5555555 ein
     30.09. 06:01   der Nachtlauf rechnet: juengste Buchung = 30.09.
                    und fragt die Bank nur nach dem 30.09.
 

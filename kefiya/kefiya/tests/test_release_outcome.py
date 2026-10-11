@@ -3,7 +3,7 @@
 
 """Gesendet heisst: die Bank hat es gesagt. Nicht: nichts ist explodiert.
 
-KEF-TRF-2026-00007, 03.09.2026, 12:45. Die Sparkasse bat um die Freigabe in
+Auftrag A, 03.09.2026, 12:45. Die Sparkasse bat um die Freigabe in
 der App (3955), sagte auf die erste Statusabfrage "noch ausstehend" (3956)
 und auf die zweite 9050/9010 "Der Auftrag wurde nicht ausgefuehrt".
 python-fints warf daraufhin eine Exception, der Konstruktor des Controllers

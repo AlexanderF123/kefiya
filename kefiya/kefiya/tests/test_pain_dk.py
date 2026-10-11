@@ -26,7 +26,7 @@ from kefiya.utils.pain_dk import (IMMEDIATE_EXECUTION, NOT_PROVIDED,
 HIER = os.path.dirname(os.path.abspath(__file__))
 WURZEL = os.path.dirname(os.path.dirname(HIER))
 
-OHNE_BIC = ('<PmtInf><Dbtr><Nm>Brilu</Nm></Dbtr><DbtrAcct><Id><IBAN>DE27</IBAN>'
+OHNE_BIC = ('<PmtInf><Dbtr><Nm>Muster</Nm></Dbtr><DbtrAcct><Id><IBAN>DE27</IBAN>'
             '</Id></DbtrAcct><DbtrAgt><FinInstnId /></DbtrAgt><ChrgBr>SLEV'
             '</ChrgBr></PmtInf>')
 MIT_BIC = ('<DbtrAgt><FinInstnId><BIC>SOLADES1HDB</BIC></FinInstnId>'

@@ -173,10 +173,10 @@ class TestDerFingerabdruckZaehltKeineLeerzeichen(unittest.TestCase):
     def test_und_der_name_mit_dem_umbruch(self):
         links = booking_fingerprint.canonical(
             "Sparkasse", "2026-10-01", 50, None,
-            "Alexander und Christina Fin keissen", "Miete")
+            "Max und Erika Muster mann", "Miete")
         rechts = booking_fingerprint.canonical(
             "Sparkasse", "2026-10-01", 50, None,
-            "Alexander und Christina Finkeissen", "Miete")
+            "Max und Erika Mustermann", "Miete")
         self.assertEqual(links, rechts)
 
     def test_zeilenumbruch_zaehlt_wie_kein_leerzeichen(self):

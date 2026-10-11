@@ -8,12 +8,12 @@ Der Abruf setzt dort an, wo der letzte aufgehoert hat: beim Datum der
 juengsten gebuchten Zeile. Das ist eine Zeile zu spaet, sobald die Bank ein
 Datum in der Zukunft liefert.
 
-Gemessen am 30.09.2026, axessio Hausverwaltung GmbH Volksbank
-(DE25670923000033286660):
+Gemessen am 30.09.2026, Musterverwaltung GmbH Volksbank
+(DE19888888880004444444):
 
     29.09. 18:42   Abruf von Hand holt zwei Zeilen mit Datum 30.09.
-                   (Stadt Mannheim 91,65; Rundfunk 3,46 -- Valuta voraus)
-    29.09. abends  20.000,00 EUR gehen vom Konto 33080697 ein
+                   (Stadtkasse 91,65; Rundfunk 3,46 -- Valuta voraus)
+    29.09. abends  20.000,00 EUR gehen vom Konto 5555555 ein
     30.09. 06:01   Nachtlauf rechnet: juengste Buchung = 30.09.
                    -> er fragt die Bank nur nach dem 30.09.
 

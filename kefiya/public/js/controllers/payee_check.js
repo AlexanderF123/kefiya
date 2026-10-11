@@ -173,8 +173,8 @@ kefiya.suggest = function (input, items) {
 //: The payee whose name this is, out of what known_payees() returned.
 //:
 //: Matched by normalise_payee_name, which is the rule the check itself uses.
-//: A plain lowercased comparison was not: the history holds "Sofienstraße
-//: GmbH & Co. KG", this invoice says "Sofienstrasse GmbH", and the two are
+//: A plain lowercased comparison was not: the history holds "Musterstraße
+//: GmbH & Co. KG", this invoice says "Musterstrasse GmbH", and the two are
 //: the same payee -- check_payee says so, and a suggestion list that
 //: disagreed would offer no IBAN for a payee it had just called known.
 kefiya.payee_named = function (payees, name) {

@@ -27,11 +27,11 @@ class TestANameIsComparedByWhatIdentifiesIt(unittest.TestCase):
     first week."""
 
     def test_the_same_payee_written_three_ways(self):
-        for other in ("Sofienstrasse GmbH & Co. KG",
-                      "SOFIENSTRASSE GMBH CO KG",
-                      "Sofienstrasse GmbH"):
+        for other in ("Musterstrasse GmbH & Co. KG",
+                      "MUSTERSTRASSE GMBH CO KG",
+                      "Musterstrasse GmbH"):
             self.assertNotEqual(
-                payee_check.names_match("Sofienstrasse GmbH & Co. KG", other),
+                payee_check.names_match("Musterstrasse GmbH & Co. KG", other),
                 "different", other)
 
     def test_punctuation_case_and_titles_do_not_matter(self):
@@ -42,7 +42,7 @@ class TestANameIsComparedByWhatIdentifiesIt(unittest.TestCase):
 
     def test_two_different_people_are_different(self):
         self.assertEqual(
-            payee_check.names_match("Milorad Vrban", "Milorad Djordjic"),
+            payee_check.names_match("Jan Novak", "Jan Horak"),
             "different")
 
     def test_one_word_in_common_is_not_a_match(self):
@@ -58,27 +58,27 @@ class TestANameIsComparedByWhatIdentifiesIt(unittest.TestCase):
                          "different")
 
     def test_nothing_matches_nothing(self):
-        for pair in (("", "Vrban"), ("Vrban", None), ("GmbH", "AG")):
+        for pair in (("", "Novak"), ("Novak", None), ("GmbH", "AG")):
             self.assertEqual(payee_check.names_match(*pair), "different", pair)
 
 
 class TestTheVerdictSeparatesTheFourCases(unittest.TestCase):
 
-    IBAN = "DE27672500200009355367"
-    OTHER = "DE72672500200009253580"
+    IBAN = "DE89999999990001111111"
+    OTHER = "DE58999999990002222222"
 
     def test_a_known_iban_under_a_known_name(self):
         self.assertEqual(
             payee_check.verdict_for(
-                "Milorad Vrban", self.IBAN,
-                history=[{"name": "Milorad Vrban"}]),
+                "Jan Novak", self.IBAN,
+                history=[{"name": "Jan Novak"}]),
             payee_check.VERDICT_KNOWN)
 
     def test_a_known_iban_under_another_name(self):
         """The IBAN was paid before -- to somebody else."""
         self.assertEqual(
             payee_check.verdict_for(
-                "Milorad Vrban", self.IBAN,
+                "Jan Novak", self.IBAN,
                 history=[{"name": "Bauhaus AG"}]),
             payee_check.VERDICT_NAME_DIFFERS)
 
@@ -87,7 +87,7 @@ class TestTheVerdictSeparatesTheFourCases(unittest.TestCase):
         bank's own check does not flag."""
         self.assertEqual(
             payee_check.verdict_for(
-                "Milorad Vrban", self.IBAN, history=[],
+                "Jan Novak", self.IBAN, history=[],
                 other=[{"iban": self.OTHER}]),
             payee_check.VERDICT_OTHER_IBAN)
 
@@ -101,7 +101,7 @@ class TestTheVerdictSeparatesTheFourCases(unittest.TestCase):
     def test_the_same_iban_in_the_other_list_is_not_another_iban(self):
         """It is the one being checked."""
         self.assertEqual(
-            payee_check.verdict_for("Milorad Vrban", self.IBAN, history=[],
+            payee_check.verdict_for("Jan Novak", self.IBAN, history=[],
                                     other=[{"iban": self.IBAN}]),
             payee_check.VERDICT_NEW)
 
@@ -109,9 +109,9 @@ class TestTheVerdictSeparatesTheFourCases(unittest.TestCase):
         """An IBAN paid under several spellings is one payee, not a mismatch."""
         self.assertEqual(
             payee_check.verdict_for(
-                "Sofienstrasse GmbH & Co. KG", self.IBAN,
+                "Musterstrasse GmbH & Co. KG", self.IBAN,
                 history=[{"name": "Bauhaus AG"},
-                         {"name": "SOFIENSTRASSE GMBH CO KG"}]),
+                         {"name": "MUSTERSTRASSE GMBH CO KG"}]),
             payee_check.VERDICT_KNOWN)
 
     def test_a_written_iban_matches_a_spaced_one(self):

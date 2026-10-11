@@ -15,7 +15,7 @@ am 29./23.09.2026 fuer drei Konten "Bankabruf ohne frische Daten", weil der
 juengste Umsatz aelter war als ein aus dem Buchungsrhythmus geschaetzter
 Grenzwert. In allen drei Faellen lief der Abruf taeglich und einwandfrei --
 die Bank hatte nur nichts zu melden. Beim Privatkonto waren es acht ruhige
-Tage bei einem echten Abstand von 2,9 Tagen, bei Sofienstr. Volksbank 23
+Tage bei einem echten Abstand von 2,9 Tagen, bei ein Volksbank-Konto 23
 ruhige Tage bei einem groessten beobachteten Abstand von 31.
 
 Daraus die eine Regel, die dieses Modul ausspricht:

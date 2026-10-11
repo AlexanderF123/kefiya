@@ -47,7 +47,7 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 #: sind den echten .sta-Dateien nachgebildet.
 ZWEI_BLAETTER = (
     ":20:REFSTARMONEY\n"
-    ":25:67250020/9219498\n"
+    ":25:99999999/9219498\n"
     ":28C:00000\n"
     ":60F:C231230EUR1000,00\n"
     ":61:2401020102CR250,00NMSCNONREF\n"
@@ -57,7 +57,7 @@ ZWEI_BLAETTER = (
     ":62F:C241230EUR1150,00\n"
     "-\n"
     ":20:REFSTARMONEY\n"
-    ":25:67250020/9219498\n"
+    ":25:99999999/9219498\n"
     ":28C:00000\n"
     ":60F:C241230EUR1150,00\n"
     ":61:2501030103D50,00NMSCNONREF\n"
@@ -77,16 +77,16 @@ KETTE_GEBROCHEN = (ZWEI_BLAETTER
 
 
 def _ein_blatt(zeilen, anfang="C231230EUR1000,00", ende="C241230EUR1000,00"):
-    return (":20:REF\n:25:67250020/9219498\n:28C:00000\n"
+    return (":20:REF\n:25:99999999/9219498\n:28C:00000\n"
             ":60F:{0}\n{1}:62F:{2}\n-\n".format(anfang, "".join(zeilen), ende))
 
 
 #: So datiert StarMoney: der Anfangssaldo traegt den Tag der ERSTEN
-#: Buchung, nicht den Vortag. Nachgebildet dem Auszug von 33108982,
+#: Buchung, nicht den Vortag. Nachgebildet dem Auszug von 7777777,
 #: ``:60F:C210104EUR1991,03`` mit sechs Buchungen vom 04.01.2021 darunter.
 STARMONEY_DATIERT = (
     ":20:REFSTARMONEY\n"
-    ":25:67092300/33108982\n"
+    ":25:88888888/7777777\n"
     ":28C:00000/001\n"
     ":60F:C210104EUR1000,00\n"
     ":61:2101040104CR250,00NMSCNONREF\n"
@@ -98,7 +98,7 @@ STARMONEY_DATIERT = (
     ":62F:C211230EUR1100,00\n"
     "-\n"
     ":20:REFSTARMONEY\n"
-    ":25:67092300/33108982\n"
+    ":25:88888888/7777777\n"
     ":28C:00000/001\n"
     ":60F:C220103EUR1100,00\n"
     ":61:2201030103D100,00NMSCNONREF\n"
@@ -109,11 +109,11 @@ STARMONEY_DATIERT = (
 
 #: Ein Blatt in zwei Bloecken: der erste endet mit einem Zwischensaldo
 #: (:62M:), der zweite nimmt ihn mit :60M: auf. So exportiert StarMoney
-#: den Jahrgang 2020 von Konto 33108982 -- 221 Buchungen, die vorher
+#: den Jahrgang 2020 von Konto 7777777 -- 221 Buchungen, die vorher
 #: verloren gingen.
 GETEILTES_BLATT = (
     ":20:REFSTARMONEY\n"
-    ":25:67092300/33108982\n"
+    ":25:88888888/7777777\n"
     ":28C:00000\n"
     ":60F:C200813EUR0,00\n"
     ":61:2008130813CR2230,04NMSCNONREF\n"
@@ -121,7 +121,7 @@ GETEILTES_BLATT = (
     ":62M:C200813EUR2230,04\n"
     "-\n"
     ":20:REFSTARMONEY\n"
-    ":25:67092300/33108982\n"
+    ":25:88888888/7777777\n"
     ":28C:00000/001\n"
     ":60M:C200813EUR2230,04\n"
     ":61:2012300102D239,01NMSCNONREF\n"
@@ -183,7 +183,7 @@ class TestDasBlattLesen(unittest.TestCase):
         """Die Sammelexporte enthalten neun Konten. Jedes Blatt traegt sein
         eigenes, sonst zaehlt eine Datei fremdes Geld mit."""
         zwei = ZWEI_BLAETTER + (
-            ":20:REF\n:25:67250020/9280049\n:28C:00000\n"
+            ":20:REF\n:25:99999999/9280049\n:28C:00000\n"
             ":60F:C231230EUR0,00\n:61:2401020102C10,00NMSCNONREF\n"
             ":62F:C241230EUR10,00\n-\n")
         konten = {blatt.konto for blatt in blaetter(zwei)}

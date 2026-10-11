@@ -9,7 +9,7 @@ Ein Modul ohne Importe, aus demselben Grund wie fints_errors.py: der
 Controller und die TAN-Strecke brauchen beide dieselben vier Woerter, und
 der Controller importiert die TAN-Strecke.
 
-Warum es das gibt. KEF-TRF-2026-00007, 03.09.2026, 12:45: Die Sparkasse
+Warum es das gibt. Auftrag A, 03.09.2026, 12:45: Die Sparkasse
 bat um die Freigabe in der App (3955), sagte auf die erste Statusabfrage
 "noch ausstehend" (3956) und auf die zweite::
 

@@ -74,7 +74,7 @@ CONFIRMATION_DEMANDED = "3945"
 #: the decoupled release, because a VoP-ID was there to send it with -- gets
 #: "0020 Ausfuehrungsbestaetigung nach Namensabgleich erhalten" for the
 #: HKVPA and "9010 Der Auftrag wurde nicht ausgefuehrt" for the order.
-#: KEF-TRF-2026-00007, twice on 03.09.2026.
+#: Auftrag A, twice on 03.09.2026.
 EXECUTION_ORDER_NOT_NEEDED = "3091"
 
 #: The verdict for which the library itself attaches the execution order:
@@ -139,7 +139,7 @@ def wants_confirmation(response, segments, hivpp):
     release without the confirmation (3945), or the verdict is a close match
     (RCVC), which is the one case the library itself sends HKVPA for. A bank
     that said it needs no execution order (3091) gets none, whatever else
-    the answer carries -- sending one anyway is what ended KEF-TRF-2026-00007
+    the answer carries -- sending one anyway is what ended Auftrag A
     with "9010 Der Auftrag wurde nicht ausgefuehrt" after the release in
     the app.
 

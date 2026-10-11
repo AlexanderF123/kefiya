@@ -11,9 +11,10 @@ from frappe.utils.scheduler import is_scheduler_inactive
 from frappe import _
 from kefiya.utils.client import import_fints_transactions
 from kefiya.utils.fints_controller import FinTSController
+from kefiya.utils.fints_errors import TanInteractionRequired
 from kefiya.utils.fints_controller_legacy import FinTSController as FinTSControllerLegacy
 from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
-from kefiya.utils import fetch_rhythm
+from kefiya.utils import fetch_rhythm, login_siblings
 
 
 class KefiyaSchedule(Document):
@@ -79,8 +80,40 @@ def _record_fetch_attempt(login_name):
             pass
 
 
-def _recover_from_failed_login(login_name):
-    """Discard a failed login's partial work and record why, never raising.
+def _log_tan_wanted(login_name):
+    """Eine Zeile: dieser Zugang will eine TAN, und niemand ist da.
+
+    Kein Traceback. Das ist kein Fehler im Programm, sondern eine Lage:
+    die Bank verlangt eine Freigabe, und um 05:01 bestaetigt sie niemand
+    in einer Banking-App. Ein Traceback je Konto hat zehn Zeilen Rauschen
+    je Nacht erzeugt und die echten Fehlschlaege darin begraben.
+    """
+    try:
+        frappe.log_error(
+            title=("Kefiya Schedule: this access wants a TAN, nobody is"
+                   " there")[:140],
+            message=(
+                "login={0}\n\nThe bank asks for a TAN before it hands out"
+                " anything. A scheduled run has nobody to ask, so this"
+                " access is left for an interactive fetch -- its other"
+                " logins are skipped in this run, they would all say the"
+                " same.\n\nNothing was parked: a challenge nobody answers"
+                " is a dialog the bank holds open for nothing."
+            ).format(login_name),
+            reference_doctype="Kefiya Login",
+            reference_name=login_name,
+        )
+    except Exception:
+        try:
+            frappe.logger("kefiya").info(
+                "Kefiya Schedule: %s wants a TAN, nobody is there",
+                login_name)
+        except Exception:
+            pass
+
+
+def _recover_from_login(login_name, aufschreiben):
+    """Discard a login's partial work and record why, never raising.
 
     Rolls back the Kefiya Import created before the fetch, which would
     otherwise survive as an empty draft: while an aborting tick still
@@ -98,13 +131,23 @@ def _recover_from_failed_login(login_name):
     except Exception:
         pass
 
-    _log_import_failure(login_name)
+    aufschreiben(login_name)
     _record_fetch_attempt(login_name)
 
     try:
         frappe.db.commit()
     except Exception:
         pass
+
+
+def _recover_from_failed_login(login_name):
+    """Ein Fehlschlag: mit Traceback."""
+    _recover_from_login(login_name, _log_import_failure)
+
+
+def _recover_from_tan_wanted(login_name):
+    """Eine verlangte TAN ohne jemanden, der sie geben kann: eine Zeile."""
+    _recover_from_login(login_name, _log_tan_wanted)
 
 
 @frappe.whitelist()
@@ -134,23 +177,40 @@ def scheduled_import_fints_payments(manual=None):
     # not cost a Monthly login the whole month.
     ATTEMPT_RETRY_GAP_DAYS = 1
 
+    # Zugaenge, die in diesem Lauf schon gesagt haben: ich will eine TAN.
+    # Deren uebrige Logins sagen dasselbe -- ein Zugang, eine Kennung, eine
+    # Anmeldung. Sie trotzdem zu versuchen hat jede Nacht zehn Protokoll-
+    # zeilen erzeugt, eine je Konto, fuer genau einen Sachverhalt.
+    tan_verlangt = set()
+
     # Query child table
     for child_item in schedule_settings.schedule_items:
         if not (current_hour == child_item.hour or manual):
             continue
+        # Vor dem try, weil der except-Zweig es liest: faellt etwas aus,
+        # bevor der Zugang feststeht, waere der Name sonst ungebunden --
+        # oder, schlimmer, truege den Zugang der vorigen Runde und wuerde
+        # fremde Logins ueberspringen.
+        zugang = None
         try:
             if not (child_item.active and (child_item.import_frequency or manual)):
                 continue
 
             login_name = child_item.kefiya_login
             (bank_account, allowed_days, skip_fetch, last_attempt,
-             account_kind, fetch_interval_days) = (
+             account_kind, fetch_interval_days, blz, fints_login) = (
                 frappe.db.get_value(
                     "Kefiya Login", login_name,
                     ["bank_account", "allowed_sync_days_in_past",
                      "skip_fetch", "last_fetch_attempt",
-                     "account_kind", "fetch_interval_days"]
-                ) or (None, None, 0, None, None, None))
+                     "account_kind", "fetch_interval_days",
+                     "blz", "fints_login"]
+                ) or (None, None, 0, None, None, None, None, None))
+
+            # Dieser Zugang hat in diesem Lauf schon eine TAN verlangt.
+            zugang = login_siblings.access_key(blz, fints_login)
+            if zugang and zugang in tan_verlangt:
+                continue
 
             # Loan and clearing accounts are never offered for statement
             # retrieval, so fetching them fails every single run. Skipping them
@@ -232,5 +292,14 @@ def scheduled_import_fints_payments(manual=None):
             # later rollback would also discard the logins that already
             # succeeded in this tick.
             frappe.db.commit()
+        except TanInteractionRequired:
+            # Kein Fehler, eine Lage: die Bank will eine Freigabe, und ein
+            # Zeitplan hat niemanden, der sie gibt. Geparkt wird dabei
+            # nichts mehr -- siehe is_tan_required_and_requested --, also
+            # bleibt auch kein Dialog offen, den die Bank fuer niemanden
+            # haelt. Der Zugang wartet auf einen Abruf von Hand.
+            if zugang:
+                tan_verlangt.add(zugang)
+            _recover_from_tan_wanted(child_item.kefiya_login)
         except Exception:
             _recover_from_failed_login(child_item.kefiya_login)

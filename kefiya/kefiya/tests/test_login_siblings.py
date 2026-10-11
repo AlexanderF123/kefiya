@@ -28,9 +28,9 @@ from kefiya.utils import login_siblings
 HIER = os.path.dirname(os.path.abspath(__file__))
 WURZEL = os.path.dirname(os.path.dirname(HIER))
 
-VB = "DE79670923000034079536"
-BRILU = "DE83670923000033312679"
-SCHON_DA = "DE16670923000033080697"
+VB = "DE54888888880006666666"
+MIET = "DE89888888880008888888"
+SCHON_DA = "DE85888888880005555555"
 
 
 def _quelle(*teile):
@@ -42,19 +42,19 @@ class TestWelcheKontenNochFehlen(unittest.TestCase):
 
     def test_was_die_bank_nennt_und_keiner_abruft(self):
         offen = login_siblings.unclaimed(
-            json.dumps([SCHON_DA, VB, BRILU]), [SCHON_DA])
-        self.assertEqual(offen, [VB, BRILU])
+            json.dumps([SCHON_DA, VB, MIET]), [SCHON_DA])
+        self.assertEqual(offen, [VB, MIET])
 
     def test_die_reihenfolge_ist_die_der_bank(self):
         self.assertEqual(
-            login_siblings.unclaimed(json.dumps([BRILU, VB]), []),
-            [BRILU, VB])
+            login_siblings.unclaimed(json.dumps([MIET, VB]), []),
+            [MIET, VB])
 
     def test_geschrieben_wie_der_nutzer_sie_schreibt(self):
         """Mit Leerzeichen und klein -- dieselbe IBAN."""
         self.assertEqual(
             login_siblings.unclaimed(json.dumps([VB]),
-                                     ["de79 6709 2300 0034 0795 36"]),
+                                     ["de54 8888 8888 0006 6666 66"]),
             [])
 
     def test_zweimal_genannt_bleibt_ein_konto(self):
@@ -172,10 +172,10 @@ class TestWelcheLoginsZumSelbenZugangGehoeren(unittest.TestCase):
 
     def test_die_anderen_desselben_zugangs(self):
         self.assertEqual(
-            login_siblings.same_access("Konto A", "67250020", "afinkeissen"),
+            login_siblings.same_access("Konto A", "99999999", "nutzer1"),
             {"name": ("!=", "Konto A"),
-             "blz": "67250020",
-             "fints_login": "afinkeissen"})
+             "blz": "99999999",
+             "fints_login": "nutzer1"})
 
     def test_das_eigene_login_ist_kein_geschwister(self):
         filter_ = login_siblings.same_access("Konto A", "672", "kennung")
@@ -185,19 +185,19 @@ class TestWelcheLoginsZumSelbenZugangGehoeren(unittest.TestCase):
         """Und damit keinen Filter. Einer ohne BLZ traefe jedes Login des
         Hauses -- und wuerde fremde Zustaende wegwerfen."""
         self.assertIsNone(
-            login_siblings.same_access("Konto A", None, "afinkeissen"))
+            login_siblings.same_access("Konto A", None, "nutzer1"))
         self.assertIsNone(
-            login_siblings.same_access("Konto A", "", "afinkeissen"))
+            login_siblings.same_access("Konto A", "", "nutzer1"))
 
     def test_ohne_kennung_auch_nicht(self):
         self.assertIsNone(
-            login_siblings.same_access("Konto A", "67250020", None))
+            login_siblings.same_access("Konto A", "99999999", None))
         self.assertIsNone(
-            login_siblings.same_access("Konto A", "67250020", ""))
+            login_siblings.same_access("Konto A", "99999999", ""))
 
     def test_eine_andere_kennung_ist_ein_anderer_zugang(self):
         """Dasselbe Haus, zwei Kennungen: zwei Zugaenge mit je eigenem
         Dialog. Deren Zustaende haben miteinander nichts zu tun."""
-        eine = login_siblings.same_access("A", "67250020", "afinkeissen")
-        andere = login_siblings.same_access("A", "67250020", "bfinkeissen")
+        eine = login_siblings.same_access("A", "99999999", "nutzer1")
+        andere = login_siblings.same_access("A", "99999999", "nutzer2")
         self.assertNotEqual(eine["fints_login"], andere["fints_login"])

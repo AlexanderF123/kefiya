@@ -3,7 +3,7 @@
 
 """Ein Eurozeichen hat einen Auftrag dreimal scheitern lassen.
 
-Die Sparkasse Heidelberg lehnte KEF-TRF-2026-00015 am 08. und 09.10.2026
+Die Sparkasse lehnte Auftrag D am 08. und 09.10.2026
 dreimal ab, jedes Mal erst nach der Freigabe in der Banking-App::
 
     9050 Die Nachricht enthaelt Fehler.
@@ -19,6 +19,7 @@ Aenderung zwischen Freigabe und Bank. Und gemeldet wird sie -- automatisch
 heisst nicht stillschweigend.
 """
 
+import json
 import pathlib
 import unittest
 
@@ -35,10 +36,10 @@ ABGELEHNT = "1 TZ. Kaution abzügl. 400€ für BK25/BK26"
 #: Echte Texte aus den 14 Auftraegen dieser Instanz. Die Umlaute bleiben
 #: stehen -- die Bank hat sie dreizehnmal ausgefuehrt.
 GELAUFEN = {
-    "Reisekosten BT-0001 Alexander Finkeißen":
-        "Reisekosten BT-0001 Alexander Finkeißen",
-    "Teilrückzahlung Darlehen AF an Sofienstraße GmbH u Co KG":
-        "Teilrückzahlung Darlehen AF an Sofienstraße GmbH u Co KG",
+    "Reisekosten BT-0001 Max Mustermann":
+        "Reisekosten BT-0001 Max Mustermann",
+    "Teilrückzahlung Darlehen MM an Musterstraße GmbH u Co KG":
+        "Teilrückzahlung Darlehen MM an Musterstraße GmbH u Co KG",
     "1. TZ Kaution, abzüglich Mietschulden 24,25,26":
         "1. TZ Kaution, abzüglich Mietschulden 24,25,26",
     # Der eine mit einem Zeilenumbruch -- die Volksbank hat ihn geschluckt,
@@ -229,29 +230,66 @@ class TestKorrigiertWirdBeiDerErfassung(unittest.TestCase):
         self.assertIn("sepa_text.complaint(vorher)", self.validate)
 
 
-class TestDerSendewegIstNurNochDasNetz(unittest.TestCase):
-    """Nach der Korrektur bei der Erfassung kann hier nichts mehr ankommen,
-    was die Bank nicht traegt -- es sei denn, etwas hat validate umgangen.
-    Dann wird abgelehnt und NICHT still korrigiert: eine Aenderung zwischen
-    Freigabe und Bank ist genau die, die niemand mehr liest."""
+class TestDerSendewegKorrigiertSelbst(unittest.TestCase):
+    """Hier stand ein frappe.throw mit "Bitte einmal oeffnen und speichern".
+
+    Das war unmoeglich. Kefiya Transfer ist submittable und kein Feld der
+    Positionen ist allow_on_submit: ein freigegebener Auftrag hat keinen
+    Speichern-Knopf mehr, nur noch "An die Bank senden". Der Auftrag war
+    damit weder sendbar noch zu reparieren, und die Meldung schickte den
+    Nutzer zu einer Tuer, die es nicht gibt.
+
+    validate() faengt es bei der Erfassung. Was davor freigegeben wurde,
+    kann nur noch im Sendeweg gerichtet werden -- also richtet er es.
+    """
 
     def setUp(self):
         quelle = TRANSFER.read_text(encoding="utf-8")
         self.bauen = quelle[quelle.index("def build_pain001_for"):]
 
-    def test_geprueft_wird_vor_dem_senden(self):
-        self.assertIn("sepa_text.complaint(", self.bauen)
-        self.assertLess(self.bauen.index("sepa_text.complaint("),
+    def test_ein_freigegebener_auftrag_laesst_sich_nicht_mehr_aendern(self):
+        """Die Begruendung, gelesen aus dem Doctype. Wird eines der Felder
+        einmal allow_on_submit, gilt sie nicht mehr -- und dieser Test
+        sagt es."""
+        pfad = (WURZEL / "kefiya/kefiya/doctype/kefiya_transfer_item"
+                         "/kefiya_transfer_item.json")
+        felder = {f["fieldname"]: f
+                  for f in json.loads(pfad.read_text(encoding="utf-8"))["fields"]}
+        for name in ("purpose", "recipient_name"):
+            self.assertFalse(felder[name].get("allow_on_submit"), name)
+
+    def test_der_sendeweg_korrigiert(self):
+        self.assertIn("sepa_text.clean(vorher)", self.bauen)
+        self.assertLess(self.bauen.index("sepa_text.clean(vorher)"),
                         self.bauen.index("sepa.add_payment(payment)"))
 
-    def test_und_abgelehnt(self):
-        stelle = self.bauen.index("sepa_text.complaint(")
-        herum = self.bauen[stelle:stelle + 900]
-        self.assertIn("frappe.throw(", herum)
-        self.assertIn("was NOT sent", herum)
+    def test_und_weist_nicht_mehr_zurueck(self):
+        """Die unmoegliche Tuer ist zu."""
+        self.assertNotIn("Open it and save it once", self.bauen)
+        stelle = self.bauen.index("sepa_text.clean(vorher)")
+        self.assertNotIn("frappe.throw", self.bauen[stelle:stelle + 1200])
 
-    def test_aber_nichts_wird_hier_korrigiert(self):
-        self.assertNotIn("sepa_text.clean", self.bauen)
+    def test_die_korrektur_steht_auch_im_auftrag(self):
+        """Sonst stuende im Beleg ein anderer Text als bei der Bank, und
+        der Beleg ist die Spur."""
+        self.assertIn("row.db_set(feld, nachher", self.bauen)
+
+    def test_aber_ein_misslungenes_schreiben_haelt_den_auftrag_nicht_auf(self):
+        """Die Nachricht an die Bank ist richtig; nur die Spur fehlt."""
+        stelle = self.bauen.index("row.db_set(feld, nachher")
+        herum = self.bauen[stelle - 200:stelle + 400]
+        self.assertIn("except Exception:", herum)
+        self.assertIn("frappe.log_error(", herum)
+
+    def test_und_es_wird_gesagt_und_aufgeschrieben(self):
+        """Zwischen Freigabe und Bank aendert sich nichts stillschweigend:
+        die Meldung erreicht den, der gerade sendet, der Logeintrag den,
+        der spaeter sucht."""
+        self.assertIn("frappe.msgprint(", self.bauen)
+        self.assertIn("Kefiya: text adjusted so the bank can carry it",
+                      self.bauen)
+        self.assertLess(self.bauen.index("frappe.msgprint("),
+                        self.bauen.index("sepa.export(validate=True)"))
 
 
 class TestDasModulBrauchtKeineBench(unittest.TestCase):

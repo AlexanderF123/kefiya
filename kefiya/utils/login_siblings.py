@@ -84,6 +84,23 @@ def unclaimed(iban_list, already_used):
     return offen
 
 
+def access_key(blz, fints_login):
+    """Welcher Zugang das ist, als vergleichbarer Wert.
+
+    Dieselbe Regel wie same_access(), nur andersherum gefragt: nicht
+    "welche anderen gehoeren dazu", sondern "zu welchem gehoert dieser".
+    Der Zeitplan braucht das, um nach dem ersten Login eines Zugangs, das
+    eine TAN verlangt, die uebrigen zu ueberspringen -- sie verlangen
+    dieselbe.
+
+    :return: ein Schluessel, oder None wenn es keinen Zugang gibt, auf den
+        sich etwas beziehen liesse
+    """
+    if not (blz and fints_login):
+        return None
+    return (blz, fints_login)
+
+
 def same_access(name, blz, fints_login):
     """Die Filter, die die ANDEREN Logins desselben Bankzugangs auswaehlen.
 

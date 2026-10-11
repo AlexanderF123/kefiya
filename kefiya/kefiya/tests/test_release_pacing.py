@@ -7,13 +7,13 @@ Gemessen am 28.09.2026 am Sammelabruf von Hand, 12:15 bis 12:19. Dreissig
 Volksbank-Konten haengen an EINEM Zugang und laufen als EINE Kette; vierzehn
 waren an der Reihe, sieben haben eine Freigabe in der App verlangt:
 
-    12:15:22  33286660 axHV
-    12:15:46  33108982 Maximilian          24 s spaeter
-    12:17:02  34130680 MPF Immobilien      76 s
-    12:17:14  33106831 RA Christina        12 s
-    12:17:29  33343930 RM Beteiligungs     15 s
-    12:17:55  33080697 Ch & A Finkeissen   26 s
-    12:19:25  33343957 Hotel Baden-Baden   90 s
+    12:15:22  Konto 1
+    12:15:46  Konto 2    24 s spaeter
+    12:17:02  Konto 3    76 s
+    12:17:14  Konto 4    12 s
+    12:17:29  Konto 5    15 s
+    12:17:55  Konto 6    26 s
+    12:19:25  Konto 7    90 s
 
 Die Abstaende sind die Reaktionszeit des Nutzers, nicht die der Bank: kefiya
 wartet auf die Freigabe und geht in derselben Sekunde zum naechsten Konto,

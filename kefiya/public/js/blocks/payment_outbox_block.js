@@ -3,9 +3,10 @@
 
 // THIS FILE IS NOT LOADED BY THE APP.
 //
-// It is the script of the Custom HTML Block "axessio_zahlungsausgang", kept
-// here so it is versioned like everything else. The block's HTML field stays
-// what it always was:
+// It is the script of the Custom HTML Block that carries the outgoing
+// payments page, kept here so it is versioned like everything else. The
+// block itself lives on the instance and is named there; the HTML field
+// stays what it always was:
 //
 //     <div id='zk'></div>
 //
