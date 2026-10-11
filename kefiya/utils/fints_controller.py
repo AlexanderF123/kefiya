@@ -634,15 +634,37 @@ class FinTSController(TanSession):
             yield self.fints_connection
 
     def is_tan_required_and_requested(self, response) -> bool:
-        """Checks the given response, if a TAN is required. If so, it is requested from the user.
+        """Does the bank want a TAN -- and has somebody been asked for it?
+
+        Gefragt wird nur, wo jemand antworten kann. Der Zeitplan baut seinen
+        Controller mit interactive=False, und hier wurde trotzdem geparkt und
+        eine Aufforderung verschickt. Um 05:01 bestaetigt niemand eine
+        Freigabe in einer Banking-App: jede Nacht blieben zehn geparkte
+        Anfragen zurueck, eine je Konto des Zugangs, und die Bank haelt fuer
+        jede davon einen Dialog offen -- so steht es im Docstring von
+        _park_tan_challenge. Sie veralteten, und eine veraltete antwortet::
+
+            9050 Die Nachricht enthaelt Fehler.
+            9800 Dialog abgebrochen
+            9210 Auftrag abgelehnt - Auftrag auf Kundenwunsch abgebrochen.
+
+        Unbeaufsichtigt ist die Antwort dieselbe -- eine TAN ist noetig --,
+        aber nichts wird geparkt und niemand wird gefragt. Eine Anfrage, die
+        niemand beantwortet, ist Muell, fuer den ein Institut einen Dialog
+        offen haelt.
+
         :param response: The response object from the FinTS server
-        :return: True if a TAN is required (and requested), False otherwise
+        :return: True if a TAN is required (and, where somebody is there,
+            requested), False otherwise
         """
-        if isinstance(response, NeedTANResponse):
-            self.ask_for_tan(response)
+        if not isinstance(response, NeedTANResponse):
+            return False
+
+        if not self.interactive.enabled:
             return True
 
-        return False
+        self.ask_for_tan(response)
+        return True
 
     def __parked_challenge_is_stale(self):
         """Is the parked TAN challenge too old to still be worth replaying?
