@@ -167,27 +167,60 @@ class TestTheBankGetsQuoted(unittest.TestCase):
 
     def test_the_client_remembers_what_it_heard(self):
         source = _source("utils", "fints_vop_client.py")
-        body = _body(
-            source,
-            "def _process_response(self, dialog, segment, response):")
-        self.assertIn("self.last_said = (self.last_said + (said,))[-12:]",
+        body = _body(source, "def _remember_what_the_bank_said(self, message):")
+        self.assertIn("fints_response.lines_in_message(message)", body)
+        self.assertIn("self.last_said = (self.last_said + (said,))[-40:]",
                       body)
+
+    def test_it_is_written_down_per_message_not_per_line(self):
+        """The whole point: the library raises on the first 9010 it meets,
+        and it meets the message-level lines first. A note-taker that is
+        called once per line therefore never sees the segment-level ones --
+        which are the lines that say what was actually wrong."""
+        source = _source("utils", "fints_vop_client.py")
+        self.assertIn("def process_response_message(self, dialog, message,",
+                      source)
+        self.assertNotIn("def _process_response(self, dialog, segment,",
+                         source)
+        body = _body(source,
+                     "def process_response_message(self, dialog, message,")
+        self.assertLess(body.index("self._remember_what_the_bank_said(message)"),
+                        body.index("return super().process_response_message("))
 
     def test_it_changes_nothing(self):
         """A note-taker that alters the flow is not a note-taker."""
         source = _source("utils", "fints_vop_client.py")
-        body = _body(
-            source,
-            "def _process_response(self, dialog, segment, response):")
+        body = _body(source,
+                     "def process_response_message(self, dialog, message,")
         self.assertIn(
-            "return super()._process_response(dialog, segment, response)",
-            body)
+            "dialog, message, internal_send=internal_send)", body)
 
     def test_the_piece_check_covers_it(self):
         """Or the override lands on a library that has moved."""
         source = _source("utils", "fints_vop_client.py")
         needed = source.split("needed = (")[1].split(")")[0]
-        self.assertIn('"_process_response"', needed)
+        self.assertIn('"process_response_message"', needed)
+
+    def test_what_went_out_is_written_down_too(self):
+        """A complaint about a message is unreadable without the message."""
+        source = _source("utils", "fints_vop_client.py")
+        body = _body(source, "def send_tan(self, challenge, tan):")
+        self.assertLess(
+            body.index("self._remember_what_we_sent(vop_seg + [tan_seg])"),
+            body.index("response = dialog.send(*(vop_seg + [tan_seg]))"))
+
+    def test_only_the_segment_types_are_written_down(self):
+        """The message it describes carries a TAN."""
+        source = _source("utils", "fints_vop_client.py")
+        body = _body(source, "def _remember_what_we_sent(self, segments):")
+        self.assertIn("type(segment).__name__", body)
+
+    def test_the_failure_log_quotes_what_went_out(self):
+        source = _source("utils", "fints_controller.py")
+        body = _body(source, "def __note_the_failed_release(self):")
+        self.assertIn("fints_vop_client.what_was_sent(self.fints_connection)",
+                      body)
+        self.assertIn("What was sent:", body)
 
     def test_the_failure_log_quotes_it(self):
         source = _source(*TAN_STRECKE)
@@ -218,6 +251,20 @@ class TestWhatTheBankSaid(unittest.TestCase):
         self.assertIn("nothing recorded", what_the_bank_said(Connection()))
         self.assertIn("nothing recorded", what_the_bank_said(object()))
 
+    def test_it_names_the_segment_where_the_bank_named_one(self):
+        """Two lines of one message can carry the same code about different
+        segments, and that difference is the whole diagnosis."""
+        from kefiya.utils.fints_vop_client import what_the_bank_said
+
+        class Connection:
+            last_said = (("9050", "Die Nachricht enthaelt Fehler.", ""),
+                         ("9210", "Ungueltige Auftragsdaten.", "2"))
+
+        said = what_the_bank_said(Connection())
+        self.assertIn("[Segment 2]", said)
+        # The message-level line names none, and must not grow one.
+        self.assertNotIn("Fehler. [Segment", said)
+
     def test_it_never_raises(self):
         from kefiya.utils.fints_vop_client import what_the_bank_said
 
@@ -225,6 +272,26 @@ class TestWhatTheBankSaid(unittest.TestCase):
             last_said = "not a sequence of pairs"
 
         self.assertIsInstance(what_the_bank_said(Connection()), str)
+
+
+class TestWhatWasSent(unittest.TestCase):
+
+    def test_it_names_the_segments(self):
+        from kefiya.utils.fints_vop_client import what_was_sent
+
+        class Connection:
+            last_sent = ("HKVPA1", "HKTAN7")
+
+        self.assertEqual("HKVPA1 + HKTAN7", what_was_sent(Connection()))
+
+    def test_an_empty_record_says_so_rather_than_lying(self):
+        from kefiya.utils.fints_vop_client import what_was_sent
+
+        class Connection:
+            last_sent = ()
+
+        self.assertIn("nothing recorded", what_was_sent(Connection()))
+        self.assertIn("nothing recorded", what_was_sent(object()))
 
 
 if __name__ == "__main__":

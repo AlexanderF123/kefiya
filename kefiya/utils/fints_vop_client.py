@@ -27,6 +27,7 @@ WHY THIS CANNOT SEND TWICE, which is the only question that matters here:
     bestaetigt, und genau das ist der Sinn der Empfaengerpruefung.
 """
 
+from kefiya.utils import fints_response
 from kefiya.utils.fints_vop import (CONFIRMATION_DEMANDED,
                                     POLL_LIMIT_SECONDS, can_be_approved,
                                     demands_confirmation, poll_pause,
@@ -74,7 +75,7 @@ def _pieces():
     needed = ("_find_vop_format_for_segment", "_need_twostep_tan_for_segment",
               "_get_tan_segment", "is_challenge_structured",
               "_send_pay_with_possible_retry", "send_tan", "_get_dialog",
-              "_process_response")
+              "process_response_message")
     for name in needed:
         if not hasattr(FinTS3PinTanClient, name):
             return None
@@ -127,39 +128,74 @@ def _build(parts):
     class VopAwarePinTanClient(base):
         """A client that can also be told "confirm the payee first"."""
 
-        #: What the bank last said, so a failure can quote it.
+        #: What the bank last said, so a failure can quote it. One entry
+        #: per line of a bank answer: (code, text, reference element).
         last_said = ()
 
-        def _process_response(self, dialog, segment, response):
-            """Remember the bank's words, then let the library decide.
+        #: The segment TYPES of the last message this client composed
+        #: itself, so a refusal can be read against what provoked it.
+        last_sent = ()
 
-            Changes nothing. It exists because python-fints throws away what
-            the bank actually said and puts its own sentence in its place --
-            and that sentence is wrong outside the one case it was written
-            for::
+        def process_response_message(self, dialog, message,
+                                     internal_send=True):
+            """Write the WHOLE message down, then let the library read it.
+
+            Changes nothing. It replaces an override on _process_response
+            that wrote one line down at a time -- and could therefore only
+            ever write down the lines BEFORE the one the library throws on::
 
                 if response.code == '9010':
                     raise FinTSClientError("Error during dialog initialization,
                         could not fetch BPD. Please check that you passed the
                         correct bank identifier to the HBCI URL ...")
 
-            The check is unconditional, so a 9010 answering a TAN status query
-            mid-dialog -- which is what the Sparkasse sent, and what stopped
-            Auftrag A -- is reported as a wrong bank URL. The URL was
-            right. Nobody could have got from that message to the cause, and
-            the whole run had to be reconstructed from the outside.
+            That check is unconditional, so a 9010 answering a TAN status
+            query mid-dialog -- which is what the Sparkasse sent, and what
+            stopped Auftrag A -- is reported as a wrong bank URL. The URL was
+            right.
 
-            So every response is noted here first, and the caller quotes them
-            when something fails. Guarded: a client that cannot remember what
-            it heard must still work exactly as before.
+            And the library reads message level (HIRMG) before segment level
+            (HIRMS), so the raise lands before a single segment-level line
+            has been looked at. Those are the lines that say WHICH segment
+            the bank objected to. The same transfer was refused on 09.10.2026
+            and again on 13.10.2026 with two message-level codes and nothing
+            else in the log; the bank had said more, and this is where it
+            went missing.
+
+            Reading the message here, before the library touches it, makes
+            the record complete whatever the library then does with it.
+            """
+            self._remember_what_the_bank_said(message)
+            return super().process_response_message(
+                dialog, message, internal_send=internal_send)
+
+        def _remember_what_the_bank_said(self, message):
+            """Keep the lines of one message. Never raises -- it is a notebook.
+
+            Kept generously: one refused message can carry a dozen lines, and
+            the useful one is regularly the last.
             """
             try:
-                said = (str(getattr(response, "code", "")),
-                        str(getattr(response, "text", "")))
-                self.last_said = (self.last_said + (said,))[-12:]
+                for line in fints_response.lines_in_message(message):
+                    said = (line["code"], line["text"], line["reference"])
+                    self.last_said = (self.last_said + (said,))[-40:]
             except Exception:
                 pass
-            return super()._process_response(dialog, segment, response)
+
+        def _remember_what_we_sent(self, segments):
+            """The segment TYPES of a message, never their contents.
+
+            A TAN segment carries the TAN and a payment segment carries the
+            payment; neither belongs in a log. The type is what a refusal has
+            to be read against: "9050 Die Nachricht enthaelt Fehler" says
+            nothing on its own, and the same line next to "HKVPA1 + HKTAN"
+            says which segment to suspect first.
+            """
+            try:
+                self.last_sent = tuple(
+                    type(segment).__name__ for segment in segments)
+            except Exception:
+                self.last_sent = ()
 
         def send_tan(self, challenge, tan):
             """Answer the TAN -- and keep saying the payee was confirmed.
@@ -209,6 +245,9 @@ def _build(parts):
                 vop_seg = []
                 if can_be_approved(getattr(challenge, "vop_result", None)):
                     vop_seg = [HKVPA1(vop_id=challenge.vop_result.vop_id)]
+                # Written down before it goes out, because a refusal of this
+                # message is only readable against what was in it.
+                self._remember_what_we_sent(vop_seg + [tan_seg])
                 response = dialog.send(*(vop_seg + [tan_seg]))
 
                 if challenge.decoupled:
@@ -584,7 +623,36 @@ def what_the_bank_said(connection):
     said = getattr(connection, "last_said", None)
     if not said:
         return "(nothing recorded -- this connection keeps no record)"
+    out = []
     try:
-        return "\n".join("  {0} {1}".format(code, text) for code, text in said)
+        for entry in said:
+            line = "  {0} {1}".format(entry[0], entry[1]).rstrip()
+            # Which segment the bank meant, where it said so. Two lines of
+            # the same message can carry the same code about different
+            # segments, and that difference is the whole diagnosis.
+            reference = entry[2] if len(entry) > 2 else ""
+            if reference:
+                line = "{0} [Segment {1}]".format(line, reference)
+            out.append(line)
+    except Exception:
+        return "(the record could not be read)"
+    return "\n".join(out)
+
+
+def what_was_sent(connection):
+    """The segment types of the last message this client composed itself.
+
+    The other half of the record. "9050 Die Nachricht enthaelt Fehler" is a
+    complaint about a message, and until the message is named next to it,
+    reading the complaint is guesswork -- four days of it, in one case.
+
+    Types only, never contents: the message it describes carries a TAN.
+    Never raises; answers a note saying so when there is nothing.
+    """
+    sent = getattr(connection, "last_sent", None)
+    if not sent:
+        return "(nothing recorded)"
+    try:
+        return " + ".join(str(name) for name in sent)
     except Exception:
         return "(the record could not be read)"

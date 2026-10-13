@@ -692,6 +692,13 @@ class FinTSController(TanSession):
             said = fints_vop_client.what_the_bank_said(self.fints_connection)
         except Exception:
             said = "(the bank's words could not be read)"
+        # What provoked the answer. A message-level refusal names no segment,
+        # so without this line the reader is left to guess which one the bank
+        # meant -- and guessing it cost four days on one transfer.
+        try:
+            sent = fints_vop_client.what_was_sent(self.fints_connection)
+        except Exception:
+            sent = "(could not be read)"
         try:
             frappe.log_error(
                 title="Kefiya: the parked release could not be answered",
@@ -701,8 +708,10 @@ class FinTSController(TanSession):
                     " here. The challenge has been discarded and the order is"
                     " not marked as sent; whether the bank carried it out has"
                     " to be read in the online banking."
+                    "\n\nWhat was sent: {3}"
                     "\n\nWhat the bank said:\n{1}\n\n{2}"
-                ).format(self.kefiya_login.name, said, frappe.get_traceback()),
+                ).format(self.kefiya_login.name, said, frappe.get_traceback(),
+                         sent),
                 reference_doctype="Kefiya Login",
                 reference_name=self.kefiya_login.name,
             )
