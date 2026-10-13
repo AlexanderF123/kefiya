@@ -296,3 +296,85 @@ class TestWhichSegmentTheCodeIsAbout(unittest.TestCase):
         v = fr.verdict_of(Answer([Line("0010", "Nachricht entgegengenommen")]))
         self.assertEqual(v["lines"][0]["reference"], "")
         self.assertEqual(fr.as_text(v), "0010 Nachricht entgegengenommen")
+
+
+class Header:
+    def __init__(self, type):
+        self.type = type
+
+
+class Segment:
+    """A segment of a bank message, as little of one as the reader needs."""
+
+    def __init__(self, type, lines=None):
+        self.header = Header(type)
+        if lines is not None:
+            self.responses = lines
+
+
+class BankMessage:
+    """A whole bank message: segments, each with its answer lines."""
+
+    def __init__(self, segments):
+        self.segments = segments
+
+
+class TestTheWholeMessageIsRead(unittest.TestCase):
+    """python-fints reads HIRMG (message level) first and raises on the first
+    9010 it meets -- so every HIRMS line of the same message is thrown away,
+    and those are the lines that name WHICH segment the bank objected to.
+
+    The same transfer was refused on 09.10.2026 and again on 13.10.2026,
+    four days and two dialogs apart, and both times the entire record was
+
+        9050 Die Nachricht enthaelt Fehler.
+        9010 Der Auftrag wurde nicht ausgefuehrt.
+
+    Neither line says what was wrong with it.
+    """
+
+    def _refusal(self):
+        return BankMessage([
+            Segment("HIRMG", [Line("9050", "Die Nachricht enthält Fehler."),
+                              Line("9010", "Der Auftrag wurde nicht "
+                                           "ausgeführt.")]),
+            Segment("HIRMS", [Line("9210", "Ungültige Auftragsdaten.")]),
+        ])
+
+    def test_both_levels_are_read(self):
+        lines = fr.lines_in_message(self._refusal())
+        self.assertEqual(["9050", "9010", "9210"],
+                         [line["code"] for line in lines])
+
+    def test_the_segment_level_line_keeps_its_segment(self):
+        line = Line("9210", "Ungültige Auftragsdaten.")
+        line.reference_element = "3"
+        lines = fr.lines_in_message(
+            BankMessage([Segment("HIRMS", [line])]))
+        self.assertEqual("3", lines[0]["reference"])
+
+    def test_segments_that_are_not_an_answer_are_skipped(self):
+        lines = fr.lines_in_message(BankMessage([
+            Segment("HNHBK"),
+            Segment("HITAN", [Line("9999", "not an answer segment")]),
+            Segment("HIRMG", [Line("0010", "Nachricht entgegengenommen")]),
+        ]))
+        self.assertEqual(["0010"], [line["code"] for line in lines])
+
+    def test_an_unreadable_segment_is_one_segment_less(self):
+        """Not a failed read: this runs while a message is being handled."""
+        class Hostile:
+            @property
+            def header(self):
+                raise RuntimeError("no")
+
+        lines = fr.lines_in_message(BankMessage([
+            Hostile(),
+            Segment("HIRMG", [Line("9050", "Die Nachricht enthält Fehler.")]),
+        ]))
+        self.assertEqual(["9050"], [line["code"] for line in lines])
+
+    def test_something_that_is_not_a_message_reads_as_nothing(self):
+        self.assertEqual([], fr.lines_in_message(None))
+        self.assertEqual([], fr.lines_in_message(object()))
+        self.assertEqual([], fr.lines_in_message(BankMessage([])))

@@ -106,29 +106,104 @@ def verdict_of(response):
     """
     lines = []
     for entry in _entries_of(response):
-        try:
-            code = _text(getattr(entry, "code", None))
-            text = _text(getattr(entry, "text", None))
-            # A HIRMS line is code / reference_element / text / parameters,
-            # and the parameters are where an institute puts the part that
-            # actually helps -- which field it objected to, which limit was
-            # exceeded. The text alone is often only "Ungueltige
-            # Auftragsdaten".
-            detail = _text(getattr(entry, "parameters", None))
-            # WHICH segment the code is about. Kept because leaving it out
-            # cost half a day: a release answered "0020 Der Auftrag wurde
-            # ausgefuehrt", which was read as the transfer having gone
-            # through. It belonged to the status query segment. The code
-            # alone cannot say which; the reference element can.
-            reference = _text(getattr(entry, "reference_element", None))
-        except Exception:
-            # A line this cannot read is one line less, not a failed dialog.
-            continue
-        if code or text:
-            lines.append({"code": code, "text": text, "detail": detail,
-                          "reference": reference})
+        line = _line_of(entry)
+        if line:
+            lines.append(line)
 
     return {"status": _worst(response, lines), "lines": lines}
+
+
+def _line_of(entry):
+    """One line of a bank answer as plain data, or None where it cannot be read.
+
+    :return: {"code", "reference", "text", "detail"} or None
+    """
+    try:
+        code = _text(getattr(entry, "code", None))
+        text = _text(getattr(entry, "text", None))
+        # A HIRMS line is code / reference_element / text / parameters, and
+        # the parameters are where an institute puts the part that actually
+        # helps -- which field it objected to, which limit was exceeded. The
+        # text alone is often only "Ungueltige Auftragsdaten".
+        detail = _text(getattr(entry, "parameters", None))
+        # WHICH segment the code is about. Kept because leaving it out cost
+        # half a day: a release answered "0020 Der Auftrag wurde
+        # ausgefuehrt", which was read as the transfer having gone through.
+        # It belonged to the status query segment. The code alone cannot say
+        # which; the reference element can.
+        reference = _text(getattr(entry, "reference_element", None))
+    except Exception:
+        # A line this cannot read is one line less, not a failed dialog.
+        return None
+    if not (code or text):
+        return None
+    return {"code": code, "text": text, "detail": detail,
+            "reference": reference}
+
+
+#: The two segment types a bank answers in. HIRMG is about the whole
+#: message, HIRMS about one segment of it.
+_ANSWER_SEGMENTS = ("HIRMG", "HIRMS")
+
+
+def lines_in_message(message):
+    """Every line of ONE bank message, in the order the bank wrote them.
+
+    verdict_of reads an answer OBJECT -- a TransactionResponse, which the
+    library has already narrowed down to one order. This reads the MESSAGE,
+    which is the only place both levels are still together, and it exists
+    because python-fints stops reading one halfway through::
+
+        for seg in message.find_segments(HIRMG2):    # message level
+            ...
+            self._process_response(dialog, None, response)
+        for seg in message.find_segments(HIRMS2):    # segment level
+            ...
+            self._process_response(dialog, segment, response)
+
+    and _process_response raises on the first 9010 it meets. Message level
+    is read first, so that raise lands BEFORE a single segment-level line
+    has been looked at -- and the segment-level lines are the ones that name
+    which segment the bank objected to and why.
+
+    That is not theory. The same transfer was refused on 09.10.2026 and
+    again on 13.10.2026, four days and two dialogs apart, and both times the
+    whole record was::
+
+        9050 Die Nachricht enthaelt Fehler.
+        9010 Der Auftrag wurde nicht ausgefuehrt.
+
+    Neither line says what was wrong. The bank had almost certainly said so
+    in a HIRMS line of the same message; nobody read that far. Four days
+    were spent guessing instead -- at the character set, at the instant-
+    payment flag, at a stale dialog -- and each guess was wrong.
+
+    Never raises: this runs while a message is being handled, and a reader
+    that throws turns a readable refusal into a crash.
+
+    :param message: a FinTSInstituteMessage, or anything with .segments
+    :return: a list of {"code", "reference", "text", "detail"}
+    """
+    lines = []
+    try:
+        segments = list(getattr(message, "segments", None) or [])
+    except Exception:
+        return lines
+
+    for segment in segments:
+        try:
+            kind = _text(getattr(getattr(segment, "header", None), "type", None))
+            if kind.upper()[:5] not in _ANSWER_SEGMENTS:
+                continue
+            entries = list(getattr(segment, "responses", None) or [])
+        except Exception:
+            # One unreadable segment is one segment less, not a failed read.
+            continue
+        for entry in entries:
+            line = _line_of(entry)
+            if line:
+                lines.append(line)
+    return lines
 
 
 def _worst(response, lines):
