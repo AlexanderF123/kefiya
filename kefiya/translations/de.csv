@@ -438,3 +438,7 @@ Approval by a second person,Freigabe durch eine zweite Person
 Fetch at most every n days,Höchstens alle n Tage abrufen
 "Leer oder 0: die Vorgabe der Kontoart gilt (Geschaeftsanteile, Avale, Darlehen: 30 Tage; Depots: 7; Zahlungskonten: bei jedem Lauf). Ab 1: hoechstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar.","Leer oder 0: die Vorgabe der Kontoart gilt (Geschäftsanteile, Avale, Darlehen: 30 Tage; Depots: 7; Zahlungskonten: bei jedem Lauf). Ab 1: höchstens alle n Tage. Von Hand bleibt der Zugang jederzeit abrufbar."
 "This dated order cannot be prepared for a release, so it was NOT sent and nothing has reached the bank. Please report this -- the resume point {0} cannot be written down.","Dieser Terminauftrag lässt sich nicht auf eine Freigabe vorbereiten und wurde deshalb NICHT gesendet; bei der Bank ist nichts angekommen. Bitte melden Sie das — der Wiederaufnahme-Punkt {0} lässt sich nicht aufschreiben."
+the bank does not offer a securities snapshot for depot {0},Die Bank bietet für Depot {0} keinen Depotbestand an
+"this access reports no BIC, so depot {0} cannot be addressed","Dieser Zugang meldet keine BIC, deshalb ist Depot {0} nicht ansprechbar"
+the bank wants a release for depot {0}. Fetch this access by hand once.,Die Bank verlangt für Depot {0} eine Freigabe. Rufen Sie diesen Zugang einmal von Hand ab.
+depot {0} could not be read: {1},Depot {0} konnte nicht gelesen werden: {1}

@@ -64,9 +64,18 @@ TEXT = {".py", ".js", ".json", ".md", ".csv", ".txt", ".html", ".css",
 #: normalisierter Form. Normalisiert heisst: klein, ohne Akzente, "ss" fuer
 #: das scharfe s, nur Buchstaben und Ziffern.
 #:
-#: Es sind Namen von Personen, Gesellschaften, Bankzugaengen und Mandanten.
-#: Was es genau ist, steht hier absichtlich nicht.
+#: Es sind Namen von Personen, Gesellschaften, Bankzugaengen und Mandanten
+#: sowie Konto- und Depotnummern. Was es genau ist, steht hier absichtlich
+#: nicht.
+#:
+#: Nachgetragen wird hier, wer einmal beinahe hineingeraten waere: am
+#: 16.10.2026 stand eine echte Depotnummer in einem neuen Test, aus einer
+#: Uebergabe uebernommen. Die IBAN-Pruefung sah sie nicht -- eine
+#: Kontonummer ist keine IBAN. Ein Vorsatz haette sie auch nicht gesehen.
 GESPERRT = (
+    (9, "1feff0f16452"),
+    (9, "4c53ea08c9ec"),
+    (9, "9e3a99634e44"),
     (10, "8a4152b353bf"),
     (11, "56c7cecc0b93"),
     (11, "20864cda2693"),

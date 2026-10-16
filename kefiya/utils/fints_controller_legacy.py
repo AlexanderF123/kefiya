@@ -206,29 +206,36 @@ class FinTSController:
                 )
             )
 
-    def get_fints_holdings(self):
-        """Fetch securities holdings (Depot / Wertpapiere) for the account.
+    def get_fints_holdings(self, depots=None):
+        """Der Depotbestand (HKWPD) -- eine Abfrage je Depot.
 
-        :return: list of plain dicts (isin, security_name, quantity, price,
-            market_value, currency, valuation_date, securities_account)
+        Wort fuer Wort dieselbe Zusage wie im TAN-faehigen Controller, und
+        aus demselben Modul bedient: fints_depot. Die beiden Controller sind
+        keine Verwandten, also haette eine zweite Fassung hier gestanden und
+        waere irgendwann auseinandergelaufen -- auf dieser Seite still, denn
+        ohne TAN faellt niemandem auf, dass nichts mehr ankommt.
+
+        :param depots: Depotnummern. Leer oder None fragt wie bisher das
+            Konto des Logins.
+        :return: {"holdings": [Positionen], "refused": [{"securities_account",
+            "reason"}]}
         """
+        from kefiya.utils import (fints_depot,
+                                  securities_depot)
+
         with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
-            holdings = self.fints_connection.get_holdings(account)
-            result = []
-            for h in holdings or []:
-                result.append({
-                    "isin": getattr(h, "isin", None),
-                    "security_name": getattr(h, "name", None),
-                    "quantity": getattr(h, "pieces", None),
-                    "price": getattr(h, "market_value", None),
-                    "market_value": getattr(h, "total_value", None),
-                    "currency": getattr(h, "value_symbol", None),
-                    "valuation_date": getattr(h, "valuation_date", None),
-                    "securities_account": self.kefiya_login.account_iban,
-                })
-            return result
+            if not securities_depot.wanted_depots(depots):
+                account = self.get_fints_account_by_iban(
+                    self.kefiya_login.account_iban)
+                return {
+                    "holdings": fints_depot.holdings_of(
+                        self.fints_connection, account,
+                        self.kefiya_login.account_iban) or [],
+                    "refused": [],
+                }
+            return fints_depot.fetch_holdings(
+                self.fints_connection, self.kefiya_login.blz, depots,
+                self.fints_accounts)
 
     def import_fints_transactions(self, kefiya_import):
         """Create payment entries by FinTS transactions.
