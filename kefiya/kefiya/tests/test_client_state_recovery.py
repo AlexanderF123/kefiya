@@ -146,9 +146,14 @@ class TestTheButtonDoesTheSameThing(unittest.TestCase):
         from kefiya.utils import fints_state_fields
         self.assertNotIn("account_iban", fints_state_fields.CLEARED)
         self.assertNotIn("iban_list", fints_state_fields.CLEARED)
+        # Beide stehen in IDENTITY, und clear_fints_caches leert genau
+        # diese Liste -- seit die Kundensystem-ID als drittes dazugehoert
+        # und die Aufzaehlung an eine Stelle gewandert ist.
+        self.assertIn("account_iban", fints_state_fields.IDENTITY)
+        self.assertIn("iban_list", fints_state_fields.IDENTITY)
         leeren = _block(self.doc, "clear_fints_caches")
-        self.assertIn("self.account_iban = None", leeren)
-        self.assertIn("self.iban_list = None", leeren)
+        self.assertIn("for fieldname in fints_state_fields.IDENTITY:", leeren)
+        self.assertIn("self.set(fieldname, None)", leeren)
         # Auf die Zuweisung, nicht auf den Namen: der Docstring dort
         # erklaert gerade, warum account_iban stehen bleibt, und ein Test,
         # der den Namen sucht, findet die Erklaerung statt des Codes.
@@ -192,3 +197,90 @@ class TestTheMessageSaysWhatReallyHappened(unittest.TestCase):
         hint = send.index("Before sending again, look in your online banking")
         self.assertLess(send.index("could NOT be discarded"), hint)
         self.assertLess(send.index("has been discarded"), hint)
+
+
+class TestTheDeviceSurvivesTheDiscard(unittest.TestCase):
+    """Die Kundensystem-ID ist die Kennung, unter der die Bank diese
+    Installation als Geraet kennt. Sie lag nur im Blob stored_client_state,
+    und der wird bei jedem Dialogfehler verworfen -- fuer alle
+    Geschwister-Logins des Zugangs mit. Danach schickt python-fints
+
+        dialog.init(HKSYN3(SynchronizationMode.NEW_SYSTEM_ID))
+
+    und die Bank sieht ein neues Geraet: volle Authentifizierung, und die
+    90 Tage, in denen PSD2 den Abruf ohne TAN erlaubt, fangen bei null an.
+    An einem Zugang mit fuenfzehn Logins kostete ein Fehlschlag die
+    TAN-Freiheit von fuenfzehn Konten.
+
+    Eine Umsatzabfrage selbst braucht dagegen nie eine TAN -- das sagt die
+    Bank in HIPINS je Geschaeftsvorfall, und die Bibliothek haelt sich
+    daran. Die TAN galt immer nur der Anmeldung.
+    """
+
+    def setUp(self):
+        self.py = _read("utils", "fints_controller.py")
+
+    def test_it_is_handed_to_the_client(self):
+        body = _block(self.py, "__init_fints_connection")
+        self.assertIn("system_id=fints_state_fields.usable_system_id(", body)
+
+    def test_a_restored_blob_still_wins(self):
+        """set_data laeuft nach dem Konstruktor, also sticht ein frischer
+        Zustand die aufgehobene ID. Beides mitzugeben ist deshalb sicher --
+        aber nur, solange from_data auch wirklich mitgeht."""
+        body = _block(self.py, "__init_fints_connection")
+        self.assertIn("from_data=self.kefiya_login.stored_client_blob,", body)
+
+    def test_it_is_written_down_beside_the_blob(self):
+        body = _block(self.py, "_persist_fints_state")
+        self.assertIn("fints_state_fields.SYSTEM_ID_FIELD", body)
+        self.assertIn('getattr(self.fints_connection, "system_id", None)',
+                      body)
+
+    def test_and_outside_the_bpd_guard(self):
+        """Eine ID, die die Bank schon vergeben hat, gilt auch dann, wenn
+        der Dialog sonst nichts Brauchbares hinterlassen hat. Stuende der
+        Schreibvorgang im BPD-Zweig, ginge sie genau in dem Fall verloren,
+        fuer den sie gedacht ist."""
+        body = _block(self.py, "_persist_fints_state")
+        zweig = body.index("_has_bank_parameters(self.fints_connection)")
+        schreiben = body.index("fints_state_fields.SYSTEM_ID_FIELD")
+        eingerueckt = [
+            line for line in body[zweig:schreiben].split("\n")[1:]
+            if line.strip()]
+        self.assertTrue(
+            any(not line.startswith("            ") for line in eingerueckt),
+            "der Schreibvorgang haengt noch im if-Zweig")
+
+    def test_the_zero_is_never_kept(self):
+        """'0' heisst 'die Bank hat noch keine vergeben'."""
+        from kefiya.utils import fints_state_fields
+
+        self.assertIsNone(fints_state_fields.usable_system_id(
+            fints_state_fields.SYSTEM_ID_UNASSIGNED))
+
+    def test_an_automatic_discard_leaves_it_alone(self):
+        from kefiya.utils import fints_state_fields
+
+        self.assertNotIn(fints_state_fields.SYSTEM_ID_FIELD,
+                         fints_state_fields.CLEARED)
+
+    def test_but_the_button_takes_it(self):
+        """Wer 'Verbindung zuruecksetzen' drueckt, will das Geraet neu
+        anmelden -- und bezahlt das mit einer TAN. Das ist der Sinn."""
+        login = _read("kefiya", "doctype", "kefiya_login", "kefiya_login.py")
+        body = _block(login, "clear_fints_caches")
+        self.assertIn("for fieldname in fints_state_fields.IDENTITY:", body)
+
+    def test_the_access_shares_one_device(self):
+        """Die ID gehoert dem Zugang, nicht dem einzelnen Login."""
+        geerbt = _block(self.py, "_seed_client_state_from_sibling")
+        self.assertIn("fints_state_fields.SYSTEM_ID_FIELD", geerbt)
+        geteilt = _block(self.py, "_propagate_client_state_to_siblings")
+        self.assertIn("fints_state_fields.SYSTEM_ID_FIELD", geteilt)
+
+    def test_sharing_never_empties_a_sibling(self):
+        """Ein Geschwister ohne eigene ID wuerde sich sonst bei der Bank neu
+        anmelden -- genau der Fehler, den das hier verhindern soll."""
+        body = _block(self.py, "_propagate_client_state_to_siblings")
+        self.assertIn("if meine_system_id:", body)

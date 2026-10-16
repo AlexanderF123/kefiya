@@ -41,6 +41,7 @@
   "bank_account",
   "hidden_section",
   "iban_list",
+  "fints_system_id",
   "stored_client_state",
   "stored_dialog_state",
   "stored_tan_state",
@@ -154,6 +155,13 @@
   {
    "fieldname": "iban_list",
    "fieldtype": "Text"
+  },
+  {
+   "description": "Die Kennung, unter der die Bank diese Installation als Geraet kennt. Ueberlebt das Verwerfen eines kaputten Verbindungszustands, damit die Bank nicht jedes Mal eine neue starke Authentifizierung verlangt.",
+   "fieldname": "fints_system_id",
+   "fieldtype": "Data",
+   "label": "FinTS System ID",
+   "read_only": 1
   },
   {
    "description": "From python-fints 4.x version, the default product_id is removed, so that each user needs to acquire its own:\nhttps://python-fints.readthedocs.io/en/latest/upgrading_3_4.html\n",

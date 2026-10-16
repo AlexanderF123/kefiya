@@ -86,6 +86,50 @@ class TestDieIdentitaetBleibtStehen(unittest.TestCase):
         self.assertNotIn("account_iban", fints_state_fields.CLEARED)
         self.assertNotIn("iban_list", fints_state_fields.CLEARED)
 
+    def test_nichts_aus_der_identitaet_steht_in_cleared(self):
+        for name in fints_state_fields.IDENTITY:
+            self.assertNotIn(name, fints_state_fields.CLEARED, name)
+
+    def test_und_jedes_davon_gibt_es_im_doctype(self):
+        vorhanden = felder()
+        for name in fints_state_fields.IDENTITY:
+            self.assertIn(name, vorhanden, name)
+
+
+class TestDieKundensystemIdUeberlebt(unittest.TestCase):
+    """Sie ist die Kennung, unter der die Bank diese Installation als Geraet
+    kennt. Lag sie nur im Blob, holte sich die Bibliothek nach jedem
+    verworfenen Zustand mit HKSYN(NEW_SYSTEM_ID) eine neue -- ein neues
+    Geraet, volle Authentifizierung, und die 90 Tage der PSD2-Ausnahme
+    fingen bei null an. Mit dem Verwerfen der Geschwister traf das den
+    ganzen Zugang auf einmal."""
+
+    def test_sie_steht_neben_dem_blob_und_nicht_darin(self):
+        self.assertIn(fints_state_fields.SYSTEM_ID_FIELD,
+                      fints_state_fields.IDENTITY)
+        self.assertNotIn(fints_state_fields.SYSTEM_ID_FIELD,
+                         fints_state_fields.CLEARED)
+
+    def test_das_feld_ist_text_und_kein_zustand(self):
+        feld = felder()[fints_state_fields.SYSTEM_ID_FIELD]
+        self.assertEqual("Data", feld.get("fieldtype"))
+        self.assertFalse(
+            fints_state_fields.SYSTEM_ID_FIELD.startswith("stored_"),
+            "ein stored_*-Name wuerde von TestKeinZustandsfeldFehlt"
+            " eingesammelt und damit doch verworfen")
+
+    def test_die_null_ist_keine_id(self):
+        """Sie heisst 'die Bank hat noch keine vergeben'. Aufgehoben wuerde
+        sie der Bibliothek verschweigen, dass sie synchronisieren muss."""
+        self.assertIsNone(fints_state_fields.usable_system_id("0"))
+        self.assertIsNone(fints_state_fields.usable_system_id(None))
+        self.assertIsNone(fints_state_fields.usable_system_id(""))
+        self.assertIsNone(fints_state_fields.usable_system_id("   "))
+
+    def test_eine_echte_kommt_durch(self):
+        self.assertEqual("ABC123",
+                         fints_state_fields.usable_system_id("  ABC123 "))
+
 
 class TestDieVorlageBleibtUnberuehrt(unittest.TestCase):
 

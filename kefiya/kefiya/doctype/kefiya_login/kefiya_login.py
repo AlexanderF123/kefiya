@@ -59,13 +59,22 @@ class KefiyaLogin(Document):
 
     def clear_fints_caches(self, siblings=False):
         """Den Verbindungszustand wegwerfen und dazu, was nur ein Mensch
-        wegwerfen darf: die Kontenliste der Bank und das Konto, das dieses
-        Login abruft. Die beiden bleiben bei den Geschwistern stehen, auch
-        wenn deren Zustand mitgeht.
+        wegwerfen darf.
+
+        Das ist fints_state_fields.IDENTITY: die Kontenliste der Bank, das
+        Konto, das dieses Login abruft, und die Kundensystem-ID. Die drei
+        gehoeren dem Login und nicht seinem Dialog, deshalb stehen sie nicht
+        in CLEARED und ueberleben jedes automatische Verwerfen. Wer
+        "Verbindung zuruecksetzen" drueckt, will sie trotzdem los -- bei der
+        Kundensystem-ID heisst das, dass die Bank dieses Geraet neu kennen
+        lernt und einmal eine TAN verlangt. Das ist der Sinn des Knopfes.
+
+        Sie bleiben bei den Geschwistern stehen, auch wenn deren Zustand
+        mitgeht.
         """
         self.discard_connection_state(siblings=siblings)
-        self.iban_list = None
-        self.account_iban = None
+        for fieldname in fints_state_fields.IDENTITY:
+            self.set(fieldname, None)
 
     @property
     def stored_client_blob(self):
