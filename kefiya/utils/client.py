@@ -82,24 +82,79 @@ def import_fints_transactions(kefiya_import, kefiya_login, user_scope):
         .import_fints_transactions(kefiya_import)
 
 
+def depots_of(kefiya_login):
+    """Die Depotnummern der Wertpapierkonten, die an diesem Login haengen.
+
+    Leer heisst: an diesem Zugang ist kein Depot verknuepft. Der Abruf
+    fragt dann wie vorher das Konto des Logins -- siehe
+    get_fints_holdings. Nie ein Grund zu scheitern: ohne Liste verhaelt
+    sich der Depotabruf wie vor dieser Aenderung.
+    """
+    try:
+        zeilen = frappe.get_all(
+            "Kefiya Securities Account",
+            filters={"kefiya_login": kefiya_login},
+            fields=["account_number"],
+            order_by="account_number",
+            limit_page_length=0)
+    except Exception:
+        return []
+    return [z.get("account_number") for z in zeilen if z.get("account_number")]
+
+
+def store_holdings(kefiya_login, controller=None, summary=None):
+    """Den Depotbestand holen und ablegen, Ablehnungen mitgefuehrt.
+
+    Ohne Controller baut diese Funktion den passenden selbst -- die Wahl
+    zwischen TAN-faehigem und Legacy-Controller haengt an einer Einstellung
+    und wird hier getroffen, wo sie fuer alle anderen Abrufe auch getroffen
+    wird. Der Zeitplan muss sie damit weder kennen noch nachbauen.
+
+    Eine Ablehnung ist kein Fehler: die Bank laesst den Depotbestand fuer
+    dieses Konto nicht zu, und das ist eine Auskunft, keine Stoerung. Sie
+    steht deshalb im Ergebnis unter ``refused`` und nicht im
+    Fehlerprotokoll.
+
+    Als "bietet die Bank nicht an" gilt der Depotabruf nur, wenn gar nichts
+    ankam UND mindestens ein Depot abgelehnt wurde. Kam von einem Depot ein
+    Bestand und von einem anderen nicht, waere das Gegenteil eine Luege --
+    abgerufen wurde ja.
+    """
+    from kefiya.utils.securities import refresh_holdings
+
+    if controller is None:
+        controller = _get_fints_controller()(kefiya_login)
+
+    antwort = controller.get_fints_holdings(depots_of(kefiya_login)) or {}
+    bestand = antwort.get("holdings") or []
+    abgelehnt = antwort.get("refused") or []
+
+    ergebnis = refresh_holdings(kefiya_login, bestand)
+    if abgelehnt:
+        ergebnis["refused"] = abgelehnt
+        if summary is not None and not bestand:
+            summary.setdefault("unsupported", []).append("holdings")
+            summary.setdefault("unsupported_details", {})["holdings"] = \
+                "; ".join(eintrag.get("reason", "") for eintrag in abgelehnt)
+    return ergebnis
+
+
 @frappe.whitelist()
 def import_fints_holdings(kefiya_login, user_scope):
     """Fetch securities holdings (Depot) for a login and store a snapshot.
 
     :param kefiya_login: kefiya_login doc name
     :param user_scope: current open doctype page (for progress/TAN UI)
-    :return: dict with created/updated counts
+    :return: dict with created/updated/closed counts and one entry per depot
     """
     frappe.has_permission("Kefiya Login", ptype="write",
                           doc=kefiya_login, throw=True)
-    from kefiya.utils.securities import refresh_holdings
 
     FinTSController = _get_fints_controller()
     interactive = {"docname": user_scope, "enabled": True}
 
-    controller = FinTSController(kefiya_login, interactive)
-    holdings = controller.get_fints_holdings()
-    return refresh_holdings(kefiya_login, holdings)
+    return store_holdings(
+        kefiya_login, FinTSController(kefiya_login, interactive))
 
 
 @frappe.whitelist()
@@ -690,11 +745,13 @@ def fetch_all(kefiya_login, user_scope=None):
             summary, "pending", "pending_transactions", _fetch_pending)
 
         # 2c) Securities holdings (Depot) -> Kefiya Security Holding.
+        #     Je verknuepftem Wertpapierkonto eine Abfrage, mit DESSEN
+        #     Depotnummer. Vorher ging eine einzige an das Konto des Logins,
+        #     also an das Girokonto, und dafuer laesst keine Bank einen
+        #     Depotbestand zu -- es kam nie etwas an.
         def _fetch_holdings():
-            from kefiya.utils.securities import refresh_holdings
-
-            holdings = FetchCtl(kefiya_login).get_fints_holdings()
-            return refresh_holdings(kefiya_login, holdings)
+            return store_holdings(
+                kefiya_login, FetchCtl(kefiya_login), summary)
 
         summary["holdings"] = _optional_fetch(
             summary, "holdings", "holdings", _fetch_holdings)

@@ -54,6 +54,41 @@ def _log_import_failure(login_name):
             pass
 
 
+def _fetch_depot_snapshot(login_name):
+    """Den Depotbestand mitnehmen -- nachrangig und folgenlos.
+
+    Der Zeitplan holte bisher nur Umsaetze; fetch_all mit Saldo, Depot und
+    allem Uebrigen haengt am Knopf. Ein Depotstand, der nur erscheint, wenn
+    jemand drueckt, ist aber kein Depotstand, sondern eine Momentaufnahme
+    von irgendwann.
+
+    Streng nachrangig: die Umsaetze sind die Arbeit, der Bestand ist eine
+    Momentaufnahme. Was hier schiefgeht, darf die soeben gebuchten Umsaetze
+    nicht kosten -- deshalb faengt diese Funktion alles und wirft nie.
+
+    Logins ohne verknuepftes Wertpapierkonto fassen die Bank gar nicht an:
+    eine Abfrage in der Datenbank, kein Netzverkehr, kein Dialog.
+    """
+    try:
+        from kefiya.utils.client import depots_of, store_holdings
+
+        if not depots_of(login_name):
+            return
+        store_holdings(login_name)
+        frappe.db.commit()
+    except TanInteractionRequired:
+        # Eine Freigabe, die niemand gibt. Der Bestand wartet auf einen
+        # Abruf von Hand; die Umsaetze sind schon da. Kein Protokolleintrag:
+        # dass dieser Zugang eine TAN will, steht bereits beim Umsatzabruf.
+        pass
+    except Exception:
+        frappe.log_error(
+            title="Kefiya: scheduled securities snapshot failed",
+            message=frappe.get_traceback(),
+            reference_doctype="Kefiya Login",
+            reference_name=login_name)
+
+
 def _record_fetch_attempt(login_name):
     """Stamp the login with "we tried", so the frequency gate can see it.
 
@@ -292,6 +327,13 @@ def scheduled_import_fints_payments(manual=None):
             # later rollback would also discard the logins that already
             # succeeded in this tick.
             frappe.db.commit()
+
+            # Den Depotbestand mitnehmen, wo ein Wertpapierkonto haengt --
+            # NACH dem commit. Ein Fehler in der Datenbank macht die
+            # laufende Transaktion unbrauchbar, und davor liegend haette
+            # die Momentaufnahme die soeben gebuchten Umsaetze mitnehmen
+            # koennen. Genau das, was sie nicht darf.
+            _fetch_depot_snapshot(login_name)
         except TanInteractionRequired:
             # Kein Fehler, eine Lage: die Bank will eine Freigabe, und ein
             # Zeitplan hat niemanden, der sie gibt. Geparkt wird dabei

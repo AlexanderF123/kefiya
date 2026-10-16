@@ -30,7 +30,8 @@ from .import_bank_transaction import (
 from .auto_reconcile import run_after_import
 from .assign_payment_controller import AssignmentController
 from kefiya.utils import accepted_payee
-from kefiya.utils import camt_shape, fints_state_fields, gateway_session
+from kefiya.utils import (camt_shape, fints_depot, fints_state_fields,
+                          gateway_session, securities_depot)
 from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import login_siblings
@@ -1483,28 +1484,38 @@ class FinTSController(TanSession):
         return "|".join(str(data.get(k, "")) for k in
                         ("date", "amount", "purpose", "applicant_name"))
 
-    def get_fints_holdings(self):
-        """Fetch securities holdings (Depot / Wertpapiere) for the account.
+    def get_fints_holdings(self, depots=None):
+        """Der Depotbestand (HKWPD) -- eine Abfrage je Depot.
 
-        :return: list of plain dicts (isin, security_name, quantity, price,
-            market_value, currency, valuation_date, securities_account)
+        Vorher ging genau eine Abfrage hinaus, und zwar an das Konto des
+        LOGINS. Das ist das Giro- oder Tagesgeldkonto, an dem der Zugang
+        haengt, und dafuer laesst keine Bank einen Depotbestand zu. Die
+        Ablehnung las _optional_fetch korrekt als "bietet die Bank hier
+        nicht an", also blieb es still bei {created: 0, updated: 0} --
+        monatelang, ohne eine Zeile im Fehlerprotokoll.
+
+        Die Mechanik steht in fints_depot, weil es zwei Controller gibt und
+        beide dasselbe brauchen; die Regeln dazu in securities_depot.
+
+        :param depots: Depotnummern, nach denen gefragt werden soll. Leer
+            oder None fragt wie bisher das Konto des Logins -- ein Login
+            ohne verknuepftes Wertpapierkonto verhaelt sich damit genau wie
+            vorher.
+        :return: {"holdings": [Positionen], "refused": [{"securities_account",
+            "reason"}]}
         """
         with self.client_session():
-            account = self._require_fints_account()
-            holdings = self.fints_connection.get_holdings(account)
-            result = []
-            for h in holdings or []:
-                result.append({
-                    "isin": getattr(h, "isin", None),
-                    "security_name": getattr(h, "name", None),
-                    "quantity": getattr(h, "pieces", None),
-                    "price": getattr(h, "market_value", None),
-                    "market_value": getattr(h, "total_value", None),
-                    "currency": getattr(h, "value_symbol", None),
-                    "valuation_date": getattr(h, "valuation_date", None),
-                    "securities_account": self.kefiya_login.account_iban,
-                })
-            return result
+            if not securities_depot.wanted_depots(depots):
+                return {
+                    "holdings": fints_depot.holdings_of(
+                        self.fints_connection,
+                        self._require_fints_account(),
+                        self.kefiya_login.account_iban) or [],
+                    "refused": [],
+                }
+            return fints_depot.fetch_holdings(
+                self.fints_connection, self.kefiya_login.blz, depots,
+                self.fints_accounts)
 
     @staticmethod
     def _amount_from(amount_field):
