@@ -30,7 +30,7 @@ from .import_bank_transaction import (
 from .auto_reconcile import run_after_import
 from .assign_payment_controller import AssignmentController
 from kefiya.utils import accepted_payee
-from kefiya.utils import camt_shape, gateway_session
+from kefiya.utils import camt_shape, fints_state_fields, gateway_session
 from kefiya.utils import fints_vop
 from kefiya.utils import fints_vop_client
 from kefiya.utils import login_siblings
@@ -490,6 +490,15 @@ class FinTSController(TanSession):
                 product_id=self.kefiya_login.get_password("product_id"),
                 mode=FinTSClientMode.INTERACTIVE,
                 from_data=self.kefiya_login.stored_client_blob,
+                # Die Kennung, unter der die Bank dieses Geraet kennt. Ohne
+                # sie schickt die Bibliothek HKSYN(NEW_SYSTEM_ID), die Bank
+                # sieht ein neues Geraet und verlangt eine volle
+                # Authentifizierung -- nach jedem verworfenen Zustand aufs
+                # Neue. Ein mitgegebener Blob sticht sie: set_data laeuft
+                # nach dem Konstruktor, der frische Zustand gewinnt.
+                system_id=fints_state_fields.usable_system_id(
+                    self.kefiya_login.get(
+                        fints_state_fields.SYSTEM_ID_FIELD)),
             )
         except Exception as e:
             frappe.throw(
@@ -786,6 +795,18 @@ class FinTSController(TanSession):
             self.kefiya_login.stored_client_blob = \
                 self.fints_connection.deconstruct(including_private=True)
 
+        # Und die Kundensystem-ID daneben, nicht nur im Blob. Sie ueberlebt
+        # damit das Verwerfen eines kaputten Zustands, und die Bank erkennt
+        # das Geraet wieder, statt eine neue starke Authentifizierung zu
+        # verlangen. Ausserhalb des BPD-Zweiges, weil eine ID, die die Bank
+        # schon vergeben hat, auch dann gilt, wenn der Dialog sonst nichts
+        # Brauchbares hinterlassen hat.
+        system_id = fints_state_fields.usable_system_id(
+            getattr(self.fints_connection, "system_id", None))
+        if system_id:
+            self.kefiya_login.set(
+                fints_state_fields.SYSTEM_ID_FIELD, system_id)
+
         if tan_state and isinstance(tan_state, NeedTANResponse):
             self.kefiya_login.stored_tan_blob = tan_state.get_data()
             self.kefiya_login.stored_tan_state_decoupled = tan_state.decoupled
@@ -852,12 +873,22 @@ class FinTSController(TanSession):
             rows = frappe.get_all(
                 "Kefiya Login",
                 filters=filters,
-                fields=["stored_client_state"],
+                fields=["stored_client_state",
+                        fints_state_fields.SYSTEM_ID_FIELD],
                 order_by="client_state_updated desc",
                 limit=1,
             )
             if rows and rows[0].stored_client_state:
                 self.kefiya_login.stored_client_state = rows[0].stored_client_state
+                # Die Kundensystem-ID gehoert dem Zugang, nicht dem Login:
+                # ein neu angelegtes Login desselben Zugangs soll das Geraet
+                # erben statt sich bei der Bank als ein weiteres anzumelden.
+                geerbt = fints_state_fields.usable_system_id(
+                    rows[0].get(fints_state_fields.SYSTEM_ID_FIELD))
+                if geerbt and not self.kefiya_login.get(
+                        fints_state_fields.SYSTEM_ID_FIELD):
+                    self.kefiya_login.set(
+                        fints_state_fields.SYSTEM_ID_FIELD, geerbt)
         except Exception:
             frappe.log_error(
                 title="Kefiya: seed client state from sibling failed",
@@ -872,6 +903,8 @@ class FinTSController(TanSession):
             filters = self._sibling_login_filters()
             state = self.kefiya_login.stored_client_state
             mine = self.kefiya_login.client_state_updated
+            meine_system_id = fints_state_fields.usable_system_id(
+                self.kefiya_login.get(fints_state_fields.SYSTEM_ID_FIELD))
             if not (filters and state):
                 return
             siblings = frappe.get_all(
@@ -899,10 +932,18 @@ class FinTSController(TanSession):
                 # keep a sibling's own session if it is at least as fresh
                 if s.stored_client_state and mine and s.client_state_updated and s.client_state_updated >= mine:
                     continue
+                geteilt = {"stored_client_state": state,
+                           "client_state_updated": mine}
+                # Dasselbe Geraet fuer den ganzen Zugang. Nur setzen, nie
+                # leeren: ein Geschwister ohne eigene ID wuerde sich sonst
+                # bei der Bank neu anmelden und eine TAN kosten.
+                if meine_system_id:
+                    geteilt[fints_state_fields.SYSTEM_ID_FIELD] = \
+                        meine_system_id
                 frappe.db.set_value(
                     "Kefiya Login",
                     s.name,
-                    {"stored_client_state": state, "client_state_updated": mine},
+                    geteilt,
                     update_modified=False,
                 )
         except Exception:
