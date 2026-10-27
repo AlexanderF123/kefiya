@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import frappe
 from fints.client import NeedTANResponse
+from fints.exceptions import FinTSSCARequiredError
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, getdate
 
@@ -33,6 +34,17 @@ class TestFetchTanRequired(FrappeTestCase):
                 controller = make_controller(cls)
                 controller.fints_connection.get_transactions.return_value = MagicMock(
                     spec=NeedTANResponse
+                )
+                with self.assertRaises(FetchTanRequired):
+                    controller.get_fints_transactions(start, add_days(getdate(), -1))
+
+    def test_sca_required_error_on_fetch_raises_clear_error(self):
+        start = add_days(getdate(), -120)
+        for cls in CONTROLLERS:
+            with self.subTest(controller=cls.__module__):
+                controller = make_controller(cls)
+                controller.fints_connection.get_transactions.side_effect = (
+                    FinTSSCARequiredError("SCA required")
                 )
                 with self.assertRaises(FetchTanRequired):
                     controller.get_fints_transactions(start, add_days(getdate(), -1))

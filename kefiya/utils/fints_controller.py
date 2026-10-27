@@ -11,6 +11,7 @@ import mt940
 
 from dateutil.relativedelta import relativedelta
 from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse, NeedRetryResponse
+from fints.exceptions import FinTSSCARequiredError
 
 from frappe import _
 from frappe.utils import now_datetime
@@ -30,6 +31,23 @@ class TanInteractionRequired(InitFailedException):
 
 class FetchTanRequired(frappe.ValidationError):
     """The bank asked for a TAN on the transaction fetch, which isn't supported yet."""
+
+
+def throw_fetch_tan_required():
+    """Stop the import because the bank wants a TAN for the fetch itself.
+
+    fints signals this either by returning a NeedTANResponse or, on bank
+    code 9075, by raising FinTSSCARequiredError. It happens mostly for
+    history older than 90 days (PSD2). Asking for the TAN is phamos/kefiya#45.
+    """
+    frappe.throw(
+        _(
+            "Your bank requires a TAN to fetch transactions from this date"
+            " range. Choose a From Date within the last 90 days."
+        ),
+        exc=FetchTanRequired,
+        title=_("TAN Required"),
+    )
 
 class FinTSController:
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
@@ -367,23 +385,16 @@ class FinTSController:
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
                 self.kefiya_login.account_iban)
-            transactions = self.fints_connection.get_transactions(
-                account,
-                start_date,
-                end_date
-            )
-            if isinstance(transactions, NeedTANResponse):
-                # The bank wants a TAN for this fetch itself (PSD2, mostly for
-                # history older than 90 days). Asking for it is phamos/kefiya#45.
-                frappe.throw(
-                    _(
-                        "Your bank requires a TAN to fetch transactions from"
-                        " this date range. Choose a From Date within the last"
-                        " 90 days."
-                    ),
-                    exc=FetchTanRequired,
-                    title=_("TAN Required"),
+            try:
+                transactions = self.fints_connection.get_transactions(
+                    account,
+                    start_date,
+                    end_date
                 )
+            except FinTSSCARequiredError:
+                throw_fetch_tan_required()
+            if isinstance(transactions, NeedTANResponse):
+                throw_fetch_tan_required()
             return json.loads(
                 json.dumps(transactions, cls=mt940.JSONEncoder)
             )

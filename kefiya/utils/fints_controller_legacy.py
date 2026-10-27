@@ -10,6 +10,7 @@ import mt940
 
 from dateutil.relativedelta import relativedelta
 from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse
+from fints.exceptions import FinTSSCARequiredError
 
 from frappe import _
 from frappe.utils import now_datetime
@@ -18,7 +19,7 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
-from .fints_controller import FetchTanRequired
+from .fints_controller import FetchTanRequired, throw_fetch_tan_required
 from .import_bank_transaction import ImportBankTransaction
 from .assign_payment_controller import AssignmentController
 
@@ -182,23 +183,16 @@ class FinTSController:
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
                 self.kefiya_login.account_iban)
-            transactions = self.fints_connection.get_transactions(
-                account,
-                start_date,
-                end_date
-            )
-            if isinstance(transactions, NeedTANResponse):
-                # The bank wants a TAN for this fetch itself (PSD2, mostly for
-                # history older than 90 days). Asking for it is phamos/kefiya#45.
-                frappe.throw(
-                    _(
-                        "Your bank requires a TAN to fetch transactions from"
-                        " this date range. Choose a From Date within the last"
-                        " 90 days."
-                    ),
-                    exc=FetchTanRequired,
-                    title=_("TAN Required"),
+            try:
+                transactions = self.fints_connection.get_transactions(
+                    account,
+                    start_date,
+                    end_date
                 )
+            except FinTSSCARequiredError:
+                throw_fetch_tan_required()
+            if isinstance(transactions, NeedTANResponse):
+                throw_fetch_tan_required()
             return json.loads(
                 json.dumps(transactions, cls=mt940.JSONEncoder)
             )
