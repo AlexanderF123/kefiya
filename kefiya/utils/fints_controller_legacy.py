@@ -9,7 +9,7 @@ import json
 import mt940
 
 from dateutil.relativedelta import relativedelta
-from fints.client import FinTS3PinTanClient, FinTSClientMode
+from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse
 
 from frappe import _
 from frappe.utils import now_datetime
@@ -18,6 +18,7 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
+from .fints_controller import FetchTanRequired
 from .import_bank_transaction import ImportBankTransaction
 from .assign_payment_controller import AssignmentController
 
@@ -181,15 +182,25 @@ class FinTSController:
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
                 self.kefiya_login.account_iban)
-            return json.loads(
-                json.dumps(
-                    self.fints_connection.get_transactions(
-                        account,
-                        start_date,
-                        end_date
+            transactions = self.fints_connection.get_transactions(
+                account,
+                start_date,
+                end_date
+            )
+            if isinstance(transactions, NeedTANResponse):
+                # The bank wants a TAN for this fetch itself (PSD2, mostly for
+                # history older than 90 days). Asking for it is phamos/kefiya#45.
+                frappe.throw(
+                    _(
+                        "Your bank requires a TAN to fetch transactions from"
+                        " this date range. Choose a From Date within the last"
+                        " 90 days."
                     ),
-                    cls=mt940.JSONEncoder
+                    exc=FetchTanRequired,
+                    title=_("TAN Required"),
                 )
+            return json.loads(
+                json.dumps(transactions, cls=mt940.JSONEncoder)
             )
 
     def import_fints_transactions(self, kefiya_import):
@@ -264,6 +275,9 @@ class FinTSController:
                 "payments": new_bank_transactions,
                 # "assignment": auto_assignment
             }
+        except FetchTanRequired:
+            # Already a clear message for the user; don't wrap it
+            raise
         except Exception as e:
             frappe.throw(_(
                 "Error parsing transactions<br>{0}"
