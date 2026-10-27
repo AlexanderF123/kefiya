@@ -163,9 +163,8 @@ class FinTSController:
     def get_fints_transactions(self, start_date=None, end_date=None):
         """Get FinTS transactions.
 
-        The code is not allowing to fetch transaction which are older
-        than 90 days. Also only transaction from atleast one day ago can be
-        fetched
+        Defaults to the last 90 days up to yesterday. Older history can be
+        requested; whether the bank serves it is up to the bank (PSD2).
 
         :param start_date: Date to start the fetch
         :param end_date: Date to end the fetch
@@ -178,11 +177,6 @@ class FinTSController:
 
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
-
-        if (now_datetime().date() - start_date).days >= 90:
-            raise NotImplementedError(
-                _("Start date more then 90 days in the past")
-            )
 
         with self.fints_connection:
             account = self.get_fints_account_by_iban(
