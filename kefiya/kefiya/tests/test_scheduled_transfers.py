@@ -118,8 +118,56 @@ class TestTheFetchAsksForThem(unittest.TestCase):
         client = self._read("utils", "client.py")
         self.assertIn("payment_kinds=DEBIT_FETCH_KINDS)", client)
         planned = self._read("utils", "planned_payment.py")
-        self.assertIn('DEBIT_FETCH_KINDS = ("Standing Order",)', planned)
+        self.assertIn('DEBIT_FETCH_KINDS = ("Scheduled Debit",)', planned)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOneForecastTable(unittest.TestCase):
+    """Kefiya Planned Payment holds the bank's rows and everybody else's,
+    under the forecast's field names. kefiya keeps only its own."""
+
+    def setUp(self):
+        import json
+
+        with open(os.path.join(WURZEL, "kefiya", "doctype",
+                               "kefiya_planned_payment",
+                               "kefiya_planned_payment.json"),
+                  encoding="utf-8") as handle:
+            self.meta = json.load(handle)
+        self.fields = {f["fieldname"]: f for f in self.meta["fields"]}
+        with open(os.path.join(WURZEL, "utils", "planned_payment.py"),
+                  encoding="utf-8") as handle:
+            self.source = handle.read()
+
+    def test_the_forecast_field_names(self):
+        for name in ("due_date", "expected_amount", "source_kind", "status",
+                     "direction", "party_type", "party", "reference_doctype",
+                     "reference_name", "matched_bank_transaction",
+                     "matched_amount", "net_amount", "tax_amount",
+                     "tax_rate", "probability", "is_manual", "generated_by",
+                     "last_generated_on", "cancellation_reason",
+                     "superseded_by", "reference_key"):
+            self.assertIn(name, self.fields)
+        self.assertEqual(self.meta["autoname"], "field:reference_key")
+
+    def test_the_mark_says_where_a_row_came_from(self):
+        self.assertEqual(self.fields["from_bank"]["fieldtype"], "Check")
+        self.assertIn('"from_bank": 1,', self.source)
+
+    def test_nothing_instance_specific_is_linked(self):
+        """Lease and Property belong to another app; they stay custom
+        fields where that app is installed."""
+        self.assertNotIn("lease", self.fields)
+        self.assertNotIn("property", self.fields)
+
+    def test_kefiya_only_touches_the_banks_rows(self):
+        match = self.source.split("def match_on_bank_transaction(")[1].split(
+            "\ndef ")[0]
+        expire = self.source.split("def expire_stale_planned_payments(")[1]
+        for body in (match, expire):
+            self.assertIn('"from_bank": 1', body)
+        self.assertNotIn("delete_doc", match)
+        self.assertIn('"status": "Matched"', match)

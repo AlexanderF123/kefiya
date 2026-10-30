@@ -2,21 +2,28 @@
 # Copyright (c) 2026, Phamos GmbH and contributors
 # For license information, please see license.txt
 
-"""Staging layer for previewed, not-yet-booked bank payments.
+"""The forecast: payments that are expected and not yet booked.
 
-Kefiya Planned Payment records are a temporary preview of scheduled transfers,
-standing-order occurrences and pending entries. They never touch the bank
-balance or reconciliation. The flow is:
+One table for two kinds of rows. Rows the BANK reports -- dated transfers,
+standing orders, pending entries -- carry from_bank = 1 and are kept by this
+module alone. Every other row (rent, invoices, loan instalments, anything an
+app or a person plans) has from_bank = 0, and this module never touches it:
+not on refresh, not on matching, not on expiry. The table used to be two --
+Kefiya Planned Payment for the bank, a forecast of the instance's own beside
+it -- and is one since 30.10.2026, under this name and with the instance's
+field names (due_date, expected_amount, source_kind), so a script written
+against either reads the same rows.
+
+They never touch the bank balance or reconciliation. The flow for bank rows:
 
     bank fetch ---> refresh_planned_payments(login, items)   (idempotent upsert)
-    real txn   ---> match_on_bank_transaction(bank_transaction)  (delete match)
+    real txn   ---> match_on_bank_transaction(bank_transaction)  (mark Matched)
     daily      ---> expire_stale_planned_payments()          (housekeeping)
 
-NOTE: the actual retrieval of scheduled payments from the bank is not wired up
-yet -- python-fints 5.x exposes no ready API for scheduled transfers / standing
-orders, so this is bank- and library-dependent work. ``refresh_planned_payments``
-is the source-agnostic entry point that such a fetch would call with a list of
-plain dicts; everything below it is independent of how the data is obtained.
+The bank rows come from the pending entries, the dated transfers (HKCSB, see
+scheduled_transfers) and the dated debits (HKDBS). python-fints ships none of
+those queries in a usable form; ``refresh_planned_payments`` is the
+source-agnostic entry point they all call with a list of plain dicts.
 """
 
 import hashlib
@@ -171,7 +178,10 @@ def normalize_scheduled_debits(raw_items):
         frequency = _first(raw, [
             "frequency", "time_unit", "interval", "cycle",
         ])
-        kind = _first(raw, ["payment_kind", "type"]) or "Standing Order"
+        # HKDBS: dated direct debits the account COLLECTS. It used to be
+        # filed as an outgoing "Standing Order" -- a different business
+        # transaction, in the wrong direction.
+        kind = _first(raw, ["payment_kind", "type"]) or "Scheduled Debit"
 
         # A recurrence expands to its occurrences in the next month; a one-off
         # (no frequency) yields a single dated item.
@@ -190,7 +200,10 @@ def normalize_scheduled_debits(raw_items):
             items.append({
                 "planned_date": d,
                 "amount": amount,
-                "direction": "Outgoing",
+                # A dated debit brings money in; anything else read here
+                # pays it out.
+                "direction": ("Incoming" if kind == "Scheduled Debit"
+                              else "Outgoing"),
                 "payment_kind": kind,
                 "counterparty_name": name,
                 "counterparty_iban": iban,
@@ -200,13 +213,16 @@ def normalize_scheduled_debits(raw_items):
     return {"items": items, "skipped": skipped}
 
 
-#: Kinds reported by the standing-order fetch (HKDSE / scheduled transfers).
-STANDING_ORDER_KINDS = ("Scheduled Transfer", "Standing Order")
+#: Kinds of orders the bank holds for the account.
+STANDING_ORDER_KINDS = ("Scheduled Transfer", "Bank Standing Order")
 
 #: What the dated-debit fetch (HKDBS) writes, and so all its sweep may
 #: cancel. The dated transfers (HKCSB) are "Scheduled Transfer" and have a
 #: sweep of their own.
-DEBIT_FETCH_KINDS = ("Standing Order",)
+DEBIT_FETCH_KINDS = ("Scheduled Debit",)
+
+#: States a refresh does not reopen: the booking already answered them.
+SETTLED_STATUSES = ("Matched", "Partially Matched", "Booked")
 
 #: Kind used for entries the bank shows but has not booked yet.
 PENDING_KIND = "Pending"
@@ -342,10 +358,14 @@ def refresh_planned_payments(kefiya_login, items, payment_kinds=None):
         )
         seen_keys.add(key)
 
-        existing = frappe.db.get_value(DOCTYPE, {"reference_key": key}, "name")
+        # The key is the record's name (autoname field:reference_key).
+        existing = frappe.db.exists(DOCTYPE, key)
         if existing:
             doc = frappe.get_doc(DOCTYPE, existing)
-            doc.status = "Open"
+            # Reopened only from a state the bank can undo. A row matched to
+            # a booking stays matched: the booking is the bank's last word.
+            if doc.status not in SETTLED_STATUSES:
+                doc.status = "Open"
             doc.fetched_on = now
             doc.save(ignore_permissions=True)
             updated += 1
@@ -355,26 +375,31 @@ def refresh_planned_payments(kefiya_login, items, payment_kinds=None):
                 "kefiya_login": kefiya_login,
                 "bank_account": bank_account,
                 "company": company,
-                "planned_date": item.get("planned_date"),
-                "amount": flt(item.get("amount")),
+                "due_date": item.get("planned_date"),
+                "expected_amount": flt(item.get("amount")),
                 "direction": item.get("direction") or "Outgoing",
-                "payment_kind": item.get("payment_kind") or "Scheduled Transfer",
+                "source_kind": item.get("payment_kind") or "Scheduled Transfer",
+                "from_bank": 1,
+                "bank_task_id": item.get("task_id"),
                 "counterparty_name": item.get("counterparty_name"),
                 "counterparty_iban": item.get("counterparty_iban"),
                 "purpose": item.get("purpose"),
                 "status": "Open",
                 "reference_key": key,
+                "generated_by": "kefiya",
                 "fetched_on": now,
             })
             doc.insert(ignore_permissions=True)
             created += 1
 
     # anything still Open for this login but no longer reported was cancelled
-    # at the bank.
+    # at the bank. Only the bank's own rows: a row somebody planned is not
+    # the bank's to cancel.
     cancelled = 0
-    sweep_filters = {"kefiya_login": kefiya_login, "status": "Open"}
+    sweep_filters = {"kefiya_login": kefiya_login, "status": "Open",
+                     "from_bank": 1}
     if payment_kinds:
-        sweep_filters["payment_kind"] = ("in", list(payment_kinds))
+        sweep_filters["source_kind"] = ("in", list(payment_kinds))
     open_records = frappe.get_all(
         DOCTYPE,
         filters=sweep_filters,
@@ -409,8 +434,8 @@ def _counterparty_matches(planned, txn):
 def match_on_bank_transaction(doc, method=None):
     """doc_events hook (Bank Transaction, after_insert).
 
-    When a real transaction is booked, remove the Open planned payment it
-    fulfils. Matched records are deleted immediately (no audit retention).
+    When a real transaction is booked, mark the Open bank-reported row it
+    fulfils as Matched, with the booking it was matched to.
 
     Wrapped defensively: this runs in the same transaction as the Bank
     Transaction insert (after_insert), so a failure here must never abort the
@@ -437,8 +462,11 @@ def match_on_bank_transaction(doc, method=None):
             filters={
                 "bank_account": doc.bank_account,
                 "status": "Open",
+                # The bank's own rows. The others are matched by whoever
+                # planned them, with their own tolerances.
+                "from_bank": 1,
                 "direction": direction,
-                "planned_date": [
+                "due_date": [
                     "between",
                     [
                         add_days(txn_date, -MATCH_DATE_TOLERANCE_DAYS),
@@ -446,16 +474,22 @@ def match_on_bank_transaction(doc, method=None):
                     ],
                 ],
             },
-            fields=["name", "amount", "counterparty_iban", "counterparty_name"],
+            fields=["name", "expected_amount", "counterparty_iban",
+                    "counterparty_name"],
         )
 
         for cand in candidates:
-            if abs(flt(cand.amount) - amount) > AMOUNT_EPSILON:
+            if abs(flt(cand.expected_amount) - amount) > AMOUNT_EPSILON:
                 continue
             if _counterparty_matches(cand, doc):
-                frappe.delete_doc(
-                    DOCTYPE, cand.name, ignore_permissions=True, force=True
-                )
+                # Marked, not deleted: the forecast keeps what it expected
+                # and which booking fulfilled it, as the rest of the table
+                # always did.
+                frappe.db.set_value(DOCTYPE, cand.name, {
+                    "status": "Matched",
+                    "matched_bank_transaction": doc.name,
+                    "matched_amount": amount,
+                })
                 break
     except Exception:
         frappe.log_error(
@@ -470,7 +504,8 @@ def expire_stale_planned_payments():
     cutoff = add_days(now_datetime().date(), -EXPIRE_GRACE_DAYS)
     stale = frappe.get_all(
         DOCTYPE,
-        filters={"status": "Open", "planned_date": ["<", cutoff]},
+        filters={"status": "Open", "from_bank": 1,
+                 "due_date": ["<", cutoff]},
         pluck="name",
     )
     for name in stale:

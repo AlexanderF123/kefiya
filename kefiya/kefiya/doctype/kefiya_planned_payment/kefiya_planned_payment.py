@@ -8,12 +8,14 @@ from frappe.model.document import Document
 
 
 class KefiyaPlannedPayment(Document):
-    """A previewed, not-yet-booked payment (scheduled transfer, standing order
-    occurrence or pending entry) retrieved from the bank.
+    """One expected, not-yet-booked payment -- the forecast.
 
-    This is a temporary staging record only: it never affects the bank balance
-    or reconciliation. It is replaced on every fetch and removed once the real
-    Bank Transaction is booked (see kefiya.utils.planned_payment).
+    from_bank = 1: reported by the bank (dated transfer, standing order,
+    pending entry) and kept by kefiya.utils.planned_payment alone.
+    from_bank = 0: planned here or by another app; kefiya never touches it.
+
+    Never affects the bank balance or reconciliation. A bank row is marked
+    Matched once the real Bank Transaction is booked.
     """
 
     pass
