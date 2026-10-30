@@ -2149,7 +2149,8 @@ class FinTSController(TanSession):
                     fints_response.as_text(verdict) or "(the bank said nothing)"
                 ),
             )
-            result = {"status": "submitted"}
+            result = {"status": "submitted",
+                      "bank_said": fints_response.as_text(verdict)}
             if scheduled:
                 # The identifier under which the bank now holds the dated
                 # order. Without it the order can never be changed or called
