@@ -34,6 +34,46 @@ ueberweist, nimmt den Namen aus der Liste der Bank.
 #: Was python-fints ohne Angabe schickt.
 DEFAULT_PAIN_001 = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
 
+#: Die beiden Schemata, nach denen kefiya eine Ueberweisung baut.
+PAIN_001_03 = "pain.001.001.03"
+PAIN_001_09 = "pain.001.001.09"
+
+#: Der ISO-Name von pain.001.001.09, fuer eine Bank, die ihn selbst fuehrt
+#: oder keinen eigenen nennt.
+URN_PAIN_001_09 = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.09"
+
+
+def schema_for(supported):
+    """Nach welchem Schema der Auftrag gebaut wird.
+
+    pain.001.001.03, solange die Bank es fuehrt -- daran haengen Volksbank
+    und Sparkasse, und dort laeuft es. pain.001.001.09 nur, wo die Bank .03
+    nicht mehr nennt und .09 schon. Gemessen am 30.10.2026 an einem
+    comdirect-Konto: eine Echtzeitueberweisung als .03 kam zurueck mit::
+
+        9210 VOP-Auftrag ungueltig.
+        9210 Sepa-Format nicht mehr gueltig. Bitte Software-Anbieter
+             kontaktieren.
+
+    Eine leere oder unlesbare Liste aendert nichts: dann ist nicht bekannt,
+    was die Bank will, und es bleibt beim bisherigen Schema -- die Bank sagt
+    es dann selbst.
+
+    :param supported: was die Bank in HISPAS (oder HIIPZS) nennt
+    :return: PAIN_001_03 oder PAIN_001_09
+    """
+    names = [str(s) for s in (supported or ()) if s]
+    if not names or any(PAIN_001_03 in name for name in names):
+        return PAIN_001_03
+    if any(PAIN_001_09 in name for name in names):
+        return PAIN_001_09
+    return PAIN_001_03
+
+
+def default_for(schema):
+    """Der ISO-Name eines Schemas, wenn die Bank keinen eigenen nennt."""
+    return URN_PAIN_001_09 if schema == PAIN_001_09 else DEFAULT_PAIN_001
+
 
 def choose(supported, schema="pain.001.001.03", default=DEFAULT_PAIN_001):
     """Der Name, unter dem diese Bank das Schema fuehrt.
