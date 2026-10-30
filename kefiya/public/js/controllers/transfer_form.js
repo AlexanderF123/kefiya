@@ -476,6 +476,11 @@ kefiya.transfer_form_submit = function (dialog, values, payers, existing, onSave
 	};
 
 	dialog.disable_primary_action();
+	// Taken before the call, so a lookup after a timeout can ask for drafts
+	// written since -- in the system's time zone, which is the one the
+	// server stamps them in. Two minutes early, for clocks that disagree.
+	const started = moment(frappe.datetime.now_datetime())
+		.subtract(2, "minutes").format("YYYY-MM-DD HH:mm:ss");
 	let call;
 	if (existing) {
 		// The paying account stays as it was: it is read-only above, and
@@ -514,6 +519,16 @@ kefiya.transfer_form_submit = function (dialog, values, payers, existing, onSave
 		if (onSaved) onSaved();
 	}).catch(function (r) {
 		dialog.enable_primary_action();
+		// No answer is not a refusal. A gateway that gives up after its
+		// timeout leaves the server running, and the order is stored anyway.
+		// Measured on 30.10.2026: "Not saved" over a 504, the order entered a
+		// second time, and two identical drafts of 15.000,00 EUR in the
+		// outbox -- one release away from paying twice.
+		if (kefiya.outcome_unknown(r)) {
+			kefiya.transfer_form_unknown(dialog, doc, item, existing,
+				existing ? null : payers[payerIndex].login, started, onSaved);
+			return;
+		}
 		// The document's own validation is the safeguard here -- the IBAN
 		// checksum above all -- so its message is what the user needs to see,
 		// not a generic failure.
@@ -524,6 +539,82 @@ kefiya.transfer_form_submit = function (dialog, values, payers, existing, onSave
 				|| __("The transfer could not be saved."),
 		});
 	});
+};
+
+// Did the server answer at all? A refusal carries the server's words; a
+// timeout or a gateway error carries an HTML page or nothing. Only the second
+// leaves the outcome open.
+kefiya.outcome_unknown = function (r) {
+	if (!r) return true;
+	if (kefiya.server_message(r) || r.exc || r.exception
+			|| (r.responseJSON && (r.responseJSON.exc
+				|| r.responseJSON.exception
+				|| r.responseJSON._server_messages))) {
+		return false;
+	}
+	const status = r.status || (r.xhr && r.xhr.status) || 0;
+	return [0, 502, 503, 504].indexOf(status) >= 0
+		|| r.statusText === "timeout";
+};
+
+// The save went out and no answer came back. Look before saying anything:
+// "not saved" invites entering the order again, and if it WAS saved that is
+// the second payment.
+kefiya.transfer_form_unknown = function (dialog, doc, item, existing, login,
+	started, onSaved) {
+	const unclear = function () {
+		frappe.msgprint({
+			title: __("Outcome unknown"),
+			indicator: "orange",
+			message: existing
+				? __("The server did not answer in time, so whether the"
+					+ " changes were stored is not known. Open the transfer"
+					+ " again before changing it once more.")
+				: __("The server did not answer in time, so whether the"
+					+ " transfer was entered is not known. Look in the"
+					+ " outgoing payments before entering it again -- if it is"
+					+ " there, entering it a second time would pay it twice."),
+		});
+	};
+	if (existing) {
+		unclear();
+		return;
+	}
+	frappe.call({
+		method: "frappe.client.get_list",
+		args: {
+			doctype: "Kefiya Transfer",
+			filters: [
+				["Kefiya Transfer", "docstatus", "=", 0],
+				["Kefiya Transfer", "owner", "=", frappe.session.user],
+				["Kefiya Transfer", "kefiya_login", "=", login],
+				["Kefiya Transfer", "creation", ">=", started],
+				["Kefiya Transfer Item", "recipient_iban", "=",
+					item.recipient_iban],
+				["Kefiya Transfer Item", "amount", "=", item.amount],
+			],
+			fields: ["name"],
+			order_by: "creation desc",
+			limit_page_length: 1,
+		},
+	}).then(function (r) {
+		const found = r && r.message && r.message[0];
+		if (!found) {
+			unclear();
+			return;
+		}
+		dialog.hide();
+		frappe.msgprint({
+			title: __("Transfer entered"),
+			indicator: "green",
+			message: __("The server answered late, but the transfer is"
+				+ " there: {0}. Do not enter it again.", [
+				"<a href='/app/kefiya-transfer/"
+				+ encodeURIComponent(found.name) + "'>"
+				+ frappe.utils.escape_html(found.name) + "</a>"]),
+		});
+		if (onSaved) onSaved();
+	}).catch(unclear);
 };
 
 kefiya.server_message = function (r) {
