@@ -3,8 +3,11 @@
 //
 // The box that asks for a TAN, or says the release happens in the banking app.
 //
-//   kefiya.tan_prompt(data, done)     data is the fints_tan_interaction_required
-//                                     payload; done fires once the answer is in
+//   kefiya.tan_prompt(data, done, opts)
+//                                     data is the fints_tan_interaction_required
+//                                     payload; done fires once the answer is in;
+//                                     opts.transfer = {login, names} answers a
+//                                     transfer's TAN for exactly those orders
 //   kefiya.focus_tan_field(dialog)    the focus rule on its own, for a caller
 //                                     that builds its own box
 //
@@ -100,7 +103,52 @@ frappe.provide("kefiya");
     // done(ok) fires once the answer has been handed to the server: true when
     // it was accepted, false when it was refused. A caller that acts on the
     // release MUST look at the flag.
-    function tanPrompt(data, done) {
+    // The answer to a transfer's TAN, given where the orders are known.
+    // send_transfer_tan resumes the parked dialog, reads what the bank said
+    // and marks the orders sent only when the bank released them.
+    //
+    // done(ok) fires once, true only for a release the bank accepted.
+    function answerTransferTan(transfer, tan, done) {
+        frappe.call({
+            method: "kefiya.utils.client.send_transfer_tan",
+            args: { kefiya_login: transfer.login, tan: tan || "",
+                    user_scope: transfer.login,
+                    transfer_names: JSON.stringify(transfer.names || []) },
+            freeze: true,
+            freeze_message: __("Sending the TAN to the bank …"),
+            callback: function (r) {
+                var m = (r && r.message) || {};
+                if (m.status === "submitted") {
+                    frappe.show_alert({
+                        message: __("Handed to the bank: {0} orders",
+                            [(m.sent || transfer.names || []).length]),
+                        indicator: "green" }, 8);
+                    if (done) done(true);
+                } else if (m.status === "tan_required") {
+                    frappe.show_alert({
+                        message: __("The bank asks for another TAN."),
+                        indicator: "orange" }, 8);
+                    if (done) done(false);
+                } else {
+                    frappe.msgprint({ title: __("Not sent"), indicator: "red",
+                        message: frappe.utils.escape_html(
+                            m.message || __("Unknown error.")) });
+                    if (done) done(false);
+                }
+            },
+            error: function (r) {
+                frappe.msgprint({ title: __("Not sent"), indicator: "red",
+                    message: frappe.utils.escape_html(
+                        kefiya.call_error ? kefiya.call_error(r) : "") });
+                if (done) done(false);
+            }
+        });
+    }
+
+    // opts.transfer = {login, names}: the TAN belongs to these orders and is
+    // answered through send_transfer_tan. Without it the box resolves the
+    // login's interaction, as it does for a fetch.
+    function tanPrompt(data, done, opts) {
         var fields = [];
         if (data.possible_tan_modes) {
             fields.push({ fieldtype: "Select", fieldname: "tan_mode",
@@ -148,7 +196,17 @@ frappe.provide("kefiya");
         var challenge = tanChallengeField(data);
         if (challenge) fields.unshift(challenge);
 
+        var transfer = opts && opts.transfer;
         var dialog = frappe.prompt(fields, function (values) {
+            // A typed TAN for a transfer goes where the order is known. The
+            // general resolve below neither checks what the bank answered nor
+            // marks the order sent -- an order released this way stayed
+            // "Approved" with its money gone, the state that invites a second
+            // send.
+            if (transfer && data.tan_required) {
+                answerTransferTan(transfer, values.tan, done);
+                return;
+            }
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
                 method: "kefiya.utils.client.resolve_tan_interaction",

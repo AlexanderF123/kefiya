@@ -1016,6 +1016,11 @@ def _mark_sent(docs, result, scheduled):
         doc.db_set("status", "Scheduled at Bank" if scheduled else "Sent")
         if task_id:
             doc.db_set("bank_task_id", task_id)
+        # The bank holds the order, so the payee check that held it up is
+        # answered. Only _release_result cleared this, and an order released
+        # with a typed TAN after the payee check kept "payee check open".
+        if doc.get("vop_pending"):
+            doc.db_set("vop_pending", 0)
 
 
 def _parked_is_not_failed(doc):

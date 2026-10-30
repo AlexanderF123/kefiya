@@ -444,3 +444,5 @@ Transfer entered,Überweisung erfasst
 "The server did not answer in time, so whether the transfer was entered is not known. Look in the outgoing payments before entering it again -- if it is there, entering it a second time would pay it twice.","Der Server hat nicht rechtzeitig geantwortet, deshalb ist nicht bekannt, ob die Überweisung erfasst wurde. Sehen Sie im Zahlungsausgang nach, bevor Sie sie erneut erfassen — liegt sie dort, würde eine zweite Erfassung sie doppelt bezahlen."
 "The server answered late, but the transfer is there: {0}. Do not enter it again.","Der Server hat spät geantwortet, aber die Überweisung ist da: {0}. Bitte nicht noch einmal erfassen."
 "The bank no longer accepts transfers in the SEPA format pain.001.001.03, and this order cannot be built in {0} from here. It was NOT sent.","Die Bank nimmt Überweisungen im SEPA-Format pain.001.001.03 nicht mehr an, und dieser Auftrag lässt sich von hier aus nicht in {0} bauen. Er wurde NICHT gesendet."
+Sending the TAN to the bank …,TAN wird an die Bank gesendet …
+The bank asks for another TAN.,Die Bank verlangt eine weitere TAN.

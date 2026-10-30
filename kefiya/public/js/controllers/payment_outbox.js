@@ -262,6 +262,8 @@ kefiya.payment_outbox = function (root) {
 		sortBy: kept.sort_by || null,
 		sortDir: kept.sort_dir === "desc" ? "desc" : "asc",
 		busy: false,
+		// {login, names} while a TAN for orders sent from here may arrive.
+		tanFor: null,
 	};
 
 	function money(v) { return format_currency(Number(v || 0)); }
@@ -760,7 +762,23 @@ kefiya.payment_outbox = function (root) {
 
 	function send() {
 		const rows = applicable("send");
-		if (!rows.length || view.busy) return;
+		if (view.busy) return;
+		if (!rows.length) {
+			// Said, not swallowed. An order held at the payee check was
+			// selected, Send was pressed, and nothing happened at all -- over
+			// and over, with the reason sitting in the row.
+			const held = selection().filter(function (r) { return r.blocked; });
+			if (held.length) {
+				frappe.msgprint({
+					title: __("Not sent"), indicator: "orange",
+					message: held.map(function (r) {
+						return "<div><b>" + esc(r.name) + "</b>: "
+							+ esc(r.blocked) + "</div>";
+					}).join(""),
+				});
+			}
+			return;
+		}
 
 		// One collective order leaves from exactly ONE account -- that is
 		// what makes it one order. Sent one after another, each order pays
@@ -845,7 +863,14 @@ kefiya.payment_outbox = function (root) {
 	}
 
 
+	// The orders the next TAN belongs to. Set before anything goes to the
+	// bank, kept through the payee check, cleared once the TAN is answered.
+	function expectTan(login, names) {
+		view.tanFor = { login: login, names: (names || []).slice() };
+	}
+
 	function handToBank(names, login, approving) {
+		expectTan(login, names);
 		view.busy = true;
 		frappe.call({
 			method: "kefiya.utils.client.send_transfer_outbox",
@@ -897,6 +922,7 @@ kefiya.payment_outbox = function (root) {
 			frappe.msgprint({ title: __("Not sent"), indicator: "red",
 				message: esc(m.message || "") });
 		} else if (outcome === "payee") {
+			expectTan(login, names);
 			// Nothing was handed to the bank. This branch did not exist, so a
 			// parked payee check fell into the success case below and was
 			// reported in green -- for an order that never left.
@@ -1077,6 +1103,7 @@ kefiya.payment_outbox = function (root) {
 				step(index + 1, sent + 1);
 				return;
 			case "payee":
+				expectTan(orders[index].kefiya_login, [name]);
 				kefiya.vop_prompt({
 					login: orders[index].kefiya_login,
 					scope: orders[index].kefiya_login,
@@ -1129,6 +1156,7 @@ kefiya.payment_outbox = function (root) {
 
 			ready.then(function (go) {
 				if (!go) return;
+				expectTan(orders[index].kefiya_login, [name]);
 				return frappe.call({
 					method: "kefiya.utils.client.submit_kefiya_transfer",
 					args: { transfer_name: name,
@@ -1184,8 +1212,24 @@ kefiya.payment_outbox = function (root) {
 			frappe.realtime.on("fints_tan_interaction_required",
 				function (data) {
 					const live = kefiya._outbox;
-					if (!live || !live.busy) return;
-					if (kefiya.tan_prompt) kefiya.tan_prompt(data, live.load);
+					if (!live || !kefiya.tan_prompt) return;
+					// Asked by the orders this page sent -- not only while a
+					// request of its own is running. The TAN after a payee
+					// check comes out of the release box's request, after
+					// the send has returned, and "busy" had been false for
+					// a while by then: the box never opened and the order
+					// sat waiting for a TAN nobody was asked for.
+					// Measured on 30.10.2026 at a comdirect account.
+					const want = live.tanFor;
+					if (want && (!data.fints_login
+							|| data.fints_login === want.login)) {
+						kefiya.tan_prompt(data, function () {
+							live.tanFor = null;
+							live.load();
+						}, { transfer: want });
+						return;
+					}
+					if (live.busy) kefiya.tan_prompt(data, live.load);
 				});
 		} catch (ignored) {}
 	}
