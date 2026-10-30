@@ -123,6 +123,15 @@ frappe.provide("kefiya");
                       [p.created || 0, p.updated || 0, p.cancelled || 0]);
         });
 
+        // HKCSB: the dated transfers the bank holds -- what StarMoney lists.
+        // Nothing asked for them before; the line above is the debit side.
+        report(__("Scheduled transfers"), "scheduled_transfers", function () {
+            var p = x.scheduled_transfers;
+            if (!p) return null;
+            return __("{0} new, {1} unchanged, {2} cancelled",
+                      [p.created || 0, p.updated || 0, p.cancelled || 0]);
+        });
+
         report(__("Standing orders"), "standing_orders", function () {
             var o = x.standing_orders;
             if (!o) return null;

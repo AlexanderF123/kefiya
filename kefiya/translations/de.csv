@@ -446,3 +446,4 @@ Transfer entered,Überweisung erfasst
 "The bank no longer accepts transfers in the SEPA format pain.001.001.03, and this order cannot be built in {0} from here. It was NOT sent.","Die Bank nimmt Überweisungen im SEPA-Format pain.001.001.03 nicht mehr an, und dieser Auftrag lässt sich von hier aus nicht in {0} bauen. Er wurde NICHT gesendet."
 Sending the TAN to the bank …,TAN wird an die Bank gesendet …
 The bank asks for another TAN.,Die Bank verlangt eine weitere TAN.
+Scheduled transfers,Terminierte Überweisungen

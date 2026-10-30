@@ -1706,6 +1706,16 @@ class FinTSController(TanSession):
             return standing_orders.fetch_scheduled_debits(
                 self.fints_connection, account)
 
+    def get_fints_scheduled_transfers(self):
+        """The dated transfers the bank holds (HKCSB) -- see
+        standing_orders.fetch_scheduled_transfers."""
+        from kefiya.utils import standing_orders
+
+        with self.client_session():
+            account = self._require_fints_account()
+            return standing_orders.fetch_scheduled_transfers(
+                self.fints_connection, account)
+
     def get_fints_standing_orders(self):
         """The bestand of SEPA standing orders (HKCDB).
 

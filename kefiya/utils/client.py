@@ -702,21 +702,43 @@ def fetch_all(kefiya_login, user_scope=None):
         # 3) Standing orders / scheduled debits -> forecast table (best effort).
         def _fetch_planned():
             from kefiya.utils.planned_payment import (
-                STANDING_ORDER_KINDS, normalize_scheduled_debits,
+                DEBIT_FETCH_KINDS, normalize_scheduled_debits,
                 refresh_planned_payments,
             )
             raw = _to_jsonable(FetchCtl(kefiya_login).get_fints_scheduled_debits())
             norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
             # Scoped: without it this sweep would cancel the pending entries
             # written just above, and the next one would cancel these back.
+            # And only the kind it writes: the dated transfers below are
+            # "Scheduled Transfer", and a sweep over both cancelled them.
             planned = refresh_planned_payments(
                 kefiya_login, norm["items"],
-                payment_kinds=STANDING_ORDER_KINDS)
+                payment_kinds=DEBIT_FETCH_KINDS)
             planned["skipped"] = norm["skipped"]
             return planned
 
         summary["planned"] = _optional_fetch(
             summary, "planned", "scheduled_debits", _fetch_planned)
+
+        # 3b) The dated TRANSFERS the bank holds (HKCSB) -> forecast table.
+        #     The step above asks for dated direct debits, which a payer
+        #     never has -- the forecast stayed empty at every bank while
+        #     StarMoney listed the same accounts' dated transfers.
+        def _fetch_scheduled_transfers():
+            from kefiya.utils import scheduled_transfers
+            from kefiya.utils.planned_payment import refresh_planned_payments
+
+            segments = FetchCtl(kefiya_login).get_fints_scheduled_transfers()
+            norm = scheduled_transfers.items_from(segments)
+            result = refresh_planned_payments(
+                kefiya_login, norm["items"],
+                payment_kinds=(scheduled_transfers.KIND,))
+            result["skipped"] = norm["skipped"]
+            return result
+
+        summary["scheduled_transfers"] = _optional_fetch(
+            summary, "scheduled_transfers", "scheduled_transfers",
+            _fetch_scheduled_transfers)
 
         def _fetch_standing_orders():
             rows = _to_jsonable(

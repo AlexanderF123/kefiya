@@ -222,6 +222,32 @@ def fetch_standing_orders(connection, account, login=None):
         return connection._send_with_possible_retry(dialog, seg, _extract)
 
 
+def fetch_scheduled_transfers(connection, account):
+    """The dated transfers the bank holds for this account -- HKCSB.
+
+    What StarMoney lists as "terminierte Ueberweisungen". The forecast used to
+    ask only for the dated direct debits (HKDBS), which a payer never has.
+    The query has the shape of the library's HKDBS; see fints_segments.
+
+    :return: list of HICSB segments
+    :raises FinTSUnsupportedOperation: where the bank does not offer HKCSB
+    """
+    from kefiya.utils.fints_segments import HKCSB1
+
+    with connection._get_dialog() as dialog:
+        hkcsb = connection._find_highest_supported_command(HKCSB1)
+        return connection._fetch_with_touchdowns(
+            dialog,
+            lambda touchdown: hkcsb(
+                account=hkcsb._fields["account"].type.from_sepa_account(
+                    account),
+                touchdown_point=touchdown,
+            ),
+            lambda responses: responses,
+            "HICSB",
+        )
+
+
 def fetch_scheduled_debits(connection, account):
     """The bestand of scheduled direct debits -- HKDBS, asked correctly.
 

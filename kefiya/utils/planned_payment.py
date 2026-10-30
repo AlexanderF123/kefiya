@@ -203,6 +203,11 @@ def normalize_scheduled_debits(raw_items):
 #: Kinds reported by the standing-order fetch (HKDSE / scheduled transfers).
 STANDING_ORDER_KINDS = ("Scheduled Transfer", "Standing Order")
 
+#: What the dated-debit fetch (HKDBS) writes, and so all its sweep may
+#: cancel. The dated transfers (HKCSB) are "Scheduled Transfer" and have a
+#: sweep of their own.
+DEBIT_FETCH_KINDS = ("Standing Order",)
+
 #: Kind used for entries the bank shows but has not booked yet.
 PENDING_KIND = "Pending"
 
