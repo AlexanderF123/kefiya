@@ -150,7 +150,11 @@ EVIDENCE_EVERY_SECONDS = 7 * 24 * 3600
 
 
 def _write_down_the_answer(login, command_seg, response, segments, rows):
-    """The bank's answer, raw, in the Error Log -- once a week per access.
+    """The bank's answer, raw, as a private file on the Kefiya Login.
+
+    Once a week per access. Not the Error Log: that is for errors, and an
+    answer the bank gave without complaint is not one. The file sits where
+    the access is, in the form's attachments.
 
     The schedule's field order is unconfirmed, and the raw elements are what
     confirms it. They used to be read and dropped: the fetch reported a count.
@@ -158,8 +162,10 @@ def _write_down_the_answer(login, command_seg, response, segments, rows):
     """
     from kefiya.utils import standing_order_evidence
 
+    if not login:
+        return
     try:
-        key = "kefiya:standing_order_evidence:{0}".format(login or "-")
+        key = "kefiya:standing_order_evidence:{0}".format(login)
         if frappe.cache().get_value(key):
             return
         try:
@@ -169,12 +175,16 @@ def _write_down_the_answer(login, command_seg, response, segments, rows):
                 for r in response.responses(command_seg))
         except Exception:
             said = ""
-        frappe.log_error(
-            title="Kefiya: standing orders as the bank sent them",
-            message=standing_order_evidence.message(
+        frappe.get_doc({
+            "doctype": "File",
+            "file_name": standing_order_evidence.file_name(
+                frappe.utils.today()),
+            "attached_to_doctype": "Kefiya Login",
+            "attached_to_name": login,
+            "is_private": 1,
+            "content": standing_order_evidence.message(
                 login, segments, said=said, parsed=rows),
-            reference_doctype="Kefiya Login" if login else None,
-            reference_name=login)
+        }).insert(ignore_permissions=True)
         frappe.cache().set_value(key, 1,
                                  expires_in_sec=EVIDENCE_EVERY_SECONDS)
     except Exception:

@@ -89,6 +89,20 @@ class TestTheFetchWritesItDown(unittest.TestCase):
                       " segments, rows)", fetch)
         self.assertIn("EVIDENCE_EVERY_SECONDS = 7 * 24 * 3600", self.source)
 
+    def test_as_a_file_on_the_login_not_in_the_error_log(self):
+        """The Error Log is for errors. This is an answer given without
+        complaint."""
+        note = self.source.split("def _write_down_the_answer(")[1].split(
+            "def fetch_standing_orders(")[0]
+        self.assertIn('"doctype": "File"', note)
+        self.assertIn('"attached_to_doctype": "Kefiya Login"', note)
+        self.assertIn('"is_private": 1', note)
+        self.assertNotIn("log_error", note)
+
+    def test_the_file_is_named_by_day(self):
+        self.assertEqual(evidence.file_name("2026-10-30"),
+                         "dauerauftraege-bankantwort-2026-10-30.txt")
+
     def test_the_controller_says_which_login(self):
         with open(os.path.join(WURZEL, "utils", "fints_controller.py"),
                   encoding="utf-8") as handle:

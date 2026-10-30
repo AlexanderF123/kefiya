@@ -17,7 +17,8 @@ turns "probably the rhythm" into "the rhythm", and only then may kefiya write
 standing orders into a list or, later, to the bank.
 
 Every element is kept, with its position and its type. Nothing is
-interpreted here.
+interpreted here. The text goes into a private file on the Kefiya Login, not
+into the Error Log -- an answer the bank gave without complaint is no error.
 """
 
 #: A pain message can be long. Enough for one order, not a whole statement.
@@ -63,8 +64,13 @@ def segment_lines(segment):
     return lines
 
 
+def file_name(day):
+    """The attachment's name: one per access and day of fetching."""
+    return "dauerauftraege-bankantwort-{0}.txt".format(day)
+
+
 def message(login, segments, said=None, parsed=None):
-    """The Error Log text for one answer. Never raises."""
+    """The text of one answer, for the file on the login. Never raises."""
     try:
         out = ["login={0}".format(login),
                "HICDB segments: {0}".format(len(segments or []))]
