@@ -1718,7 +1718,8 @@ class FinTSController(TanSession):
         with self.client_session():
             account = self._require_fints_account()
             return standing_orders.fetch_standing_orders(
-                self.fints_connection, account)
+                self.fints_connection, account,
+                login=self.kefiya_login.name)
 
     def get_fints_statements(self):
         """List available electronic account statements
