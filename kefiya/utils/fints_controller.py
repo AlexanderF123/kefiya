@@ -439,8 +439,13 @@ class FinTSController(TanSession):
             return verdict
         frappe.log_error(
             title="Kefiya: the bank refused the order",
-            message="login={0}\n{1}".format(
-                self.kefiya_login.name, fints_response.as_text(verdict)),
+            message="login={0}\n{1}\n\nSEPA schema sent: {2}\nSEPA formats"
+                    " the bank lists: {3}".format(
+                        self.kefiya_login.name,
+                        fints_response.as_text(verdict),
+                        getattr(self, "sepa_schema", None) or "(not chosen)",
+                        ", ".join(getattr(self, "sepa_formats_listed", None)
+                                  or []) or "(none read)"),
         )
         frappe.throw(
             _("The bank refused this order. It was NOT sent.\n\n{0}").format(
@@ -1994,7 +1999,8 @@ class FinTSController(TanSession):
 
     def submit_sepa_transfer(self, pain_xml, instant_payment=False,
                              payment_reference=None, multiple=False,
-                             control_sum=None, scheduled=False):
+                             control_sum=None, scheduled=False,
+                             rebuild_pain=None):
         """Submit a SEPA credit transfer (pain.001 XML) via FinTS.
 
         Requires a TAN: if the bank asks for one, the request is persisted and
@@ -2053,11 +2059,17 @@ class FinTSController(TanSession):
             # and the payee check broke off with "9000 interne Probleme" on
             # its second follow-up, six times. See sepa_descriptor.
             kwargs["pain_descriptor"] = self._pain_descriptor(instant_payment)
+            # The message was built as pain.001.001.03 before the bank's
+            # parameters were known. Where the bank no longer lists that
+            # schema it is built again, now, in the one it does -- before
+            # anything goes out. See sepa_descriptor.schema_for.
+            pain_xml = self._in_the_banks_schema(pain_xml, rebuild_pain)
             try:
                 if scheduled:
                     response = self._send_scheduled_transfer(
                         account, pain_xml, multiple=multiple,
-                        control_sum=control_sum)
+                        control_sum=control_sum,
+                        pain_descriptor=kwargs["pain_descriptor"])
                 else:
                     response = self.fints_connection.sepa_transfer(
                         account, pain_xml, **kwargs)
@@ -2165,11 +2177,37 @@ class FinTSController(TanSession):
                     bpd.find_segment_first("HISPAS"))
         except Exception:
             supported = []
-        chosen = sepa_descriptor.choose(supported)
+        # Kept for the refusal log: "9210 Sepa-Format nicht mehr gueltig"
+        # is only readable next to the list the bank gave.
+        self.sepa_formats_listed = list(supported)
+        self.sepa_schema = sepa_descriptor.schema_for(supported)
+        chosen = sepa_descriptor.choose(
+            supported, schema=self.sepa_schema,
+            default=sepa_descriptor.default_for(self.sepa_schema))
         frappe.logger("kefiya").info(
-            "Kefiya SEPA descriptor: login=%s instant=%s chosen=%s bank_lists=%s",
-            self.kefiya_login.name, instant_payment, chosen, supported)
+            "Kefiya SEPA descriptor: login=%s instant=%s schema=%s chosen=%s"
+            " bank_lists=%s", self.kefiya_login.name, instant_payment,
+            self.sepa_schema, chosen, supported)
         return chosen
+
+    def _in_the_banks_schema(self, pain_xml, rebuild_pain):
+        """The message in the schema _pain_descriptor chose. Never guesses.
+
+        Unchanged where that is pain.001.001.03, which is how every message
+        is built first. Otherwise built again by ``rebuild_pain(schema)``; a
+        caller that cannot do that gets a refusal before the bank is
+        contacted, not an order the bank has already said it will reject.
+        """
+        schema = getattr(self, "sepa_schema", sepa_descriptor.PAIN_001_03)
+        if schema == sepa_descriptor.PAIN_001_03:
+            return pain_xml
+        if rebuild_pain is None:
+            frappe.throw(_(
+                "The bank no longer accepts transfers in the SEPA format"
+                " pain.001.001.03, and this order cannot be built in {0} from"
+                " here. It was NOT sent."
+            ).format(schema), title=_("Not sent"))
+        return rebuild_pain(schema)
 
     def _refuse_unsigned(self, multiple, scheduled, instant_payment,
                          verdict=None):
@@ -2233,7 +2271,8 @@ class FinTSController(TanSession):
         )
 
     def _send_scheduled_transfer(self, account, pain_xml, multiple=False,
-                                 control_sum=None, currency="EUR"):
+                                 control_sum=None, currency="EUR",
+                                 pain_descriptor=None):
         """Hand a dated transfer to the bank (HKCSE / HKCME).
 
         python-fints stops at the immediate transfer, so this mirrors its
@@ -2252,7 +2291,9 @@ class FinTSController(TanSession):
         from kefiya.utils.fints_segments import HKCME1, HKCSE1
 
         conn = self.fints_connection
-        pain_descriptor = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
+        # The name the bank keeps, as for an immediate transfer; the ISO name
+        # of .03 where nobody chose one, which is what this always sent.
+        pain_descriptor = pain_descriptor or sepa_descriptor.DEFAULT_PAIN_001
 
         # Wo dieser Auftrag weitermacht, wenn die Bank ihn zurueckhaelt -- als
         # gebundene METHODE. Hier stand eine Closure, und die konnte die

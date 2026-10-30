@@ -145,4 +145,5 @@ class TestDerAuftragTraegtIhn(unittest.TestCase):
         wahl = wahl[:wahl.index("    def _refuse_unsigned(")]
         self.assertIn('find_segment_first("HIIPZS")', wahl)
         self.assertIn('find_segment_first("HISPAS")', wahl)
-        self.assertIn("sepa_descriptor.choose(supported)", wahl)
+        self.assertIn("sepa_descriptor.choose(\n            supported, schema=self.sepa_schema", wahl)
+        self.assertIn("sepa_descriptor.schema_for(supported)", wahl)

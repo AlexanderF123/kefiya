@@ -29,6 +29,7 @@ from frappe.utils import cint, flt, getdate, now_datetime
 from kefiya.utils import four_eyes
 from kefiya.utils import own_transfer
 from kefiya.utils import pain_dk
+from kefiya.utils import sepa_descriptor
 from kefiya.utils import sepa_text
 
 
@@ -367,12 +368,12 @@ class KefiyaTransfer(Document):
             ))
         self.status = "Draft"
 
-    def build_pain001(self):
-        """Render this document as a pain.001.001.03 credit-transfer message.
+    def build_pain001(self, schema=sepa_descriptor.PAIN_001_03):
+        """Render this document as a pain.001 credit-transfer message.
 
         Returns (xml, control_sum, count).
         """
-        return build_pain001_for([self])
+        return build_pain001_for([self], schema=schema)
 
 
 def _payee_detail(answer):
@@ -439,8 +440,12 @@ def requested_execution_date(doc):
     return pain_dk.execution_date(wanted, bank_holds_it=True)
 
 
-def build_pain001_for(docs):
+def build_pain001_for(docs, schema=sepa_descriptor.PAIN_001_03):
     """Render one or more Kefiya Transfers as a single pain.001 message.
+
+    ``schema`` is pain.001.001.03 unless the bank no longer lists it -- see
+    sepa_descriptor.schema_for. The controller decides that once it has the
+    bank's parameters, and builds the message again where it must.
 
     Several documents collapse into one collective order (HKCCM) that the bank
     authorises with a single TAN -- the point of the outbox. They must all be
@@ -499,7 +504,10 @@ def build_pain001_for(docs):
     # clean=False keeps the text exactly as entered, so the XSD validation
     # below is what catches out-of-spec characters instead of silently
     # rewriting a recipient name.
-    sepa = SepaTransfer(config, schema="pain.001.001.03", clean=False)
+    if schema not in (sepa_descriptor.PAIN_001_03,
+                      sepa_descriptor.PAIN_001_09):
+        frappe.throw(_("Unsupported SEPA schema: {0}").format(schema))
+    sepa = SepaTransfer(config, schema=schema, clean=False)
 
     control_sum = 0
     # Was unterwegs an den Texten geaendert wurde, fuer die

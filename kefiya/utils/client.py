@@ -978,6 +978,7 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
             multiple=count > 1,
             control_sum=control_sum if count > 1 else None,
             scheduled=scheduled,
+            rebuild_pain=lambda schema: doc.build_pain001(schema=schema)[0],
         )
     except Exception as exc:
         # Release the lock so the user can retry deliberately; the audit log
@@ -1513,6 +1514,8 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
             multiple=count > 1,
             control_sum=control_sum if count > 1 else None,
             scheduled=scheduled,
+            rebuild_pain=lambda schema: build_pain001_for(
+                docs, schema=schema)[0],
         )
     except Exception as exc:
         for key in lock_keys:
