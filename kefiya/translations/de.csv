@@ -457,3 +457,14 @@ The counter account must be a ledger account of {0}.,Das Gegenkonto muss ein Buc
 Please give party type and party for the counter account {0}.,Bitte für das Gegenkonto {0} Partei-Typ und Partei angeben.
 "The paying account belongs to {0}, not to {1}.","Das Auftraggeberkonto gehört zu {0}, nicht zu {1}."
 "Four eyes: you entered or last changed this standing order, so someone else has to activate it. Activating approves every transfer it will place.","Vier Augen: Sie haben diesen Dauerauftrag angelegt oder zuletzt geändert, deshalb muss ihn jemand anderes aktivieren. Das Aktivieren gibt jede Überweisung frei, die er anlegt."
+only standing orders,nur Daueraufträge
+Empty: until it is ended.,Leer: bis er beendet wird.
+Frequency,Turnus
+Repeat as a standing order,Als Dauerauftrag wiederholen
+Repeat until,Wiederholen bis
+Standing order,Dauerauftrag
+Standing order {0} is active. The next transfer is placed on {1}.,Dauerauftrag {0} ist aktiv. Die nächste Überweisung wird am {1} angelegt.
+Standing order {0} was entered. It places transfers once a second person has activated it.,"Dauerauftrag {0} wurde erfasst. Er legt Überweisungen an, sobald eine zweite Person ihn aktiviert hat."
+"The transfer was entered, the standing order was not. Create it under Kefiya Standing Order.","Die Überweisung wurde erfasst, der Dauerauftrag nicht. Bitte unter „Dauerauftrag“ anlegen."
+"This transfer is the first one. The next ones are placed in the outgoing payments on their date, approved, once a second person has activated the standing order.","Diese Überweisung ist die erste. Die folgenden werden zu ihrem Termin freigegeben in den Zahlungsausgang gestellt, sobald eine zweite Person den Dauerauftrag aktiviert hat."
+"Only a single transfer can be repeated as a standing order, not a collective one.","Nur eine Einzelüberweisung lässt sich als Dauerauftrag wiederholen, keine Sammelüberweisung."

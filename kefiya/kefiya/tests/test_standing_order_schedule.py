@@ -149,3 +149,33 @@ class TestItIsWiredUp(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestATransferCanStartOne(unittest.TestCase):
+    """"Dauerauftrag als Option bei Überweisungen, auch in der Liste
+    filterbar" -- the option in the entry dialog and the filter in the
+    outgoing payments."""
+
+    def test_the_entry_dialog_offers_it_for_new_transfers_only(self):
+        form = _read("public", "js", "controllers", "transfer_form.js")
+        block = form.split("if (!isEdit) {")[1][:1500]
+        self.assertIn('fieldname: "repeat"', block)
+        self.assertIn('fieldname: "frequency"', block)
+        self.assertIn('fieldname: "valid_until"', block)
+        self.assertIn("kefiya.repeat_as_standing_order(entered, values",
+                      form)
+
+    def test_the_first_transfer_is_the_first_execution(self):
+        endpoint = _read("utils", "standing_order_from_transfer.py")
+        self.assertIn('"last_executed_for": str(first)', endpoint)
+        self.assertIn('"status": "Proposed"', endpoint)
+        self.assertIn("if not order.needs_second_person():", endpoint)
+        self.assertIn('transfer.db_set("standing_order", order.name)',
+                      endpoint)
+
+    def test_the_outbox_filters_by_it(self):
+        server = _read("utils", "outbox.py")
+        self.assertIn('filters["standing_order"] = ["is", "set"]', server)
+        page = _read("public", "js", "controllers", "payment_outbox.js")
+        self.assertIn("data-act='standing'", page)
+        self.assertIn("standing_only: view.standingOnly ? 1 : 0", page)

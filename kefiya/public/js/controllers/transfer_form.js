@@ -179,6 +179,36 @@ kefiya.transfer_form = function (options) {
 		{ fieldtype: "HTML", fieldname: "hint" },
 	];
 
+	// Repeat it: this transfer is the first execution, a standing order kept
+	// here places the ones after it. Only when entering -- a correction of
+	// one order is not the start of a series.
+	if (!isEdit) {
+		fields.push(
+			{ fieldtype: "Section Break", label: __("Standing order") },
+			{
+				fieldtype: "Check", fieldname: "repeat",
+				label: __("Repeat as a standing order"),
+				description: __("This transfer is the first one. The next ones"
+					+ " are placed in the outgoing payments on their date,"
+					+ " approved, once a second person has activated the"
+					+ " standing order."),
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldtype: "Select", fieldname: "frequency",
+				label: __("Frequency"), default: "Monthly",
+				options: "Monthly\nQuarterly\nHalf-Yearly\nYearly",
+				depends_on: "eval:doc.repeat",
+				mandatory_depends_on: "eval:doc.repeat",
+			},
+			{
+				fieldtype: "Date", fieldname: "valid_until",
+				label: __("Repeat until"), depends_on: "eval:doc.repeat",
+				description: __("Empty: until it is ended."),
+			},
+		);
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: isEdit ? __("Correct transfer") : __("New transfer"),
 		size: "large",
@@ -510,12 +540,17 @@ kefiya.transfer_form_submit = function (dialog, values, payers, existing, onSave
 		});
 	}
 
-	call.then(function () {
+	call.then(function (r) {
 		dialog.hide();
 		frappe.show_alert({
 			message: existing ? __("Transfer saved.") : __("Transfer entered."),
 			indicator: "green",
 		}, 4);
+		const entered = !existing && r && r.message && r.message.name;
+		if (entered && values.repeat) {
+			kefiya.repeat_as_standing_order(entered, values, onSaved);
+			return;
+		}
 		if (onSaved) onSaved();
 	}).catch(function (r) {
 		dialog.enable_primary_action();
@@ -615,6 +650,37 @@ kefiya.transfer_form_unknown = function (dialog, doc, item, existing, login,
 		});
 		if (onSaved) onSaved();
 	}).catch(unclear);
+};
+
+// The standing order behind a transfer just entered. Said either way: a
+// series that did not start must not look as if it had.
+kefiya.repeat_as_standing_order = function (transfer, values, onSaved) {
+	frappe.call({
+		method: "kefiya.utils.standing_order_from_transfer.create",
+		args: { transfer_name: transfer, frequency: values.frequency,
+			valid_until: values.valid_until || null },
+	}).then(function (r) {
+		const m = (r && r.message) || {};
+		frappe.msgprint({
+			title: __("Standing order"),
+			indicator: m.status === "Active" ? "green" : "orange",
+			message: m.status === "Active"
+				? __("Standing order {0} is active. The next transfer is placed"
+					+ " on {1}.", [frappe.utils.escape_html(m.name),
+					frappe.datetime.str_to_user(m.next_execution_date)])
+				: __("Standing order {0} was entered. It places transfers once a"
+					+ " second person has activated it.",
+					[frappe.utils.escape_html(m.name)]),
+		});
+		if (onSaved) onSaved();
+	}).catch(function () {
+		frappe.msgprint({
+			title: __("Standing order"), indicator: "red",
+			message: __("The transfer was entered, the standing order was not."
+				+ " Create it under Kefiya Standing Order."),
+		});
+		if (onSaved) onSaved();
+	});
 };
 
 kefiya.server_message = function (r) {
