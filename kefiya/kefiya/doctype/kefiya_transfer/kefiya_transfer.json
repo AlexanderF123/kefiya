@@ -16,6 +16,7 @@
   "instant_payment",
   "status",
   "on_hold",
+  "standing_order",
   "items_section",
   "items",
   "totals_section",
@@ -169,11 +170,21 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Held Back"
+  },
+  {
+   "fieldname": "standing_order",
+   "fieldtype": "Link",
+   "label": "Standing Order",
+   "options": "Kefiya Standing Order",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "search_index": 1,
+   "description": "Placed by this standing order."
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-07-28 21:00:00.000000",
+ "modified": "2026-10-30 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya Transfer",

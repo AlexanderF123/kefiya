@@ -634,3 +634,72 @@ msgstr "Wer eine dieser Rollen hat, darf eine Überweisung, die er selbst erfass
 
 msgid "Kefiya Self Approval Role"
 msgstr "Rolle mit eigener Freigabe"
+
+msgid "Kefiya Standing Order"
+msgstr "Dauerauftrag"
+
+msgid "Paying Account"
+msgstr "Auftraggeberkonto"
+
+msgid "Day of Execution"
+msgstr "Ausführungstag"
+
+msgid "Next Execution"
+msgstr "Nächste Ausführung"
+
+msgid "Counter Account"
+msgstr "Gegenkonto"
+
+msgid "Validity and Execution"
+msgstr "Laufzeit und Ausführung"
+
+msgid "Lead Days"
+msgstr "Vorlauf (Tage)"
+
+msgid "Last Transfer"
+msgstr "Letzte Überweisung"
+
+msgid "Last Executed For"
+msgstr "Zuletzt ausgeführt für Termin"
+
+msgid "Detected in Bank Transactions"
+msgstr "Erkennung aus Bankumsätzen"
+
+msgid "Detection Key"
+msgstr "Erkennungsschlüssel"
+
+msgid "Detected By"
+msgstr "Erkannt durch"
+
+msgid "Occurrences"
+msgstr "Vorkommen"
+
+msgid "First Seen"
+msgstr "Erstmals gesehen"
+
+msgid "Last Seen"
+msgstr "Zuletzt gesehen"
+
+msgid "Last Bank Transaction"
+msgstr "Letzter Bankumsatz"
+
+msgid "Detection Confidence"
+msgstr "Erkennungssicherheit"
+
+msgid "Pause Standing Orders"
+msgstr "Daueraufträge pausieren"
+
+msgid "From the Bank"
+msgstr "Von der Bank"
+
+msgid "Expected Amount"
+msgstr "Erwarteter Betrag"
+
+msgid "Source Kind"
+msgstr "Herkunft"
+
+msgid "Bank Standing Order"
+msgstr "Dauerauftrag bei der Bank"
+
+msgid "Scheduled Debit"
+msgstr "Terminierte Lastschrift"
