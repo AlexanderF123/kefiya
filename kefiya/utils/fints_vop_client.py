@@ -399,10 +399,37 @@ def _build(parts):
                     tan_seg = self._get_tan_segment(command_seg, '4')
                     segments = vop_seg + [command_seg, tan_seg]
 
+                    # Written down before it goes out, like the TAN: a
+                    # refusal of this message is read against what was in it.
+                    self._remember_what_we_sent(segments)
                     response = dialog.send(*segments)
 
+                    # The library asks for the payee result with throw=True,
+                    # and an answer without one became
+                    #
+                    #     FinTSNoResponseError: The bank's response did not
+                    #     contain a response to your request
+                    #
+                    # -- raised past every reader of the bank's own words.
+                    # Measured on 30.10.2026 at a comdirect account: the order
+                    # stopped there and nobody could tell whether the bank
+                    # had refused it, wanted a TAN, or skipped the check.
+                    #
+                    # The bank decides that, not this line. No HIVPP means
+                    # there is no verdict to park and no VoP-ID to release
+                    # with; what the bank said about the order and the TAN is
+                    # read below exactly as for a bank without the check --
+                    # a TAN it asks for is still the user's to give, and a
+                    # refusal is still a refusal.
+                    hivpp = None
                     if vop_standard:
-                        hivpp = response.find_segment_first(HIVPP1, throw=True)
+                        hivpp = response.find_segment_first(HIVPP1)
+                        if hivpp is None:
+                            _log_no_hivpp(
+                                _codes_in(response, vop_seg[0]),
+                                what_was_sent(self), what_the_bank_said(self))
+
+                    if hivpp is not None:
                         # Wait for the verdict before deciding anything. The
                         # first answer is often only "still checking, ask
                         # again", and everything below needs a result.
@@ -458,8 +485,6 @@ def _build(parts):
                                 response, (vop_seg[0] if vop_seg else None,
                                            command_seg, tan_seg), hivpp):
                             hivpp = None
-                    else:
-                        hivpp = None
 
                     for resp in response.responses(tan_seg):
                         if resp.code in ('0030', '3955'):
@@ -593,6 +618,31 @@ def _log_no_vop_id(hivpp, trail=None, said=None):
                      len(getattr(hivpp, "payment_status_report", b"") or b""),
                      getattr(hivpp, "vop_single_result", None),
                      said or "  (not recorded)"))
+    except Exception:
+        pass
+
+
+def _log_no_hivpp(said_to_check, sent, said):
+    """The bank answered the order without a payee-check segment. Never raises.
+
+    Not a guess at why: the codes the bank attached to HKVPP, what the message
+    carried, and every line the connection heard, so the next look starts
+    from the bank's words instead of from the library's sentence.
+    """
+    try:
+        import frappe
+
+        frappe.log_error(
+            title="Kefiya: the bank answered without a payee-check result",
+            message=(
+                "The order went out with HKVPP and the answer carried no"
+                " HIVPP. Nothing was parked; the order continues on what the"
+                " bank said about it and the TAN -- a TAN request is put to"
+                " the user, a refusal stops it."
+                "\n\nWhat was sent: {0}"
+                "\n\nWhat the bank said to HKVPP: {1}"
+                "\n\nEvery code the connection heard, oldest first:\n{2}"
+            ).format(sent, said_to_check, said))
     except Exception:
         pass
 
