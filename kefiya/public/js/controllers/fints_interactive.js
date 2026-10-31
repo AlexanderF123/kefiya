@@ -214,7 +214,9 @@ kefiya.interactive = {
 						challenge_html += `<p>${data.challenge.text}</p>`;
 					}
 					if (data.challenge.image) {
-						challenge_html += `<img src="${data.challenge.image}" alt="${__("TAN challenge")}" style="max-width: 100%;">`;
+						// white on purpose, also in dark mode: TAN generators read a
+						// transparent QR code badly on a dark background
+						challenge_html += `<img src="${data.challenge.image}" alt="${__("TAN challenge")}" style="max-width: 100%; background: #fff; padding: var(--padding-sm);">`;
 					}
 					fields.push(
 						{

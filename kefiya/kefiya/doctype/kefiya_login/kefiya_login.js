@@ -105,7 +105,6 @@ frappe.ui.form.on('Kefiya Login', {
 			],
 			primary_action_label: __("Save"),
 			primary_action: async (values) => {
-				dialog.hide();
 				// The server saved the login while loading (connection state),
 				// so save on the server and reload, instead of saving the
 				// now outdated form.
@@ -113,6 +112,8 @@ frappe.ui.form.on('Kefiya Login', {
 					account_iban: values.account_iban,
 					iban_list: JSON.stringify(ibanList),
 				});
+				// only now: if saving fails, the dialog and the choice stay
+				dialog.hide();
 				await frm.reload_doc();
 				frm.toggle_display("transaction_settings_section", true);
 			},
