@@ -7,7 +7,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, nowdate
 
-from kefiya.kefiya.page.kefiya_hub.kefiya_hub import get_overview
+from kefiya.kefiya.page.kefiya_hub.kefiya_hub import get_overview, record_failed_connection
 
 COMPANY = "_Test GmbH"
 OTHER_COMPANY = "My Company"
@@ -181,3 +181,70 @@ class TestKefiyaHubOverview(FrappeTestCase):
         names = [d.name for d in get_overview(COMPANY)["logins"]]
         self.assertIn(f"{PREFIX} This company", names)
         self.assertNotIn(f"{PREFIX} Other company", names)
+
+
+@patch("kefiya.utils.bank_logo._get", lambda *args, **kwargs: None)
+class TestKefiyaHubConnect(FrappeTestCase):
+    """Data and actions behind the login cards of the Connect view."""
+
+    def setUp(self):
+        for login in frappe.get_all("Kefiya Login", {"name": ["like", f"{PREFIX}%"]}, pluck="name"):
+            frappe.delete_doc("Kefiya Login", login, force=True)
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        frappe.db.rollback()
+
+    def test_card_says_whether_a_connection_is_stored_but_not_the_state(self):
+        with_state = make_login("With state")
+        make_login("Without state")
+        frappe.db.set_value("Kefiya Login", with_state, "stored_client_state", "secret-state")
+
+        overview = get_overview(COMPANY)
+        self.assertTrue(login_by_name(overview, "With state").has_client_state)
+        self.assertFalse(login_by_name(overview, "Without state").has_client_state)
+        self.assertNotIn("secret-state", frappe.as_json(overview))
+
+    def test_failed_connection_is_counted_and_the_account_cleared(self):
+        login = make_login("Failing", failed_connection=1)
+        frappe.db.set_value("Kefiya Login", login, "account_iban", "DE75120300001020304050")
+
+        self.assertEqual(record_failed_connection(login), 2)
+        failed, iban = frappe.db.get_value("Kefiya Login", login, ["failed_connection", "account_iban"])
+        self.assertEqual(failed, 2)
+        self.assertFalse(iban)
+
+    def test_failed_connection_needs_write_permission(self):
+        login = make_login("Failing")
+        frappe.set_user("Guest")
+        self.assertRaises(frappe.PermissionError, record_failed_connection, login)
+
+
+class TestGetAccountsErrors(FrappeTestCase):
+    """client.get_accounts hides only the TAN request, not real errors."""
+
+    def controller(self, error):
+        class Controller:
+            def __init__(self, *args):
+                pass
+
+            def get_fints_accounts(self):
+                raise error
+
+        return Controller
+
+    def test_tan_request_ends_the_call_without_accounts(self):
+        from kefiya.utils import client
+        from kefiya.utils.fints_controller import TanInteractionRequired
+
+        with patch.object(client, "_use_tan_authentication", return_value=True), \
+                patch.object(client, "_get_fints_controller", return_value=self.controller(TanInteractionRequired())):
+            self.assertIsNone(client.get_accounts("any", "any"))
+
+    def test_connection_error_is_raised_in_tan_mode(self):
+        from kefiya.utils import client
+
+        with patch.object(client, "_use_tan_authentication", return_value=True), \
+                patch.object(client, "_get_fints_controller",
+                             return_value=self.controller(frappe.ValidationError("no connection"))):
+            self.assertRaises(frappe.ValidationError, client.get_accounts, "any", "any")

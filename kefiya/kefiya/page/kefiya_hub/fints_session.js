@@ -22,15 +22,21 @@ kefiya.hub.FintsSession = class FintsSession {
 		this.handle_tan = this.handle_tan.bind(this);
 	}
 
-	/** Run a frappe.call while following its progress and TAN events. */
-	async run(call_opts) {
+	/**
+	 * Run a frappe.call while following its progress and TAN events.
+	 * Resolves with { ok, message }; ok is false when the server raised
+	 * (Frappe has already shown its message then).
+	 */
+	run(call_opts) {
 		this.start();
-		try {
-			const r = await frappe.call(call_opts);
-			return r && r.message;
-		} finally {
-			this.stop();
-		}
+		return new Promise((resolve) => {
+			frappe.call({
+				...call_opts,
+				callback: (r) => resolve({ ok: true, message: r && r.message }),
+				error: () => resolve({ ok: false }),
+				always: () => this.stop(),
+			});
+		});
 	}
 
 	start() {
@@ -76,7 +82,13 @@ kefiya.hub.FintsSession = class FintsSession {
 		if (this.on_progress) {
 			this.on_progress(data);
 		} else if (data.progress >= 100) {
+			const dialog = frappe.cur_progress;
 			frappe.hide_progress();
+			// Bootstrap ignores hide() while the dialog still fades in, which
+			// leaves it on screen (same fix as kefiya.interactive.finish_progress)
+			if (dialog) {
+				dialog.$wrapper.one("shown.bs.modal", () => dialog.$wrapper.modal("hide"));
+			}
 		} else {
 			frappe.show_progress(__("Bank connection"), data.progress, 100, data.message);
 		}
@@ -162,15 +174,15 @@ kefiya.hub.FintsSession = class FintsSession {
 	async resolve_tan(data, values) {
 		// the server doesn't need the challenge (and its image) back
 		const { challenge, ...context } = data;
-		const result = await this.run({
+		const { message } = await this.run({
 			method: "kefiya.utils.client.resolve_tan_interaction",
 			args: {
 				fints_login: this.kefiya_login,
 				values: { ...context, ...values },
 			},
 		});
-		if (result && result.tan_resolved && this.on_tan_resolved) {
-			this.on_tan_resolved(result);
+		if (message && message.tan_resolved && this.on_tan_resolved) {
+			this.on_tan_resolved(message);
 		}
 	}
 };

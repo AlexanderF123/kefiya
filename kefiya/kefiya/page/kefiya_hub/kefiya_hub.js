@@ -11,6 +11,7 @@ kefiya.hub.register_view = (view) => {
 
 {% include "kefiya/kefiya/page/kefiya_hub/fints_session.js" %}
 {% include "kefiya/kefiya/page/kefiya_hub/views/overview.js" %}
+{% include "kefiya/kefiya/page/kefiya_hub/views/connect.js" %}
 {% include "kefiya/kefiya/page/kefiya_hub/views/coming_next.js" %}
 
 // Sidebar: section title (none for the first) and its view keys

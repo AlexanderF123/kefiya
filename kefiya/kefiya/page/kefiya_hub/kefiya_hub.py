@@ -19,16 +19,23 @@ def get_overview(company=None):
         fields=[
             "name", "company", "bank_account", "account_iban",
             "erpnext_account", "failed_connection", "tan_state_updated",
-            "modified",
+            "enable_tan_authentication", "bank_logo", "modified",
         ],
         order_by="login_name asc",
     )
+    # only whether a connection state is stored, never the state itself
+    with_state = set(frappe.get_list(
+        "Kefiya Login",
+        filters={**login_filters, "stored_client_state": ["is", "set"]},
+        pluck="name",
+    ))
 
     schedule = get_schedule_items()
     last_imports = get_last_imports([d.name for d in logins])
     open_transactions = get_open_transactions(company)
 
     for login in logins:
+        login.has_client_state = login.name in with_state
         login.schedule = schedule.get(login.name)
         login.last_import = last_imports.get(login.name)
         login.open_transactions = open_transactions.get(login.bank_account, {})
@@ -42,6 +49,24 @@ def get_overview(company=None):
         "scheduler_active": not is_scheduler_inactive(),
         "steps": get_steps(logins, open_transactions),
     }
+
+
+@frappe.whitelist()
+def record_failed_connection(kefiya_login):
+    """Count a failed bank connection, as the Kefiya Login form does.
+
+    The FinTS controller resets the counter on the next successful
+    connection. Written with db.set_value, because the server already saved
+    the login while connecting and a full save would overwrite that.
+    """
+    login = frappe.get_doc("Kefiya Login", kefiya_login)
+    login.check_permission("write")
+    failed = (login.failed_connection or 0) + 1
+    frappe.db.set_value("Kefiya Login", login.name, {
+        "failed_connection": failed,
+        "account_iban": None,
+    })
+    return failed
 
 
 def get_login_status(login):

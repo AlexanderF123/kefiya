@@ -197,3 +197,86 @@
 
 .kefiya-sidebar-count.orange { background: var(--orange-100); color: var(--orange-700); }
 .kefiya-sidebar-count.red { background: var(--red-100); color: var(--red-700); }
+
+.kefiya-login-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+	gap: var(--padding-md);
+}
+
+.kefiya-login-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--padding-sm);
+	padding: var(--padding-md);
+}
+
+.kefiya-login-head {
+	display: flex;
+	align-items: center;
+	gap: var(--padding-sm);
+}
+
+.kefiya-login-title {
+	flex: 1;
+	min-width: 0;
+}
+
+.kefiya-login-title .kefiya-section-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.kefiya-bank-logo {
+	width: 36px;
+	height: 36px;
+	border-radius: var(--border-radius);
+	object-fit: contain;
+	flex-shrink: 0;
+}
+
+.kefiya-bank-initial {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--subtle-fg);
+	color: var(--text-muted);
+	font-weight: 600;
+}
+
+.kefiya-card-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: var(--text-sm);
+}
+
+.kefiya-card-row {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--padding-sm);
+}
+
+.kefiya-card-row span:last-child {
+	text-align: right;
+	overflow-wrap: anywhere;
+}
+
+.kefiya-card-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--padding-xs);
+	margin-top: auto;
+	padding-top: var(--padding-xs);
+}
+
+.kefiya-login-card .kefiya-hint {
+	margin-bottom: 0;
+	font-size: var(--text-sm);
+}
+
+.kefiya-hint-error {
+	background: var(--bg-red);
+	color: var(--text-on-red);
+}
