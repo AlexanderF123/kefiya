@@ -468,3 +468,5 @@ Standing order {0} was entered. It places transfers once a second person has act
 "The transfer was entered, the standing order was not. Create it under Kefiya Standing Order.","Die Überweisung wurde erfasst, der Dauerauftrag nicht. Bitte unter „Dauerauftrag“ anlegen."
 "This transfer is the first one. The next ones are placed in the outgoing payments on their date, approved, once a second person has activated the standing order.","Diese Überweisung ist die erste. Die folgenden werden zu ihrem Termin freigegeben in den Zahlungsausgang gestellt, sobald eine zweite Person den Dauerauftrag aktiviert hat."
 "Only a single transfer can be repeated as a standing order, not a collective one.","Nur eine Einzelüberweisung lässt sich als Dauerauftrag wiederholen, keine Sammelüberweisung."
+"The bank has not reported the release yet. The order is still marked as not sent.","Die Bank hat die Freigabe noch nicht gemeldet. Der Auftrag gilt weiter als nicht gesendet."
+"Waiting for the bank to report the release. This page carries on by itself.","Warte darauf, dass die Bank die Freigabe meldet. Diese Seite macht von selbst weiter."

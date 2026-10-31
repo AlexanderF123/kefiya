@@ -98,6 +98,24 @@ kefiya.interactive = {
 				kefiya.progress.hide();
 			});
 
+			// A transfer's box answers for the order, not for the login. The
+			// box built below sends the TAN to resolve_tan_interaction, which
+			// releases the parked order at the bank and marks nothing: the
+			// transfer stayed "Approved" with its money gone, and once the
+			// send lock ran out (10 minutes) "Send now" would have paid it a
+			// second time. tan_prompt with the transfer answers through
+			// send_transfer_tan, which reads what the bank said and marks the
+			// order sent only when it was released.
+			if (frm.doctype === "Kefiya Transfer" && kefiya.tan_prompt) {
+				kefiya.tan_prompt(data, () => frm.reload_doc(), {
+					transfer: {
+						login: data.fints_login || frm.doc.kefiya_login,
+						names: [frm.doc.name],
+					},
+				});
+				return;
+			}
+
 			let fields = [];
 
 			if (data.possible_tan_modes) {
