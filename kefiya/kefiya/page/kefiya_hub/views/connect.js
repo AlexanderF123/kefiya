@@ -29,10 +29,13 @@ kefiya.hub.register_view(
 				({
 					load: () => this.load_accounts(name, hub),
 					reset: () => this.reset_connection(name, hub),
-					edit: () => this.login_dialog(hub, name),
 					import: () => kefiya.hub.views.overview.import_dialog(name),
 					new: () => this.login_dialog(hub),
 				})[$(e.currentTarget).attr("data-action")]();
+			});
+			// the full form opens in another tab; show its changes on coming back
+			$(window).on("focus", () => {
+				if (hub.current === this.key && frappe.get_route()[0] === "kefiya-hub") hub.refresh();
 			});
 		}
 
@@ -91,9 +94,8 @@ kefiya.hub.register_view(
 				<div class="kefiya-card-actions">
 					${btn("load", __("Load accounts"), !l.account_iban)}
 					${btn("import", __("Import"), !!l.account_iban)}
-					${btn("edit", __("Edit"))}
 					${l.has_client_state ? btn("reset", __("Reset connection")) : ""}
-					<a class="btn btn-xs btn-link" href="/app/kefiya-login/${encodeURIComponent(l.name)}">${__("Open full form")}</a>
+					<a class="btn btn-xs btn-link" href="/app/kefiya-login/${encodeURIComponent(l.name)}" target="_blank" rel="noopener">${__("Open full form")}</a>
 				</div>
 			</div>`;
 		}
@@ -179,10 +181,9 @@ kefiya.hub.register_view(
 			);
 		}
 
-		/** New login (no name) or edit an existing one, without leaving the page. */
-		async login_dialog(hub, name) {
+		/** New login without leaving the page; existing ones open in the full form. */
+		async login_dialog(hub) {
 			await frappe.model.with_doctype("Kefiya Login");
-			const doc = name ? await frappe.db.get_doc("Kefiya Login", name) : null;
 
 			const fields = [];
 			KEFIYA_LOGIN_DIALOG_FIELDS.forEach(([section, fieldnames]) => {
@@ -190,21 +191,19 @@ kefiya.hub.register_view(
 				fieldnames.forEach((fieldname) => {
 					const df = { ...frappe.meta.get_docfield("Kefiya Login", fieldname) };
 					delete df.depends_on;
-					if (fieldname === "login_name" && doc) df.read_only = 1;
 					fields.push(df);
 				});
 			});
 
 			const dialog = new frappe.ui.Dialog({
-				title: doc ? doc.name : __("New Kefiya Login"),
+				title: __("New Kefiya Login"),
 				size: "large",
 				fields,
 				primary_action_label: __("Save"),
 				primary_action: async (values) => {
-					const method = doc ? "frappe.client.save" : "frappe.client.insert";
 					await frappe.call({
-						method,
-						args: { doc: { ...(doc || { doctype: "Kefiya Login" }), ...values } },
+						method: "frappe.client.insert",
+						args: { doc: { doctype: "Kefiya Login", ...values } },
 						freeze: true,
 					});
 					dialog.hide();
@@ -221,11 +220,7 @@ kefiya.hub.register_view(
 				filters: { company: company(), is_company_account: 1 },
 			});
 
-			if (doc) {
-				dialog.set_values(doc);
-			} else {
-				dialog.set_value("company", hub.company);
-			}
+			dialog.set_value("company", hub.company);
 			dialog.show();
 		}
 	})()
