@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 
 import frappe
 import json
+import re
 import mt940
 
 from dateutil.relativedelta import relativedelta
@@ -13,7 +14,7 @@ from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse
 from fints.exceptions import FinTSConnectionError, FinTSSCARequiredError
 
 from frappe import _
-from frappe.utils import now_datetime
+from frappe.utils import escape_html, now_datetime
 from frappe.utils.file_manager import (
     save_file,
     get_file,
@@ -34,20 +35,54 @@ class TanAuthenticationRequired(frappe.ValidationError):
     """The bank wants a TAN for the login, which the legacy controller can't do."""
 
 
-def throw_tan_authentication_required():
-    """Tell the user to enable TAN authentication, with a button to the settings."""
-    frappe.throw(
+def get_bank_answer(error):
+    """Short form of a fints error for the message, e.g. "9210 Auftrag abgelehnt"."""
+    if isinstance(error, FinTSConnectionError):
+        return str(error).replace("Bad status code", "HTTP")
+    answers = re.findall(r"code='(\d+)', reference_element=[^,]*, text='([^']*)'", str(error))
+    return ", ".join("{0} {1}".format(code, text) for code, text in answers) or None
+
+
+def throw_tan_authentication_required(kefiya_login, bank_answer=None):
+    """Explain that the bank wants a TAN and how to switch TAN on for this login.
+
+    With write access to the Kefiya Login, the dialog's button switches TAN
+    authentication on and tries again (kefiya.interactive.use_tan_and_try_again).
+    """
+    can_edit = frappe.has_permission("Kefiya Login", "write", kefiya_login.name)
+    login = frappe.bold(escape_html(kefiya_login.name))
+    paragraphs = [
         _(
-            "Your bank requires a TAN to load the accounts. Enable TAN"
-            " Authentication in Kefiya Settings and try again."
-        ),
+            "The bank did not send the accounts for {0}. It wants the login"
+            " confirmed with a TAN, e.g. in your banking app (PSD2)."
+        ).format(login),
+        _("TAN authentication is off for this Kefiya Login, so Kefiya can't ask for a TAN."),
+    ]
+    if can_edit:
+        paragraphs.append(_(
+            "Click {0} to switch it on and load again. Then choose your TAN"
+            " method and confirm in your banking app."
+        ).format(frappe.bold(_("Use TAN and Try Again"))))
+    else:
+        paragraphs.append(_(
+            "Ask someone who can edit this Kefiya Login to tick {0}."
+        ).format(frappe.bold(_("Use TAN Authentication"))))
+
+    message = "".join("<p>{0}</p>".format(p) for p in paragraphs)
+    if bank_answer:
+        message += '<p class="text-muted small">{0}</p>'.format(
+            _("Bank answer: {0}").format(escape_html(bank_answer))
+        )
+
+    frappe.throw(
+        message,
         exc=TanAuthenticationRequired,
         title=_("TAN Required"),
         primary_action={
-            "label": _("Open Kefiya Settings"),
-            "client_action": "frappe.set_route",
-            "args": ["Form", "Kefiya Settings"],
-        },
+            "label": _("Use TAN and Try Again"),
+            "client_action": "kefiya.interactive.use_tan_and_try_again",
+            "args": kefiya_login.name,
+        } if can_edit else None,
     )
 
 
@@ -98,7 +133,7 @@ class FinTSController:
         self.fints_connection.fetch_tan_mechanisms()
 
         if self.fints_connection.init_tan_response:
-            throw_tan_authentication_required()
+            throw_tan_authentication_required(self.kefiya_login)
 
     def __get_fints_accounts(self):
         """Fetch FinTS Accounts.
@@ -112,7 +147,7 @@ class FinTSController:
             try:
                 self.fints_accounts = self.fints_connection.get_sepa_accounts()
             except FinTSSCARequiredError:
-                throw_tan_authentication_required()
+                throw_tan_authentication_required(self.kefiya_login)
             except Exception as e:
                 # The bank has most likely ended the dialog. Don't let fints
                 # send the dialog end (HKEND) on exit: it fails too, and its
@@ -127,7 +162,7 @@ class FinTSController:
                     and str(e) == SCA_REJECTION_HTTP_STATUS
                 ) or any("code='{0}'".format(c) in str(e) for c in SCA_REJECTION_CODES):
                     frappe.log_error(title="Kefiya: bank rejected account list")
-                    throw_tan_authentication_required()
+                    throw_tan_authentication_required(self.kefiya_login, get_bank_answer(e))
                 frappe.throw(_(
                     "Could not load sepa accounts with error:<br>{0}"
                 ).format(e))
