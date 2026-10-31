@@ -7,7 +7,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, nowdate
 
-from kefiya.kefiya.page.kefiya_hub.kefiya_hub import get_overview, record_failed_connection
+from kefiya.kefiya.page.kefiya_hub.kefiya_hub import get_imports, get_overview, record_failed_connection
 
 COMPANY = "_Test GmbH"
 OTHER_COMPANY = "My Company"
@@ -52,14 +52,16 @@ def make_login(name: str, bank_account: str | None = None, company: str = COMPAN
     return login.name
 
 
-def make_import(login: str, days_ago: int) -> None:
+def make_import(login: str, days_ago: int, submit: bool = True) -> str:
     doc = frappe.get_doc({
         "doctype": "Kefiya Import",
         "kefiya_login": login,
         "from_date": add_days(nowdate(), -days_ago - 1),
         "to_date": add_days(nowdate(), -days_ago),
     }).insert()
-    doc.submit()
+    if submit:
+        doc.submit()
+    return doc.name
 
 
 def make_open_transaction(bank_account: str, amount: float) -> None:
@@ -248,3 +250,47 @@ class TestGetAccountsErrors(FrappeTestCase):
                 patch.object(client, "_get_fints_controller",
                              return_value=self.controller(frappe.ValidationError("no connection"))):
             self.assertRaises(frappe.ValidationError, client.get_accounts, "any", "any")
+
+
+@patch("kefiya.utils.bank_logo._get", lambda *args, **kwargs: None)
+class TestKefiyaHubImports(FrappeTestCase):
+    """get_imports feeds the Imports view."""
+
+    def setUp(self):
+        for login in frappe.get_all("Kefiya Login", {"name": ["like", f"{PREFIX}%"]}, pluck="name"):
+            frappe.db.delete("Kefiya Import", {"kefiya_login": login})
+            frappe.delete_doc("Kefiya Login", login, force=True)
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        frappe.db.rollback()
+
+    def test_drafts_and_submitted_imports_with_their_json(self):
+        login = make_login("Imports")
+        draft = make_import(login, days_ago=3, submit=False)
+        done = make_import(login, days_ago=1)
+        frappe.get_doc({
+            "doctype": "File",
+            "file_name": f"{done}.json",
+            "attached_to_doctype": "Kefiya Import",
+            "attached_to_name": done,
+            "content": "[]",
+            "is_private": 1,
+        }).insert()
+
+        rows = {d.name: d for d in get_imports(COMPANY) if d.source == "FinTS"}
+        self.assertEqual(rows[draft].docstatus, 0)
+        self.assertIsNone(rows[draft].file_url)
+        self.assertEqual(rows[done].docstatus, 1)
+        self.assertTrue(rows[done].file_url.endswith(".json"))
+
+    def test_limit_and_company(self):
+        login = make_login("Imports")
+        other = make_login("Other company", company=OTHER_COMPANY)
+        for days in (1, 2, 3):
+            make_import(login, days_ago=days)
+        make_import(other, days_ago=1)
+
+        rows = get_imports(COMPANY, limit=2)
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(d.kefiya_login == login for d in rows if d.source == "FinTS"))

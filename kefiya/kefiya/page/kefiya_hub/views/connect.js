@@ -29,7 +29,7 @@ kefiya.hub.register_view(
 				({
 					load: () => this.load_accounts(name, hub),
 					reset: () => this.reset_connection(name, hub),
-					import: () => kefiya.hub.views.overview.import_dialog(name),
+					import: () => kefiya.hub.views.imports.import_dialog(hub, name),
 					new: () => this.login_dialog(hub),
 				})[$(e.currentTarget).attr("data-action")]();
 			});

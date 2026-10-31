@@ -108,7 +108,13 @@ def get_last_imports(login_names):
     return last
 
 
-def get_recent_imports(company=None):
+@frappe.whitelist()
+def get_imports(company=None, limit=50):
+    """Imports of both kinds for the Imports view, newest first."""
+    return get_recent_imports(company, int(limit))
+
+
+def get_recent_imports(company=None, limit=8):
     filters = {"docstatus": ["<", 2]}
     if company:
         filters["kefiya_login"] = [
@@ -120,13 +126,22 @@ def get_recent_imports(company=None):
     fints = frappe.get_list(
         "Kefiya Import",
         filters=filters,
-        fields=["name", "kefiya_login", "from_date", "to_date", "creation",
-                "docstatus"],
+        fields=["name", "kefiya_login", "from_date", "to_date", "start_date",
+                "end_date", "creation", "owner", "docstatus"],
         order_by="creation desc",
-        limit=5,
+        limit=limit,
     )
+    # the import attaches what the bank sent as <import>.json
+    files = dict(frappe.get_all(
+        "File",
+        filters={"attached_to_doctype": "Kefiya Import",
+                 "attached_to_name": ["in", [d.name for d in fints] or [""]]},
+        fields=["attached_to_name", "file_url"],
+        as_list=True,
+    ))
     for d in fints:
         d.source = "FinTS"
+        d.file_url = files.get(d.name)
 
     # Only System Managers may read statement imports; everyone else still
     # gets the page, just without them
@@ -138,15 +153,15 @@ def get_recent_imports(company=None):
         "Kefiya Bank Statement Import",
         filters=statement_filters,
         fields=["name", "bank_account", "status", "payload_count",
-                "imported_records", "creation"],
+                "imported_records", "import_file", "creation", "owner"],
         order_by="creation desc",
-        limit=5,
+        limit=limit,
     )
     for d in statements:
         d.source = "Statement"
 
     return sorted(fints + statements, key=lambda d: d.creation,
-                  reverse=True)[:8]
+                  reverse=True)[:limit]
 
 
 def get_open_transactions(company=None):

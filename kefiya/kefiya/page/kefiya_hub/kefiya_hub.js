@@ -12,6 +12,7 @@ kefiya.hub.register_view = (view) => {
 {% include "kefiya/kefiya/page/kefiya_hub/fints_session.js" %}
 {% include "kefiya/kefiya/page/kefiya_hub/views/overview.js" %}
 {% include "kefiya/kefiya/page/kefiya_hub/views/connect.js" %}
+{% include "kefiya/kefiya/page/kefiya_hub/views/imports.js" %}
 {% include "kefiya/kefiya/page/kefiya_hub/views/coming_next.js" %}
 
 // Sidebar: section title (none for the first) and its view keys
@@ -111,7 +112,7 @@ kefiya.hub.KefiyaHub = class KefiyaHub {
 	bind_events() {
 		frappe.ui.keys.add_shortcut({
 			shortcut: "ctrl+i",
-			action: () => kefiya.hub.views.overview.import_dialog(),
+			action: () => kefiya.hub.views.imports.import_dialog(this),
 			page: this.page,
 			description: __("Import bank transactions"),
 		});
@@ -151,6 +152,7 @@ kefiya.hub.KefiyaHub = class KefiyaHub {
 		this.page.clear_primary_action();
 		this.page.clear_secondary_action();
 		this.page.clear_menu();
+		this.page.clear_inner_toolbar();
 		this.page.set_secondary_action(__("Refresh"), () => this.refresh(), "refresh");
 		view.actions && view.actions(this.page, this);
 
