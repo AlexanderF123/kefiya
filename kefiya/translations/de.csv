@@ -468,3 +468,34 @@ Standing order {0} was entered. It places transfers once a second person has act
 "The transfer was entered, the standing order was not. Create it under Kefiya Standing Order.","Die Überweisung wurde erfasst, der Dauerauftrag nicht. Bitte unter „Dauerauftrag“ anlegen."
 "This transfer is the first one. The next ones are placed in the outgoing payments on their date, approved, once a second person has activated the standing order.","Diese Überweisung ist die erste. Die folgenden werden zu ihrem Termin freigegeben in den Zahlungsausgang gestellt, sobald eine zweite Person den Dauerauftrag aktiviert hat."
 "Only a single transfer can be repeated as a standing order, not a collective one.","Nur eine Einzelüberweisung lässt sich als Dauerauftrag wiederholen, keine Sammelüberweisung."
+Bank Refused Request,Bank hat die Anfrage abgelehnt
+Error Log,Fehlerprotokoll
+"If the From Date is more than 90 days ago, choose a later one.","Liegt das Startdatum mehr als 90 Tage zurück, wählen Sie ein späteres."
+Kefiya: Could not fetch transactions,Kefiya: Umsätze konnten nicht abgerufen werden
+Kefiya: Could not load accounts,Kefiya: Konten konnten nicht geladen werden
+Login Failed,Anmeldung fehlgeschlagen
+TAN Required,TAN erforderlich
+The bank traffic was saved in the {0}.,Der Datenverkehr mit der Bank wurde im {0} gespeichert.
+The bank's answer:,Die Antwort der Bank:
+"Your bank did not accept the login of Kefiya Login {0}. Check the FinTS login name and the PIN, then try again. Careful: after several wrong PINs in a row the bank locks the online banking access.",Ihre Bank hat die Anmeldung von Kefiya Login {0} nicht angenommen. Prüfen Sie den FinTS-Anmeldenamen und die PIN und versuchen Sie es erneut. Vorsicht: Nach mehreren falschen PINs in Folge sperrt die Bank den Online-Banking-Zugang.
+"Your bank has temporarily locked the online banking access of Kefiya Login {0}, usually after several wrong PINs. Unlock it in your bank's online banking or ask your bank, then try again.","Ihre Bank hat den Online-Banking-Zugang von Kefiya Login {0} vorübergehend gesperrt, meist nach mehreren falschen PINs. Entsperren Sie ihn im Online-Banking Ihrer Bank oder fragen Sie Ihre Bank und versuchen Sie es dann erneut."
+Your bank refused to load the accounts:,Ihre Bank hat das Laden der Konten abgelehnt:
+Your bank refused to send the transactions:,Ihre Bank hat die Herausgabe der Umsätze abgelehnt:
+Your bank requires a TAN to fetch transactions from this date range. Choose a From Date within the last 90 days.,Ihre Bank verlangt für Umsätze aus diesem Zeitraum eine TAN. Wählen Sie ein Startdatum innerhalb der letzten 90 Tage.
+"Your chipTAN generator needs to be resynchronised. Do this in your bank's online banking or app, usually in the TAN or security settings, then try again.","Ihr chipTAN-Generator muss neu synchronisiert werden. Das geht im Online-Banking oder in der App Ihrer Bank, meist unter den TAN- oder Sicherheitseinstellungen. Versuchen Sie es danach erneut."
+Ask someone who can edit this Kefiya Login to tick {0}.,"Bitten Sie jemanden, der dieses Kefiya Login bearbeiten darf, {0} anzuhaken."
+Bank answer: {0},Antwort der Bank: {0}
+Click {0} to switch it on and load again. Then choose your TAN method and confirm in your banking app.,"Klicken Sie auf {0}, um sie einzuschalten und erneut zu laden. Wählen Sie dann Ihr TAN-Verfahren und bestätigen Sie in Ihrer Banking-App."
+"TAN authentication is off for this Kefiya Login, so Kefiya can't ask for a TAN.","Für dieses Kefiya Login ist die TAN-Authentifizierung ausgeschaltet, deshalb kann Kefiya keine TAN anfordern."
+"The bank did not send the accounts for {0}. It wants the login confirmed with a TAN, e.g. in your banking app (PSD2).","Die Bank hat die Konten für {0} nicht gesendet. Sie verlangt, dass die Anmeldung mit einer TAN bestätigt wird, z. B. in Ihrer Banking-App (PSD2)."
+Use TAN Authentication,TAN-Authentifizierung verwenden
+Use TAN and Try Again,TAN verwenden und erneut versuchen
+TAN authentication is on for {0}. Please try again.,Die TAN-Authentifizierung ist für {0} eingeschaltet. Bitte versuchen Sie es erneut.
+'From Date' is more than {0} days in the past. Your bank may ask for a TAN or return only the last {0} days.,'Von-Datum' liegt mehr als {0} Tage zurück. Ihre Bank verlangt dafür womöglich eine TAN oder liefert nur die letzten {0} Tage.
+'From Date' must not be after 'To Date','Von-Datum' darf nicht nach 'Bis-Datum' liegen
+'From Date' must not be in the future,'Von-Datum' darf nicht in der Zukunft liegen
+'To Date' must not be in the future,'Bis-Datum' darf nicht in der Zukunft liegen
+Invalid Dates,Ungültige Datumsangaben
+Bank logo lookup failed for {0},Bank-Logo für {0} konnte nicht ermittelt werden
+"Ask for a TAN, e.g. a confirmation in the banking app, when the bank needs one to load accounts or transactions. Most banks need this since PSD2. Untick it only for a bank that works with the PIN alone.","Eine TAN anfordern, z. B. eine Bestätigung in der Banking-App, wenn die Bank sie zum Laden von Konten oder Umsätzen verlangt. Die meisten Banken brauchen das seit PSD2. Nur bei einer Bank abwählen, die mit der PIN allein auskommt."
+Bank Logo,Bank-Logo

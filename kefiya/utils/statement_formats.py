@@ -42,6 +42,17 @@ from datetime import datetime
 #:                         column index, plus skip_rows. Declaring it as data
 #:                         is what replaced a hand-written second reader.
 #:   required              fields without which the format is not recognised.
+#:   decimal_comma         the format always writes the comma as the decimal
+#:                         separator and the dot as the thousands separator.
+#:                         Declared where an export drops trailing zeros: the
+#:                         general parser cannot tell "12,5" from "1,500".
+#:   details_in_brackets   the description is the merchant, followed by the
+#:                         posting text in brackets -- the way the card
+#:                         statement itself reads.
+#:   booked_status         (field, accepted values): rows whose field holds
+#:                         anything else are not bookings yet -- pending card
+#:                         payments -- and are left out, not counted as
+#:                         unreadable.
 PROFILES = {
     "amex": {
         "label": "American Express",
@@ -93,6 +104,34 @@ PROFILES = {
             "reference": ("referenz", "reference", "mandatsreferenz"),
         },
         "required": ("date", "amount"),
+    },
+    # DKB VISA (Business) card, "Umsatzliste". A title, the card and a balance
+    # above the header; dates as dd.mm.yy. The amount is signed from the
+    # account's side -- spending negative, the settlement of the card balance
+    # positive -- so it is a giro convention, not a card one. Pending rows
+    # ("Vorgemerkt") carry a status of their own and are not booked.
+    #
+    # The amounts drop trailing zeros: "12,5", "-4,8", "1.500". The general
+    # parser reads "12,5" as 125 -- it takes a comma followed by anything but
+    # two digits for a thousands separator -- so this format says which
+    # separator is which.
+    "dkb_visa": {
+        "label": "DKB VISA",
+        "charges_are_positive": False,
+        "decimal_comma": True,
+        "details_in_brackets": True,
+        "booked_status": ("status", ("gebucht",)),
+        "columns": {
+            "date": ("belegdatum",),
+            "value_date": ("wertstellung",),
+            "status": ("status",),
+            "counterparty": ("beschreibung",),
+            "description": ("beschreibung",),
+            "posting_text": ("umsatztyp",),
+            "amount": ("betrag",),
+            "foreign_amount": ("fremdwaehrungsbetrag",),
+        },
+        "required": ("date", "amount", "status", "posting_text"),
     },
     # The layout the very first importer could read, and the only one it could
     # read: seven rows of preamble, then columns by position. It used to be a
@@ -179,7 +218,7 @@ def detect_profile(header):
 _AMOUNT_NOISE = re.compile(r"[^\d,.\-+]")
 
 
-def parse_amount(value):
+def parse_amount(value, decimal_comma=False):
     """Read an amount without guessing which separator means what.
 
     The reader this replaces treated a plain "1234" as 12.34 -- it split off
@@ -190,6 +229,10 @@ def parse_amount(value):
     Handles: "1.234,56", "1,234.56", "1234.56", "1234", "-12,50", "12,50-",
     "EUR 1.234,56", non-breaking spaces.
 
+    :param decimal_comma: the format declares the comma the decimal separator
+        and the dot the thousands separator, so "12,5" is twelve and a half
+        and "1.500" fifteen hundred. Without it, a comma followed by anything
+        but two digits counts as a thousands separator.
     :return: float, or None when the text is not an amount
     """
     if value is None:
@@ -208,6 +251,13 @@ def parse_amount(value):
 
     negative = text.startswith("-")
     digits = text.lstrip("-")
+
+    if decimal_comma:
+        try:
+            amount = float(digits.replace(".", "").replace(",", "."))
+        except ValueError:
+            return None
+        return -amount if negative else amount
 
     last_dot, last_comma = digits.rfind("."), digits.rfind(",")
     if last_dot >= 0 and last_comma >= 0:
@@ -359,6 +409,21 @@ def read_rows(text, max_header_scan=25):
 # Rows to entries
 # --------------------------------------------------------------------------
 
+def is_booked(row, columns, profile):
+    """False for a row the format marks as not booked yet (pending).
+
+    Formats without a booking status book every row.
+    """
+    rule = profile.get("booked_status")
+    if not rule:
+        return True
+    field, accepted = rule
+    index = columns.get(field)
+    if index is None or index >= len(row):
+        return True
+    return _normalise_header(row[index]) in accepted
+
+
 def to_entry(row, columns, profile):
     """One canonical entry out of one row, or None if unreadable."""
     def cell(field):
@@ -368,7 +433,8 @@ def to_entry(row, columns, profile):
         return str(row[index] or "").strip().strip('"').strip()
 
     date = parse_date(cell("date"))
-    amount = parse_amount(cell("amount"))
+    amount = parse_amount(cell("amount"),
+                          decimal_comma=profile.get("decimal_comma", False))
     if date is None or amount is None:
         return None
 
@@ -380,8 +446,23 @@ def to_entry(row, columns, profile):
     # The posting text ("LASTSCHRIFT", "RECHNUNG") is what the bank called the
     # movement; the purpose line is what the payer wrote. Both are worth
     # keeping, and neither is worth losing to the other.
-    description = " ".join(
-        part for part in (cell("posting_text"), cell("description")) if part)
+    #
+    # A card payment abroad also names what it cost in the other currency. Not
+    # booked, but it is the figure on the receipt, so it stays with the
+    # booking: "CLOUD DIENST (Onlinezahlung, -52,30 $)".
+    foreign_amount = " ".join(cell("foreign_amount").split())
+    if profile.get("details_in_brackets"):
+        details = ", ".join(
+            part for part in (cell("posting_text"), foreign_amount) if part)
+        description = cell("description")
+        if details:
+            description = "{0} ({1})".format(description, details).strip()
+    else:
+        description = " ".join(
+            part for part in (cell("posting_text"), cell("description"))
+            if part)
+        if foreign_amount:
+            description = "{0} ({1})".format(description, foreign_amount)
 
     return {
         "date": date,

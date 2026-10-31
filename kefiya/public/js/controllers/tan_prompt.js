@@ -79,15 +79,26 @@ frappe.provide("kefiya");
         var c = data.challenge;
         if (!c || (!c.image && !c.text)) return null;
 
+        // The server sends the image as {mime, data} (tan_challenge.py).
+        // A ready data URI is accepted too, but only for a raster image type:
+        // it ends up in src="", and nothing else belongs there.
+        var src = null;
+        if (c.image && c.image.data) {
+            src = "data:" + (c.image.mime || "image/png") + ";base64,"
+                + c.image.data;
+        } else if (typeof c.image === "string"
+                && /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+\/=]+$/.test(c.image)) {
+            src = c.image;
+        }
+
         var html = '<div class="kefiya-tan-challenge" '
             + 'style="text-align:center;margin-bottom:10px">';
-        if (c.image && c.image.data) {
+        if (src) {
             html += '<img alt="' + __("Bank challenge") + '" '
                 + 'style="width:40mm;height:40mm;image-rendering:pixelated;'
                 + 'border:1px solid var(--border-color);border-radius:4px;'
-                + 'background:#fff;padding:4px" src="data:'
-                + frappe.utils.escape_html(c.image.mime || "image/png")
-                + ";base64," + frappe.utils.escape_html(c.image.data) + '">';
+                + 'background:#fff;padding:4px" src="'
+                + frappe.utils.escape_html(src) + '">';
             html += '<div class="text-muted small" style="margin-top:6px">'
                 + __("Scan this with your banking app, then enter the TAN it"
                     + " shows.") + "</div>";
@@ -334,4 +345,9 @@ frappe.provide("kefiya");
     // (it has the form's docname where this one has a login from a run) and
     // takes the focus rule from here rather than carrying a copy.
     kefiya.focus_tan_field = focusTanField;
+    // The bank's challenge as a dialog field, for every box that asks for a
+    // TAN -- the forms' own prompt (fints_interactive.js) and the Kefiya
+    // page's (kefiya_hub/fints_session.js) included. One renderer, so the
+    // bank's text is escaped the same way everywhere.
+    kefiya.tan_challenge_field = tanChallengeField;
 })();

@@ -25,31 +25,114 @@ kefiya.interactive = {
 		return this.updateQueue;
 	},
 
-	progressbar: function(frm) {
+	/**
+	 * Button of the "TAN Required" dialog (fints_controller_legacy):
+	 * switch TAN authentication on for the Kefiya Login and try again.
+	 */
+	use_tan_and_try_again: async function(kefiya_login) {
+		frappe.hide_msgprint();
+		const frm = cur_frm;
+
+		if (frm && frm.doctype === "Kefiya Login" && frm.docname === kefiya_login) {
+			// set_value + save keeps other unsaved edits on the form
+			await frm.set_value("enable_tan_authentication", 1);
+			await frm.save();
+			frm.events.call_get_login_accounts(frm);
+			return;
+		}
+
+		await frappe.db.set_value("Kefiya Login", kefiya_login, "enable_tan_authentication", 1);
+		if (frm && frm.doctype === "Kefiya Import") {
+			frm.events.call_import_transaction(frm);
+		} else {
+			frappe.show_alert({
+				message: __("TAN authentication is on for {0}. Please try again.", [kefiya_login]),
+				indicator: "green",
+			});
+		}
+	},
+
+	/**
+	 * After the bank accepted the TAN, carry on with what the user started,
+	 * so they don't have to click it again: on Kefiya Login, offer the
+	 * accounts that were loaded with the TAN. (The server's own "reload"
+	 * comes by socket and usually arrives after the request has ended, when
+	 * it is ignored.)
+	 */
+	continue_after_tan: function(frm, result) {
+		if (frm.doctype === "Kefiya Login" && result.accounts) {
+			frm.events.choose_account(frm, result.accounts);
+		}
+	},
+
+	/**
+	 * Mark a FinTS request as started in this tab. Progress and TAN events go
+	 * by socket to every tab of the user; only the tab that started the
+	 * request follows them, so other open tabs don't stack dialogs.
+	 */
+	start_progress: function(frm) {
 		this.progressState[frm.doc.name] = {
 			progress: 0,
-			completed: false,
+			active: true,
 		};
+	},
 
+	/** True while this tab waits for the FinTS request it started. */
+	is_active: function(frm) {
+		const state = this.progressState[frm.doc.name];
+		return Boolean(state && state.active);
+	},
+
+	/**
+	 * Whether this tab shows the progress of this document.
+	 *
+	 * A tab that tracked a request (start_progress) follows it until
+	 * finish_progress, and ignores what arrives later. A form that never
+	 * called start_progress -- most of kefiya's FinTS buttons don't -- keeps
+	 * showing every progress message, as it always did: going silent there
+	 * would hide a running fetch.
+	 */
+	follows_progress: function(frm) {
+		const state = this.progressState[frm.doc.name];
+		return !state || state.active;
+	},
+
+	/**
+	 * Close the progress dialog once the request has ended or needs the user.
+	 * Progress events arrive by socket and can come later; they are ignored
+	 * then, so they don't open the dialog again on top of a message or prompt.
+	 */
+	finish_progress: function(frm) {
+		this.progressState[frm.doc.name] = {
+			progress: 100,
+			active: false,
+		};
+		return this.enqueueUpdate(() => {
+			const dialog = frappe.cur_progress;
+			frappe.hide_progress();
+			// Bootstrap ignores hide() while the dialog still fades in, which
+			// left it on screen on top of the next dialog. Hide it once shown.
+			if (dialog) {
+				dialog.$wrapper.one("shown.bs.modal", () => dialog.$wrapper.modal("hide"));
+			}
+		});
+	},
+
+	progressbar: function(frm) {
 		frappe.realtime.off("fints_progressbar");
 		frappe.realtime.on("fints_progressbar", function(data) {
 			if(data.docname === frm.doc.name) {
-				const state = kefiya.interactive.progressState[frm.doc.name] || {
-					progress: 0,
-					completed: false,
-				};
+				const state = kefiya.interactive.progressState[frm.doc.name];
 
-				if (state.completed && data.progress < 100) {
+				if (!kefiya.interactive.follows_progress(frm)
+						|| (state && data.progress < state.progress)) {
 					return;
 				}
 
-				if (data.progress < state.progress) {
-					return;
+				if (state) {
+					state.progress = data.progress;
+					state.active = data.progress < 100;
 				}
-
-				state.progress = data.progress;
-				state.completed = data.progress >= 100;
-				kefiya.interactive.progressState[frm.doc.name] = state;
 
 				kefiya.interactive.enqueueUpdate(() => {
 					// One persistent window collecting every message, instead
@@ -77,6 +160,13 @@ kefiya.interactive = {
 		 */
 		frappe.realtime.off("fints_tan_interaction_required");
 		frappe.realtime.on("fints_tan_interaction_required", async function(data) {
+			// Not gated on is_active, unlike the progress above. The TAN box
+			// is the only way to release what is waiting at the bank, and on
+			// most forms nothing called start_progress -- the transfer form's
+			// send among them. The event can also arrive after the request
+			// that published it has ended. A box that does not open there
+			// leaves an order unreleasable; a second box in another tab only
+			// asks the same question twice.
 			if(data.docname !== frm.doc.name) {
 				return;
 			}
@@ -89,6 +179,11 @@ kefiya.interactive = {
 			const title = data.account_label
 				? __("Verification required") + " – " + data.account_label
 				: __("Verification required");
+
+			// A request this tab tracks has stopped for the user.
+			if (kefiya.interactive.is_active(frm)) {
+				kefiya.interactive.progressState[frm.doc.name].active = false;
+			}
 
 			await kefiya.interactive.enqueueUpdate(() => {
 				// Step out of the way for the TAN prompt, but keep the session
@@ -153,6 +248,15 @@ kefiya.interactive = {
 					},
 				);
 
+				// The bank's instructions and, for chipTAN QR or photoTAN, the code
+				// to scan -- rendered by tan_prompt.js, which escapes the bank's text.
+				const challenge_field = data.challenge && kefiya.tan_challenge_field
+					? kefiya.tan_challenge_field(data)
+					: null;
+				if (challenge_field) {
+					fields.push(challenge_field);
+				}
+
 				if (data.tan_required) {
 					fields.push(
 						{
@@ -191,6 +295,9 @@ kefiya.interactive = {
 			const dialog = frappe.prompt(
 				fields,
 				(values) => {
+					kefiya.interactive.start_progress(frm);
+					// the server doesn't need the challenge (and its image) back
+					const { challenge, ...context } = data;
 					frappe.call({
 						method: "kefiya.utils.client.resolve_tan_interaction",
 						args: {
@@ -198,8 +305,14 @@ kefiya.interactive = {
 							// on the Kefiya Login screen. A transfer's box used to
 							// answer against its own KEF-TRF-... name.
 							fints_login: data.fints_login || frm.doc.name,
-							values: { ...data, ...values },
+							values: { ...context, ...values },
 						},
+						always: () => kefiya.interactive.finish_progress(frm),
+					}).then((r) => {
+						// after "always", so the next request's progress isn't cut off
+						if (r && r.message && r.message.tan_resolved) {
+							kefiya.interactive.continue_after_tan(frm, r.message);
+						}
 					});
 				},
 				title

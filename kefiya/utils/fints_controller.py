@@ -7,10 +7,13 @@ from __future__ import unicode_literals
 import contextlib
 import frappe
 import json
+import logging
 import mt940
+import threading
 
 from dateutil.relativedelta import relativedelta
 from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse, NeedRetryResponse
+from fints.exceptions import FinTSClientPINError, FinTSClientTemporaryAuthError, FinTSSCARequiredError
 
 from frappe import _
 from frappe.utils import now_datetime, cint, time_diff_in_hours
@@ -312,6 +315,254 @@ def _advice_block(verdict):
     return "\n\n" + _("What this means:") + "\n" + "\n".join(
         "• " + _(hint) for hint in hints)
 
+
+class FetchFailed(frappe.ValidationError):
+    """The transaction fetch failed with a message that is already clear for the user."""
+
+
+class FetchTanRequired(FetchFailed):
+    """The bank asked for a TAN on the transaction fetch, which isn't supported yet."""
+
+
+class FetchRefused(FetchFailed):
+    """The bank refused the transaction fetch with a 9xxx response."""
+
+
+class LoginRejected(frappe.ValidationError):
+    """The bank did not accept the login name and PIN, or has locked the access."""
+
+
+# fints raises these when the bank rejects the login; it then also blocks the
+# PIN for the rest of the request
+LOGIN_ERRORS = (FinTSClientPINError, FinTSClientTemporaryAuthError)
+
+
+def throw_login_rejected(kefiya_login_name, error, error_log=None):
+    """Explain a wrong PIN or a locked access instead of showing fints' exception.
+
+    :param kefiya_login_name: Name of the Kefiya Login that was used
+    :param error: The FinTSClientPINError or FinTSClientTemporaryAuthError
+    :param error_log: What log_bank_traffic_on_error yielded, if anything
+    """
+    if isinstance(error, FinTSClientTemporaryAuthError):
+        intro = _(
+            "Your bank has temporarily locked the online banking access of Kefiya"
+            " Login {0}, usually after several wrong PINs. Unlock it in your bank's"
+            " online banking or ask your bank, then try again."
+        ).format(frappe.bold(kefiya_login_name))
+    else:
+        intro = _(
+            "Your bank did not accept the login of Kefiya Login {0}. Check the"
+            " FinTS login name and the PIN, then try again. Careful: after several"
+            " wrong PINs in a row the bank locks the online banking access."
+        ).format(frappe.bold(kefiya_login_name))
+
+    if error_log and error_log.bank_errors:
+        message = bank_refusal_message(intro + "<br><br>" + _("The bank's answer:"), error_log)
+    else:
+        message = intro
+        if error_log and error_log.name:
+            message += error_log_link(error_log.name)
+
+    frappe.throw(message, exc=LoginRejected, title=_("Login Failed"))
+
+
+@contextlib.contextmanager
+def explain_login_rejection(kefiya_login_name):
+    """Turn a rejected login anywhere in the block into a clear message."""
+    try:
+        yield
+    except LOGIN_ERRORS as e:
+        throw_login_rejected(kefiya_login_name, e)
+
+
+def throw_fetch_tan_required():
+    """Stop the import because the bank wants a TAN for the fetch itself.
+
+    fints signals this either by returning a NeedTANResponse or, on bank
+    code 9075, by raising FinTSSCARequiredError. It happens mostly for
+    history older than 90 days (PSD2). Asking for the TAN is phamos/kefiya#45.
+    """
+    frappe.throw(
+        _(
+            "Your bank requires a TAN to fetch transactions from this date"
+            " range. Choose a From Date within the last 90 days."
+        ),
+        exc=FetchTanRequired,
+        title=_("TAN Required"),
+    )
+
+class _BankTrafficRecorder(logging.Handler):
+    """Keep the messages fints logs while talking to the bank (fints masks the PIN),
+    and the bank's 9xxx error responses on their own.
+
+    Only records from the thread that created it: a threaded web worker can
+    talk to other banks for other users at the same time.
+    """
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.thread = threading.get_ident()
+        self.messages = []
+        self.bank_errors = []
+
+    def emit(self, record):
+        if record.thread != self.thread:
+            return
+        self.messages.append(record.getMessage())
+        code = getattr(record, "fints_response_code", None)
+        if code and code.startswith("9"):
+            error = (code, getattr(record, "fints_response_text", ""))
+            if error not in self.bank_errors:
+                self.bank_errors.append(error)
+
+
+_fints_debug = {"lock": threading.Lock(), "users": 0, "previous_level": logging.NOTSET}
+
+
+@contextlib.contextmanager
+def _fints_debug_logging():
+    """Let fints log at DEBUG while at least one recorder listens.
+
+    Counted, so overlapping requests in one process don't restore the level
+    while another still records, or leave it at DEBUG for good.
+    """
+    fints_logger = logging.getLogger("fints")
+    with _fints_debug["lock"]:
+        if _fints_debug["users"] == 0:
+            _fints_debug["previous_level"] = fints_logger.level
+            fints_logger.setLevel(logging.DEBUG)
+        _fints_debug["users"] += 1
+    try:
+        yield fints_logger
+    finally:
+        with _fints_debug["lock"]:
+            _fints_debug["users"] -= 1
+            if _fints_debug["users"] == 0:
+                fints_logger.setLevel(_fints_debug["previous_level"])
+
+
+@contextlib.contextmanager
+def log_bank_traffic_on_error(client, title):
+    """On an error, write the bank traffic and any HTTP error answer to the Error Log.
+
+    fints only raises e.g. "Bad status code 400". Finding out why needs what
+    was sent and what the bank's server answered, so record both.
+
+    Yields a dict whose "name" is set to the Error Log once one was written,
+    and whose "bank_errors" holds the bank's 9xxx responses as (code, text).
+    """
+    error_log = frappe._dict()
+    recorder = _BankTrafficRecorder()
+    http_errors = []
+
+    def keep_http_error(response, *args, **kwargs):
+        if not response.ok:
+            http_errors.append("HTTP {0} from {1}:\n{2}".format(
+                response.status_code, response.url, response.text[:5000]
+            ))
+
+    response_hooks = client.connection.session.hooks["response"]
+    response_hooks.append(keep_http_error)
+    try:
+        with _fints_debug_logging() as fints_logger:
+            fints_logger.addHandler(recorder)
+            try:
+                yield error_log
+            finally:
+                fints_logger.removeHandler(recorder)
+    except (TanInteractionRequired, FetchFailed):
+        raise
+    except Exception:
+        error_log.bank_errors = recorder.bank_errors
+        # Error Log is a MyISAM table, so the entry stays even when Frappe
+        # rolls back the request after frappe.throw
+        error_log.name = frappe.log_error(
+            title=title,
+            message="\n\n".join([frappe.get_traceback(), *http_errors, *recorder.messages]),
+        ).name
+        raise
+    finally:
+        response_hooks.remove(keep_http_error)
+
+
+def bank_refusal_message(intro, error_log, extra_hints=None):
+    """The bank's 9xxx reasons, what the user can do about them and a link to the Error Log.
+
+    :param intro: Translated sentence the reasons follow
+    :param error_log: What log_bank_traffic_on_error yielded
+    :param extra_hints: Hints for codes that depend on the request, by code
+    """
+    message = intro + "<br>" + "<br>".join(
+        "{0}: {1}".format(code, frappe.utils.escape_html(text))
+        for code, text in error_log.bank_errors
+    )
+    hints = {**bank_error_hints(), **(extra_hints or {})}
+    for hint in dict.fromkeys(hints[code] for code, _text in error_log.bank_errors if code in hints):
+        message += "<br><br>" + hint
+    if error_log.name:
+        message += error_log_link(error_log.name)
+    return message
+
+
+def error_log_link(error_log_name):
+    # relative link: get_link_to_form uses the site's host_name, which
+    # can differ from the address the user opened the site with
+    return "<br><br>" + _("The bank traffic was saved in the {0}.").format(
+        '<a href="/app/error-log/{0}">{1}</a>'.format(error_log_name, _("Error Log"))
+    )
+
+
+def fetch_fints_transactions(client, account, start_date, end_date):
+    """Fetch transactions and turn the bank's refusals into clear messages.
+
+    Used by both controllers.
+
+    :return: Transactions as json object list
+    """
+    error_log = frappe._dict()
+    try:
+        with log_bank_traffic_on_error(client, _("Kefiya: Could not fetch transactions")) as error_log, client:
+            try:
+                transactions = client.get_transactions(account, start_date, end_date)
+            except FinTSSCARequiredError:
+                throw_fetch_tan_required()
+            if isinstance(transactions, NeedTANResponse):
+                throw_fetch_tan_required()
+            return json.loads(
+                json.dumps(transactions, cls=mt940.JSONEncoder)
+            )
+    except FetchFailed:
+        raise
+    except Exception:
+        if not error_log.bank_errors:
+            raise
+        # fints reports any 9010 as "could not fetch BPD ... bank identifier",
+        # also when the login is fine and only this fetch is refused
+        frappe.throw(
+            bank_refusal_message(
+                _("Your bank refused to send the transactions:"),
+                error_log,
+                {"9010": _(
+                    "If the From Date is more than 90 days ago, choose a later one."
+                )},
+            ),
+            exc=FetchRefused,
+            title=_("Bank Refused Request"),
+        )
+
+
+def bank_error_hints():
+    """What the user can do about a bank's 9xxx code, for the codes we know."""
+    return {
+        "9040": _(
+            "Your chipTAN generator needs to be resynchronised. Do this in your"
+            " bank's online banking or app, usually in the TAN or security"
+            " settings, then try again."
+        ),
+    }
+
+
 class FinTSController(TanSession):
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
         self.kefiya_login = frappe.get_doc("Kefiya Login", kefiya_login_docname)
@@ -327,92 +578,93 @@ class FinTSController(TanSession):
         # that was reading the wrong document.
         self.interactive.fints_login = self.kefiya_login.name
 
-        self.__init_fints_connection()
+        with explain_login_rejection(self.name):
+            self.__init_fints_connection()
 
-        # If state is new and did not setup tan requirements, init tan mode (and probably ask user for mode and medium).
-        if self.__init_tan_mode(tan_mode, tan_medium, tan) is False:
-            raise TanInteractionRequired()
+            # If state is new and did not setup tan requirements, init tan mode (and probably ask user for mode and medium).
+            if self.__init_tan_mode(tan_mode, tan_medium, tan) is False:
+                raise TanInteractionRequired()
 
-        # What became of a parked release, in one word -- see release_outcome.
-        # Set BEFORE the block below, so a caller that reads it always finds
-        # one: an access with nothing parked has nothing released either.
-        self.release_outcome = release_outcome.NOTHING_PARKED
-        self.release_failure = ""
+            # What became of a parked release, in one word -- see release_outcome.
+            # Set BEFORE the block below, so a caller that reads it always finds
+            # one: an access with nothing parked has nothing released either.
+            self.release_outcome = release_outcome.NOTHING_PARKED
+            self.release_failure = ""
 
-        # If there is an open TAN request, try to fulfill it.
-        #
-        # Not while a dialog of this access is already standing: resume_dialog()
-        # refuses to run inside one, and it would be pointless anyway -- an open
-        # dialog means the access is authenticated, so this login's parked
-        # challenge is a leftover from an earlier attempt and has nothing left
-        # to unlock.
-        if self.kefiya_login.stored_tan_blob \
-                and not self.fints_connection._standing_dialog:
-            # A challenge lives only as long as the bank keeps the dialog
-            # behind it. Nothing expired it on our side, so an unanswered
-            # challenge stayed parked forever -- and replaying it does not
-            # fail quietly: the bank answers without a TAN status, fints
-            # raises, and the raise ends every attempt to use this access. One
-            # challenge nobody released in July made an account unable to send
-            # anything in August.
-            if self.__parked_challenge_is_stale():
-                self.__discard_parked_challenge()
-            else:
-                self.release_outcome = release_outcome.PENDING
-                try:
-                    self._resume_and_answer_the_parked_tan(tan)
-                except TanInteractionRequired:
-                    # The legitimate "ask the user" path, not a failure -- but
-                    # the dialog behind it is gone all the same. The exception
-                    # leaves resume_dialog()'s block, its __exit__ ends the
-                    # dialog, and the client goes on holding a reference to it.
-                    # Dropping that reference is what lets the next attempt
-                    # open a fresh dialog instead of sending on a dead one.
-                    discard_unusable_dialog(self.fints_connection)
-                    raise
-                except Exception:
-                    # Two things are wrong here at once, and each needs its own
-                    # cleanup.
-                    #
-                    # resume_dialog() clears the client's reference to the
-                    # dialog when its block ends -- but it has no try/finally,
-                    # so an exception inside skips that line and leaves an
-                    # ENDED dialog registered. Inside a fetch session that
-                    # client is shared by every login of the bank access, so
-                    # each of them in turn joins the wreck: "Cannot send on
-                    # dialog that is not open", for one account after another.
-                    discard_unusable_dialog(self.fints_connection)
-
-                    # And the bank does not accept this challenge any more.
-                    # Keeping it would brick the access; throwing it away costs
-                    # one fresh TAN, which the ordinary login now asks for.
+            # If there is an open TAN request, try to fulfill it.
+            #
+            # Not while a dialog of this access is already standing: resume_dialog()
+            # refuses to run inside one, and it would be pointless anyway -- an open
+            # dialog means the access is authenticated, so this login's parked
+            # challenge is a leftover from an earlier attempt and has nothing left
+            # to unlock.
+            if self.kefiya_login.stored_tan_blob \
+                    and not self.fints_connection._standing_dialog:
+                # A challenge lives only as long as the bank keeps the dialog
+                # behind it. Nothing expired it on our side, so an unanswered
+                # challenge stayed parked forever -- and replaying it does not
+                # fail quietly: the bank answers without a TAN status, fints
+                # raises, and the raise ends every attempt to use this access. One
+                # challenge nobody released in July made an account unable to send
+                # anything in August.
+                if self.__parked_challenge_is_stale():
                     self.__discard_parked_challenge()
+                else:
+                    self.release_outcome = release_outcome.PENDING
+                    try:
+                        self._resume_and_answer_the_parked_tan(tan)
+                    except TanInteractionRequired:
+                        # The legitimate "ask the user" path, not a failure -- but
+                        # the dialog behind it is gone all the same. The exception
+                        # leaves resume_dialog()'s block, its __exit__ ends the
+                        # dialog, and the client goes on holding a reference to it.
+                        # Dropping that reference is what lets the next attempt
+                        # open a fresh dialog instead of sending on a dead one.
+                        discard_unusable_dialog(self.fints_connection)
+                        raise
+                    except Exception:
+                        # Two things are wrong here at once, and each needs its own
+                        # cleanup.
+                        #
+                        # resume_dialog() clears the client's reference to the
+                        # dialog when its block ends -- but it has no try/finally,
+                        # so an exception inside skips that line and leaves an
+                        # ENDED dialog registered. Inside a fetch session that
+                        # client is shared by every login of the bank access, so
+                        # each of them in turn joins the wreck: "Cannot send on
+                        # dialog that is not open", for one account after another.
+                        discard_unusable_dialog(self.fints_connection)
 
-                    # Swallowed on purpose -- the fetch path goes on with a
-                    # fresh login -- but not silently, and not as a success.
-                    # This branch wrote nothing anywhere, and send_transfer_tan
-                    # then read a constructor that had not raised as a release
-                    # that had gone through: Auftrag A, 03.09.2026,
-                    # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
-                    # ausgefuehrt". The word below is what the transfer path
-                    # reads instead, and the log carries the bank's own
-                    # sentences, which python-fints' exception replaces with
-                    # one about a wrong bank URL.
-                    self.release_outcome = release_outcome.FAILED
-                    self.release_failure = self.__note_the_failed_release()
+                        # And the bank does not accept this challenge any more.
+                        # Keeping it would brick the access; throwing it away costs
+                        # one fresh TAN, which the ordinary login now asks for.
+                        self.__discard_parked_challenge()
 
-        # After successful login/tan verification fetch available accounts if not already present
-        if self.__fetch_fints_accounts() is False:
-            raise InitFailedException()
+                        # Swallowed on purpose -- the fetch path goes on with a
+                        # fresh login -- but not silently, and not as a success.
+                        # This branch wrote nothing anywhere, and send_transfer_tan
+                        # then read a constructor that had not raised as a release
+                        # that had gone through: Auftrag A, 03.09.2026,
+                        # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
+                        # ausgefuehrt". The word below is what the transfer path
+                        # reads instead, and the log carries the bank's own
+                        # sentences, which python-fints' exception replaces with
+                        # one about a wrong bank URL.
+                        self.release_outcome = release_outcome.FAILED
+                        self.release_failure = self.__note_the_failed_release()
 
-        # Afterwards the controller/connection is ready to go for further operations
-        if self.kefiya_login.failed_connection:
-            self.kefiya_login.failed_connection = 0
-            self.kefiya_login.save()
+            # After successful login/tan verification fetch available accounts if not already present
+            if self.__fetch_fints_accounts() is False:
+                raise InitFailedException()
 
-        self.interactive.show_progress_realtime(
-           _("Connection established"), 100, reload=False
-        )
+            # Afterwards the controller/connection is ready to go for further operations
+            if self.kefiya_login.failed_connection:
+                self.kefiya_login.failed_connection = 0
+                self.kefiya_login.save()
+
+            self.interactive.show_progress_realtime(
+               _("Connection established"), 100, reload=False
+            )
 
     def _refuse_a_refused_order(self, response=None):
         """Stop where the bank turned the order down. Answers the verdict.
@@ -1038,8 +1290,10 @@ class FinTSController(TanSession):
                 self.fints_accounts = [frappe._dict(acc) for acc in cached_accounts]
                 return True
 
+        error_log = frappe._dict()
         try:
-            with self.trusted_client_context() as client:
+            with log_bank_traffic_on_error(self.fints_connection, _("Kefiya: Could not load accounts")) as error_log, \
+                    self.trusted_client_context() as client:
                 self.interactive.show_progress_realtime(
                     _("Loading accounts"), 30, reload=False
                 )
@@ -1064,10 +1318,18 @@ class FinTSController(TanSession):
 
         except TanInteractionRequired:
             raise
+        except LOGIN_ERRORS as e:
+            throw_login_rejected(self.name, e, error_log)
         except Exception as e:
-            frappe.throw(_(
-                "Could not load sepa accounts with error:<br>{0}"
-            ).format(e))
+            if error_log.bank_errors:
+                # e.g. DKB ends the dialog with 9800 and says why (9040: chipTAN
+                # resync needed); fints goes on anyway and only gets HTTP 400 back
+                message = bank_refusal_message(_("Your bank refused to load the accounts:"), error_log)
+            else:
+                message = _("Could not load sepa accounts with error:<br>{0}").format(e)
+                if error_log.name:
+                    message += error_log_link(error_log.name)
+            frappe.throw(message)
 
         return False
 
@@ -1382,9 +1644,9 @@ class FinTSController(TanSession):
     def get_fints_transactions(self, start_date=None, end_date=None):
         """Get FinTS transactions.
 
-        The fetch window is limited to the login's allowed_sync_days_in_past
-        (default 90). Also only transaction from atleast one day ago can be
-        fetched
+        Defaults to the login's allowed_sync_days_in_past (90 when unset) up
+        to yesterday. Older history can be requested; whether the bank serves
+        it is up to the bank (PSD2).
 
         :param start_date: Date to start the fetch
         :param end_date: Date to end the fetch
@@ -1399,13 +1661,6 @@ class FinTSController(TanSession):
 
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
-
-        if (now_datetime().date() - start_date).days > allowed_days:
-            raise NotImplementedError(
-                _("Start date is more than the allowed {0} days in the past").format(
-                    allowed_days
-                )
-            )
 
         # Ohne das klebt der Verwendungszweck zusammen: die Bibliothek fuegt
         # die Teilfelder ?20-?29 des Feldes :86: ohne Trenner aneinander, und
@@ -2489,6 +2744,9 @@ class FinTSController(TanSession):
                 "payments": new_bank_transactions,
                 # "assignment": auto_assignment
             }
+        except FetchFailed:
+            # Already a clear message for the user; don't wrap it
+            raise
         except TanInteractionRequired:
             # Not a parsing error: the bank wants the session authenticated
             # first. Wrapping it in a ValidationError hid that from every
