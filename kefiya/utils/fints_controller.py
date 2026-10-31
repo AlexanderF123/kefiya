@@ -9,6 +9,7 @@ import frappe
 import json
 import logging
 import mt940
+import threading
 
 from dateutil.relativedelta import relativedelta
 from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse, NeedRetryResponse
@@ -52,20 +53,52 @@ def throw_fetch_tan_required():
 
 class _BankTrafficRecorder(logging.Handler):
     """Keep the messages fints logs while talking to the bank (fints masks the PIN),
-    and the bank's 9xxx error responses on their own."""
+    and the bank's 9xxx error responses on their own.
+
+    Only records from the thread that created it: a threaded web worker can
+    talk to other banks for other users at the same time.
+    """
 
     def __init__(self):
         super().__init__(logging.DEBUG)
+        self.thread = threading.get_ident()
         self.messages = []
         self.bank_errors = []
 
     def emit(self, record):
+        if record.thread != self.thread:
+            return
         self.messages.append(record.getMessage())
         code = getattr(record, "fints_response_code", None)
         if code and code.startswith("9"):
             error = (code, getattr(record, "fints_response_text", ""))
             if error not in self.bank_errors:
                 self.bank_errors.append(error)
+
+
+_fints_debug = {"lock": threading.Lock(), "users": 0, "previous_level": logging.NOTSET}
+
+
+@contextlib.contextmanager
+def _fints_debug_logging():
+    """Let fints log at DEBUG while at least one recorder listens.
+
+    Counted, so overlapping requests in one process don't restore the level
+    while another still records, or leave it at DEBUG for good.
+    """
+    fints_logger = logging.getLogger("fints")
+    with _fints_debug["lock"]:
+        if _fints_debug["users"] == 0:
+            _fints_debug["previous_level"] = fints_logger.level
+            fints_logger.setLevel(logging.DEBUG)
+        _fints_debug["users"] += 1
+    try:
+        yield fints_logger
+    finally:
+        with _fints_debug["lock"]:
+            _fints_debug["users"] -= 1
+            if _fints_debug["users"] == 0:
+                fints_logger.setLevel(_fints_debug["previous_level"])
 
 
 @contextlib.contextmanager
@@ -88,18 +121,21 @@ def log_bank_traffic_on_error(client, title):
                 response.status_code, response.url, response.text[:5000]
             ))
 
-    fints_logger = logging.getLogger("fints")
-    previous_level = fints_logger.level
-    fints_logger.setLevel(logging.DEBUG)
-    fints_logger.addHandler(recorder)
     response_hooks = client.connection.session.hooks["response"]
     response_hooks.append(keep_http_error)
     try:
-        yield error_log
+        with _fints_debug_logging() as fints_logger:
+            fints_logger.addHandler(recorder)
+            try:
+                yield error_log
+            finally:
+                fints_logger.removeHandler(recorder)
     except TanInteractionRequired:
         raise
     except Exception:
         error_log.bank_errors = recorder.bank_errors
+        # Error Log is a MyISAM table, so the entry stays even when Frappe
+        # rolls back the request after frappe.throw
         error_log.name = frappe.log_error(
             title=title,
             message="\n\n".join([frappe.get_traceback(), *http_errors, *recorder.messages]),
@@ -107,8 +143,6 @@ def log_bank_traffic_on_error(client, title):
         raise
     finally:
         response_hooks.remove(keep_http_error)
-        fints_logger.removeHandler(recorder)
-        fints_logger.setLevel(previous_level)
 
 
 def bank_error_hints():

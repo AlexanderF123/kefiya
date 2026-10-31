@@ -3,6 +3,7 @@
 # For license information, please see license.txt
 
 import logging
+import threading
 from unittest.mock import MagicMock, patch
 
 import frappe
@@ -223,6 +224,22 @@ class TestBankTrafficLog(FrappeTestCase):
         self.assertIn("Ungültige Nachricht", message)
         self.assertIn("Sending HKSPA:1:3", message)
         self.assertEqual(self.client.connection.session.hooks["response"], [])
+
+    def test_other_threads_are_not_recorded(self):
+        def other_request():
+            logging.getLogger("fints.connection").debug("Sending for another login")
+
+        with patch("frappe.log_error") as log_error, self.assertRaises(FinTSConnectionError):
+            with fints_controller.log_bank_traffic_on_error(self.client, "Kefiya: Could not load accounts"):
+                thread = threading.Thread(target=other_request)
+                thread.start()
+                thread.join()
+                bank_answers_400(self.client)()
+
+        message = log_error.call_args.kwargs["message"]
+        self.assertIn("Sending HKSPA:1:3", message)
+        self.assertNotIn("another login", message)
+        self.assertEqual(logging.getLogger("fints").level, logging.NOTSET)
 
     def test_tan_interaction_is_not_logged(self):
         with patch("frappe.log_error") as log_error, self.assertRaises(fints_controller.TanInteractionRequired):
