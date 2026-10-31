@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import contextlib
 import frappe
 import json
+import logging
 import mt940
 
 from dateutil.relativedelta import relativedelta
@@ -48,6 +49,78 @@ def throw_fetch_tan_required():
         exc=FetchTanRequired,
         title=_("TAN Required"),
     )
+
+class _BankTrafficRecorder(logging.Handler):
+    """Keep the messages fints logs while talking to the bank (fints masks the PIN),
+    and the bank's 9xxx error responses on their own."""
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.messages = []
+        self.bank_errors = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+        code = getattr(record, "fints_response_code", None)
+        if code and code.startswith("9"):
+            error = (code, getattr(record, "fints_response_text", ""))
+            if error not in self.bank_errors:
+                self.bank_errors.append(error)
+
+
+@contextlib.contextmanager
+def log_bank_traffic_on_error(client, title):
+    """On an error, write the bank traffic and any HTTP error answer to the Error Log.
+
+    fints only raises e.g. "Bad status code 400". Finding out why needs what
+    was sent and what the bank's server answered, so record both.
+
+    Yields a dict whose "name" is set to the Error Log once one was written,
+    and whose "bank_errors" holds the bank's 9xxx responses as (code, text).
+    """
+    error_log = frappe._dict()
+    recorder = _BankTrafficRecorder()
+    http_errors = []
+
+    def keep_http_error(response, *args, **kwargs):
+        if not response.ok:
+            http_errors.append("HTTP {0} from {1}:\n{2}".format(
+                response.status_code, response.url, response.text[:5000]
+            ))
+
+    fints_logger = logging.getLogger("fints")
+    previous_level = fints_logger.level
+    fints_logger.setLevel(logging.DEBUG)
+    fints_logger.addHandler(recorder)
+    response_hooks = client.connection.session.hooks["response"]
+    response_hooks.append(keep_http_error)
+    try:
+        yield error_log
+    except TanInteractionRequired:
+        raise
+    except Exception:
+        error_log.bank_errors = recorder.bank_errors
+        error_log.name = frappe.log_error(
+            title=title,
+            message="\n\n".join([frappe.get_traceback(), *http_errors, *recorder.messages]),
+        ).name
+        raise
+    finally:
+        response_hooks.remove(keep_http_error)
+        fints_logger.removeHandler(recorder)
+        fints_logger.setLevel(previous_level)
+
+
+def bank_error_hints():
+    """What the user can do about a bank's 9xxx code, for the codes we know."""
+    return {
+        "9040": _(
+            "Your chipTAN generator needs to be resynchronised. Do this in your"
+            " bank's online banking or app, usually in the TAN or security"
+            " settings, then try again."
+        ),
+    }
+
 
 class FinTSController:
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
@@ -254,8 +327,10 @@ class FinTSController:
                 self.fints_accounts = [frappe._dict(acc) for acc in cached_accounts]
                 return True
 
+        error_log = frappe._dict()
         try:
-            with self.trusted_client_context() as client:
+            with log_bank_traffic_on_error(self.fints_connection, _("Kefiya: Could not load accounts")) as error_log, \
+                    self.trusted_client_context() as client:
                 self.interactive.show_progress_realtime(
                     _("Loading accounts"), 30, reload=False
                 )
@@ -281,9 +356,23 @@ class FinTSController:
         except TanInteractionRequired:
             raise
         except Exception as e:
-            frappe.throw(_(
-                "Could not load sepa accounts with error:<br>{0}"
-            ).format(e))
+            if error_log.bank_errors:
+                # e.g. DKB ends the dialog with 9800 and says why (9040: chipTAN
+                # resync needed); fints goes on anyway and only gets HTTP 400 back
+                message = _("Your bank refused to load the accounts:<br>{0}").format("<br>".join(
+                    "{0}: {1}".format(code, frappe.utils.escape_html(text))
+                    for code, text in error_log.bank_errors
+                ))
+                hints = bank_error_hints()
+                for hint in dict.fromkeys(hints[code] for code, _text in error_log.bank_errors if code in hints):
+                    message += "<br><br>" + hint
+            else:
+                message = _("Could not load sepa accounts with error:<br>{0}").format(e)
+            if error_log.name:
+                message += "<br><br>" + _("The bank traffic was saved in the {0}.").format(
+                    frappe.utils.get_link_to_form("Error Log", error_log.name, _("Error Log"))
+                )
+            frappe.throw(message)
 
         return False
 
