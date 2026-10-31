@@ -66,35 +66,45 @@ kefiya.interactive = {
 	},
 
 	/**
-	 * Mark a FinTS request as started in this tab. Progress and TAN events go
-	 * by socket to every tab of the user; only the tab that started the
-	 * request follows them, so other open tabs don't stack dialogs.
+	 * Which FinTS request of a document this tab follows. One state per
+	 * docname, and one place that reads it (accepts_progress):
+	 *
+	 *   no entry   untracked: the form never called start_progress -- most of
+	 *              kefiya's FinTS buttons don't. Every progress message is
+	 *              shown, as it always was; going silent would hide a fetch.
+	 *   running    this tab started the request (start_progress) and shows
+	 *              its progress, never going backwards.
+	 *   done       the request ended or stopped for the user. Late socket
+	 *              messages are ignored, so they don't reopen the progress on
+	 *              top of a message or prompt. Progress and TAN events go to
+	 *              every tab of the user; only the starting tab follows them.
 	 */
 	start_progress: function(frm) {
-		this.progressState[frm.doc.name] = {
-			progress: 0,
-			active: true,
-		};
+		this.progressState[frm.doc.name] = { phase: "running", progress: 0 };
 	},
 
-	/** True while this tab waits for the FinTS request it started. */
-	is_active: function(frm) {
+	/** A request this tab follows has ended or needs the user. */
+	stop_following: function(frm) {
 		const state = this.progressState[frm.doc.name];
-		return Boolean(state && state.active);
+		if (state) {
+			state.phase = "done";
+		}
 	},
 
-	/**
-	 * Whether this tab shows the progress of this document.
-	 *
-	 * A tab that tracked a request (start_progress) follows it until
-	 * finish_progress, and ignores what arrives later. A form that never
-	 * called start_progress -- most of kefiya's FinTS buttons don't -- keeps
-	 * showing every progress message, as it always did: going silent there
-	 * would hide a running fetch.
-	 */
-	follows_progress: function(frm) {
+	/** Whether to show this progress message, recording it if so. */
+	accepts_progress: function(frm, progress) {
 		const state = this.progressState[frm.doc.name];
-		return !state || state.active;
+		if (!state) {
+			return true;
+		}
+		if (state.phase === "done" || progress < state.progress) {
+			return false;
+		}
+		state.progress = progress;
+		if (progress >= 100) {
+			state.phase = "done";
+		}
+		return true;
 	},
 
 	/**
@@ -103,10 +113,7 @@ kefiya.interactive = {
 	 * then, so they don't open the dialog again on top of a message or prompt.
 	 */
 	finish_progress: function(frm) {
-		this.progressState[frm.doc.name] = {
-			progress: 100,
-			active: false,
-		};
+		this.progressState[frm.doc.name] = { phase: "done", progress: 100 };
 		return this.enqueueUpdate(() => {
 			const dialog = frappe.cur_progress;
 			frappe.hide_progress();
@@ -122,16 +129,8 @@ kefiya.interactive = {
 		frappe.realtime.off("fints_progressbar");
 		frappe.realtime.on("fints_progressbar", function(data) {
 			if(data.docname === frm.doc.name) {
-				const state = kefiya.interactive.progressState[frm.doc.name];
-
-				if (!kefiya.interactive.follows_progress(frm)
-						|| (state && data.progress < state.progress)) {
+				if (!kefiya.interactive.accepts_progress(frm, data.progress)) {
 					return;
-				}
-
-				if (state) {
-					state.progress = data.progress;
-					state.active = data.progress < 100;
 				}
 
 				kefiya.interactive.enqueueUpdate(() => {
@@ -160,7 +159,7 @@ kefiya.interactive = {
 		 */
 		frappe.realtime.off("fints_tan_interaction_required");
 		frappe.realtime.on("fints_tan_interaction_required", async function(data) {
-			// Not gated on is_active, unlike the progress above. The TAN box
+			// Not gated on the tab's progress state, unlike the progress above. The TAN box
 			// is the only way to release what is waiting at the bank, and on
 			// most forms nothing called start_progress -- the transfer form's
 			// send among them. The event can also arrive after the request
@@ -180,10 +179,8 @@ kefiya.interactive = {
 				? __("Verification required") + " – " + data.account_label
 				: __("Verification required");
 
-			// A request this tab tracks has stopped for the user.
-			if (kefiya.interactive.is_active(frm)) {
-				kefiya.interactive.progressState[frm.doc.name].active = false;
-			}
+			// A request this tab follows has stopped for the user.
+			kefiya.interactive.stop_following(frm);
 
 			await kefiya.interactive.enqueueUpdate(() => {
 				// Step out of the way for the TAN prompt, but keep the session
@@ -310,7 +307,7 @@ kefiya.interactive = {
 						always: () => kefiya.interactive.finish_progress(frm),
 					}).then((r) => {
 						// after "always", so the next request's progress isn't cut off
-						if (r && r.message && r.message.tan_resolved) {
+						if (r && r.message && r.message.status === "submitted") {
 							kefiya.interactive.continue_after_tan(frm, r.message);
 						}
 					});

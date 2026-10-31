@@ -181,7 +181,7 @@ kefiya.hub.FintsSession = class FintsSession {
 				values: { ...context, ...values },
 			},
 		});
-		if (message && message.tan_resolved && this.on_tan_resolved) {
+		if (message && message.status === "submitted" && this.on_tan_resolved) {
 			this.on_tan_resolved(message);
 		}
 	}

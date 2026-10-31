@@ -396,17 +396,14 @@ class TestResolveTanInteraction(FrappeTestCase):
     def test_accepted_tan_returns_the_accounts(self):
         controller = MagicMock()
         controller.return_value.get_fints_accounts.return_value = [{"iban": "DE02120300000000202051"}]
-        # The fork's callers read "status", the form reads "tan_resolved".
         result = self.resolve(controller)
         self.assertEqual(result["status"], "submitted")
-        self.assertTrue(result["tan_resolved"])
         self.assertEqual(result["accounts"], [{"iban": "DE02120300000000202051"}])
 
     def test_further_interaction_is_reported(self):
         controller = MagicMock(side_effect=fints_controller.TanInteractionRequired())
         result = self.resolve(controller)
         self.assertEqual(result["status"], "tan_required")
-        self.assertFalse(result["tan_resolved"])
 
 
 class TestLoginRejected(FrappeTestCase):

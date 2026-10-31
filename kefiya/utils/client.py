@@ -2381,10 +2381,11 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
     When a user was requested to perform a 2FA, this method is called as a callback
     to resolve the interaction. If TAN is disabled, this is effectively a no-op.
 
-    :return: {"tan_resolved": True, "accounts": [...]} once the bank accepted the
-        TAN and no further interaction is needed: the accounts were loaded with
-        it, so the form can offer them right away. {"tan_resolved": False} while
-        the bank needs more.
+    :return: {"status": "submitted", "accounts": [...]} once the bank
+        accepted the TAN and no further interaction is needed: the accounts
+        were loaded with it, so the form can offer them right away (None if
+        loading them failed). {"status": "tan_required"} while the bank needs
+        more. Both carry "docname", the login.
     """
     # Permission gate: this continues an authenticated bank dialog with a
     # user-supplied TAN, so it must require write rights on that login.
@@ -2418,8 +2419,7 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
         # decoupled procedure, the bank has not seen the release yet. Said
         # so, rather than returning None for both outcomes: the box used to
         # take silence for success.
-        return {"status": "tan_required", "docname": fints_login,
-                "tan_resolved": False}
+        return {"status": "tan_required", "docname": fints_login}
 
     # The release went through. The login form offers the accounts right
     # away, so they are loaded on the dialog the TAN just opened. Best effort:
@@ -2436,4 +2436,4 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
             reference_name=fints_login,
         )
     return {"status": "submitted", "docname": fints_login,
-            "tan_resolved": True, "accounts": accounts}
+            "accounts": accounts}
