@@ -274,7 +274,7 @@ class TestAccountsBankRefusal(FrappeTestCase):
         self.assertIn("9040: Bitte resynchronisiere deinen chipTAN-Generator.", message)
         self.assertNotIn("Bad status code 400", message)
         self.assertIn("chipTAN generator needs to be resynchronised", message)
-        self.assertIn("/app/error-log/ERR-0001", message)
+        self.assertIn('href="/app/error-log/ERR-0001"', message)
 
 
 class TestTanChallenge(FrappeTestCase):

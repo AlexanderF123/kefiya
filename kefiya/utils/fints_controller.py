@@ -434,8 +434,10 @@ class FinTSController:
             else:
                 message = _("Could not load sepa accounts with error:<br>{0}").format(e)
             if error_log.name:
+                # relative link: get_link_to_form uses the site's host_name, which
+                # can differ from the address the user opened the site with
                 message += "<br><br>" + _("The bank traffic was saved in the {0}.").format(
-                    frappe.utils.get_link_to_form("Error Log", error_log.name, _("Error Log"))
+                    '<a href="/app/error-log/{0}">{1}</a>'.format(error_log.name, _("Error Log"))
                 )
             frappe.throw(message)
 
