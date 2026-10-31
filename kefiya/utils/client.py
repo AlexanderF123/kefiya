@@ -71,6 +71,7 @@ def get_accounts(kefiya_login, user_scope):
 @frappe.whitelist()
 def is_tan_enabled(kefiya_login):
     """Small helper for JS if needed."""
+    frappe.has_permission("Kefiya Login", "read", kefiya_login, throw=True)
     return _use_tan_authentication(kefiya_login)
 
 

@@ -168,6 +168,17 @@ class TestMoveTanAuthenticationPatch(FrappeTestCase):
         with patch("frappe.reload_doc"):
             move.execute()
 
+    def test_second_run_keeps_the_logins(self):
+        if not frappe.db.count("Kefiya Login"):
+            self.skipTest("no Kefiya Login on this site")
+        from kefiya.patches.v0_5_0 import move_tan_authentication_to_kefiya_login as move
+
+        self.run_patch("1")
+        with patch("frappe.reload_doc"):
+            move.execute()
+        values = set(frappe.get_all("Kefiya Login", pluck="enable_tan_authentication"))
+        self.assertEqual(values, {1})
+
     def test_logins_get_the_site_setting(self):
         if not frappe.db.count("Kefiya Login"):
             self.skipTest("no Kefiya Login on this site")

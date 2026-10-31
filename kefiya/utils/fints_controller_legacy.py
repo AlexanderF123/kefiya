@@ -153,7 +153,8 @@ class FinTSController:
                 # send the dialog end (HKEND) on exit: it fails too, and its
                 # non-validation error turns this message into a server error
                 # with an empty "Message" dialog.
-                self.fints_connection._standing_dialog.open = False
+                if self.fints_connection._standing_dialog:
+                    self.fints_connection._standing_dialog.open = False
 
                 # fints raises a plain Exception holding the bank response,
                 # or a FinTSConnectionError for the HTTP status

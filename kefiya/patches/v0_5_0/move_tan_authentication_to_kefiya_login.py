@@ -16,6 +16,9 @@ def execute():
         "value",
         order_by=None,
     )
+    if enabled is None:
+        # Fresh install or already moved: keep the logins as they are
+        return
 
     frappe.db.sql(
         "update `tabKefiya Login` set enable_tan_authentication = %s",
