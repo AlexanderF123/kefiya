@@ -93,11 +93,18 @@ kefiya.hub.KefiyaHub = class KefiyaHub {
 		this.company_field = this.page.add_field({
 			fieldname: "company",
 			label: __("Company"),
-			fieldtype: "Link",
-			options: "Company",
+			fieldtype: "Select",
 			default: frappe.defaults.get_user_default("Company"),
 			change: () => this.refresh(),
 		});
+		this.companies = frappe.db
+			.get_list("Company", { pluck: "name", order_by: "name asc", limit: 0 })
+			.then((companies) => {
+				this.company_field.df.options = companies;
+				this.company_field.refresh();
+				const current = this.company_field.get_value();
+				this.company_field.set_value(companies.includes(current) ? current : companies[0]);
+			});
 	}
 
 	bind_events() {
@@ -165,7 +172,9 @@ kefiya.hub.KefiyaHub = class KefiyaHub {
 		view.render(this.$views[this.current], this);
 	}
 
-	refresh() {
+	async refresh() {
+		// the first refresh waits for the company options and default
+		await this.companies;
 		return frappe.call({
 			method: "kefiya.kefiya.page.kefiya_hub.kefiya_hub.get_overview",
 			args: { company: this.company },
