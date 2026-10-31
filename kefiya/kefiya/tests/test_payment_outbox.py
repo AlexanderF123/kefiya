@@ -529,7 +529,7 @@ class TestAnUnsignedOrderIsNotASentOrder(unittest.TestCase):
             "\n    def ")[0]
         self.assertIn("self._refuse_unsigned(", body)
         refuse = body.find("self._refuse_unsigned(")
-        submitted = body.find('result = {"status": "submitted"}')
+        submitted = body.find('result = {"status": "submitted"')
         self.assertTrue(0 < refuse < submitted,
                         "Checked after the status is set is not checked.")
 

@@ -259,6 +259,7 @@ kefiya.payment_outbox = function (root) {
 		rows: [], payers: [], can: {}, today: "",
 		query: "", selected: {},
 		showSent: !!kept.show_sent,
+		standingOnly: !!kept.standing_only,
 		sortBy: kept.sort_by || null,
 		sortDir: kept.sort_dir === "desc" ? "desc" : "asc",
 		busy: false,
@@ -296,6 +297,7 @@ kefiya.payment_outbox = function (root) {
 		kefiya.outbox_settings.write({
 			sort_by: view.sortBy, sort_dir: view.sortDir,
 			show_sent: view.showSent ? 1 : 0,
+			standing_only: view.standingOnly ? 1 : 0,
 		});
 	}
 
@@ -309,7 +311,8 @@ kefiya.payment_outbox = function (root) {
 			// nothing in a stored script notices; here every one of them is a
 			// source string with a translation a test reads.
 			method: "kefiya.utils.outbox.outbox_data",
-			args: { q: view.query, show_sent: view.showSent ? 1 : 0 },
+			args: { q: view.query, show_sent: view.showSent ? 1 : 0,
+				standing_only: view.standingOnly ? 1 : 0 },
 		}).then(function (r) {
 			const m = (r && r.message) || {};
 			view.rows = m.rows || [];
@@ -399,6 +402,10 @@ kefiya.payment_outbox = function (root) {
 		h += "<label class='zk-chk'><input type='checkbox' data-act='sent'"
 			+ (view.showSent ? " checked" : "") + "> "
 			+ __("show sent") + "</label>";
+		// Orders a standing order placed, and only those.
+		h += "<label class='zk-chk'><input type='checkbox' data-act='standing'"
+			+ (view.standingOnly ? " checked" : "") + "> "
+			+ __("only standing orders") + "</label>";
 		h += "<button data-act='reload'>" + __("Refresh") + "</button></div>";
 		return h;
 	}
@@ -568,6 +575,14 @@ kefiya.payment_outbox = function (root) {
 			if (act === "sent") {
 				el.onchange = function () {
 					view.showSent = el.checked;
+					remember();
+					load();
+				};
+				return;
+			}
+			if (act === "standing") {
+				el.onchange = function () {
+					view.standingOnly = el.checked;
 					remember();
 					load();
 				};

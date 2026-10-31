@@ -702,21 +702,43 @@ def fetch_all(kefiya_login, user_scope=None):
         # 3) Standing orders / scheduled debits -> forecast table (best effort).
         def _fetch_planned():
             from kefiya.utils.planned_payment import (
-                STANDING_ORDER_KINDS, normalize_scheduled_debits,
+                DEBIT_FETCH_KINDS, normalize_scheduled_debits,
                 refresh_planned_payments,
             )
             raw = _to_jsonable(FetchCtl(kefiya_login).get_fints_scheduled_debits())
             norm = normalize_scheduled_debits(raw if isinstance(raw, list) else [])
             # Scoped: without it this sweep would cancel the pending entries
             # written just above, and the next one would cancel these back.
+            # And only the kind it writes: the dated transfers below are
+            # "Scheduled Transfer", and a sweep over both cancelled them.
             planned = refresh_planned_payments(
                 kefiya_login, norm["items"],
-                payment_kinds=STANDING_ORDER_KINDS)
+                payment_kinds=DEBIT_FETCH_KINDS)
             planned["skipped"] = norm["skipped"]
             return planned
 
         summary["planned"] = _optional_fetch(
             summary, "planned", "scheduled_debits", _fetch_planned)
+
+        # 3b) The dated TRANSFERS the bank holds (HKCSB) -> forecast table.
+        #     The step above asks for dated direct debits, which a payer
+        #     never has -- the forecast stayed empty at every bank while
+        #     StarMoney listed the same accounts' dated transfers.
+        def _fetch_scheduled_transfers():
+            from kefiya.utils import scheduled_transfers
+            from kefiya.utils.planned_payment import refresh_planned_payments
+
+            segments = FetchCtl(kefiya_login).get_fints_scheduled_transfers()
+            norm = scheduled_transfers.items_from(segments)
+            result = refresh_planned_payments(
+                kefiya_login, norm["items"],
+                payment_kinds=(scheduled_transfers.KIND,))
+            result["skipped"] = norm["skipped"]
+            return result
+
+        summary["scheduled_transfers"] = _optional_fetch(
+            summary, "scheduled_transfers", "scheduled_transfers",
+            _fetch_scheduled_transfers)
 
         def _fetch_standing_orders():
             rows = _to_jsonable(
@@ -1016,6 +1038,13 @@ def _mark_sent(docs, result, scheduled):
         doc.db_set("status", "Scheduled at Bank" if scheduled else "Sent")
         if task_id:
             doc.db_set("bank_task_id", task_id)
+        # What the bank said when it took the order, on the order. Its own
+        # field was there all along and nothing wrote it: an instant transfer
+        # was marked sent on 30.10.2026, the banking app did not show it, and
+        # the bank's answer to the TAN was nowhere to be read. Not the Error
+        # Log -- an accepted order is not an error.
+        if (result or {}).get("bank_said"):
+            doc.db_set("bank_reference", result["bank_said"])
         # The bank holds the order, so the payee check that held it up is
         # answered. Only _release_result cleared this, and an order released
         # with a typed TAN after the payee check kept "payee check open".
@@ -1802,8 +1831,21 @@ def send_transfer_tan(kefiya_login, tan, user_scope, transfer_names=None):
 
     docs = [frappe.get_doc("Kefiya Transfer", n) for n in names]
     if docs:
-        _mark_sent(docs, {}, _bank_holds_the_date(docs[0]))
+        _mark_sent(docs, {"bank_said": _what_the_bank_said_to_the_tan(
+            controller)}, _bank_holds_the_date(docs[0]))
     return {"status": "submitted", "sent": [d.name for d in docs]}
+
+
+def _what_the_bank_said_to_the_tan(controller):
+    """The bank's lines in answer to the TAN, as text. Never raises."""
+    from kefiya.utils import fints_response
+
+    try:
+        response = getattr(controller.fints_connection,
+                           "init_tan_response", None)
+        return fints_response.as_text(fints_response.verdict_of(response))
+    except Exception:
+        return ""
 
 
 def _release_not_given(controller, kefiya_login):

@@ -119,8 +119,9 @@ class TestTheServerAnswersTheQuestion(unittest.TestCase):
     def test_send_transfer_tan_knows_which_orders(self):
         source = _pyfunc(_py("utils", "client.py"), "def send_transfer_tan(")
         self.assertIn("transfer_names=None", source)
-        self.assertIn("_mark_sent(docs, {}, _bank_holds_the_date(docs[0]))",
+        self.assertIn("_mark_sent(docs, {\"bank_said\": _what_the_bank_said_to_the_tan(",
                       source)
+        self.assertIn("controller)}, _bank_holds_the_date(docs[0]))", source)
 
     def test_not_yet_is_reported_not_swallowed(self):
         source = _pyfunc(_py("utils", "client.py"), "def send_transfer_tan(")

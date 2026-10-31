@@ -144,9 +144,57 @@ def parse_standing_order(segment):
     return row
 
 
-def fetch_standing_orders(connection, account):
+#: How long one written-down answer per access is enough. The fetch runs
+#: daily; the evidence is needed once per bank, not once per day.
+EVIDENCE_EVERY_SECONDS = 7 * 24 * 3600
+
+
+def _write_down_the_answer(login, command_seg, response, segments, rows):
+    """The bank's answer, raw, as a private file on the Kefiya Login.
+
+    Once a week per access. Not the Error Log: that is for errors, and an
+    answer the bank gave without complaint is not one. The file sits where
+    the access is, in the form's attachments.
+
+    The schedule's field order is unconfirmed, and the raw elements are what
+    confirms it. They used to be read and dropped: the fetch reported a count.
+    Never raises; a fetch must not fail over its own notebook.
+    """
+    from kefiya.utils import standing_order_evidence
+
+    if not login:
+        return
+    try:
+        key = "kefiya:standing_order_evidence:{0}".format(login)
+        if frappe.cache().get_value(key):
+            return
+        try:
+            said = "; ".join(
+                "{0} {1}".format(getattr(r, "code", "?"),
+                                 getattr(r, "text", ""))
+                for r in response.responses(command_seg))
+        except Exception:
+            said = ""
+        frappe.get_doc({
+            "doctype": "File",
+            "file_name": standing_order_evidence.file_name(
+                frappe.utils.today()),
+            "attached_to_doctype": "Kefiya Login",
+            "attached_to_name": login,
+            "is_private": 1,
+            "content": standing_order_evidence.message(
+                login, segments, said=said, parsed=rows),
+        }).insert(ignore_permissions=True)
+        frappe.cache().set_value(key, 1,
+                                 expires_in_sec=EVIDENCE_EVERY_SECONDS)
+    except Exception:
+        pass
+
+
+def fetch_standing_orders(connection, account, login=None):
     """Ask the bank which standing orders it holds for this account.
 
+    :param login: the Kefiya Login asking, for the written-down answer
     :return: list of rows from parse_standing_order()
     :raises FinTSUnsupportedOperation: where the bank does not offer HKCDB
     """
@@ -154,7 +202,8 @@ def fetch_standing_orders(connection, account):
 
     def _extract(command_seg, response):
         rows = []
-        for segment in response.find_segments("HICDB"):
+        segments = list(response.find_segments("HICDB"))
+        for segment in segments:
             try:
                 rows.append(parse_standing_order(segment))
             except Exception:
@@ -162,6 +211,7 @@ def fetch_standing_orders(connection, account):
                 frappe.log_error(
                     title="Kefiya: could not read a standing order",
                     message=frappe.get_traceback())
+        _write_down_the_answer(login, command_seg, response, segments, rows)
         return rows
 
     with connection._get_dialog() as dialog:
@@ -170,6 +220,32 @@ def fetch_standing_orders(connection, account):
             account=hkcdb._fields["account"].type.from_sepa_account(account),
         )
         return connection._send_with_possible_retry(dialog, seg, _extract)
+
+
+def fetch_scheduled_transfers(connection, account):
+    """The dated transfers the bank holds for this account -- HKCSB.
+
+    What StarMoney lists as "terminierte Ueberweisungen". The forecast used to
+    ask only for the dated direct debits (HKDBS), which a payer never has.
+    The query has the shape of the library's HKDBS; see fints_segments.
+
+    :return: list of HICSB segments
+    :raises FinTSUnsupportedOperation: where the bank does not offer HKCSB
+    """
+    from kefiya.utils.fints_segments import HKCSB1
+
+    with connection._get_dialog() as dialog:
+        hkcsb = connection._find_highest_supported_command(HKCSB1)
+        return connection._fetch_with_touchdowns(
+            dialog,
+            lambda touchdown: hkcsb(
+                account=hkcsb._fields["account"].type.from_sepa_account(
+                    account),
+                touchdown_point=touchdown,
+            ),
+            lambda responses: responses,
+            "HICSB",
+        )
 
 
 def fetch_scheduled_debits(connection, account):

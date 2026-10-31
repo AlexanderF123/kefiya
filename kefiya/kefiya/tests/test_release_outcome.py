@@ -116,7 +116,7 @@ class TestSendTransferTanLiestDasWort(unittest.TestCase):
         self.assertIn("controller = FinTSController(", self.senden)
         pruefung = self.senden.index(
             "release_outcome.may_mark_sent(controller.release_outcome)")
-        self.assertLess(pruefung, self.senden.index("_mark_sent(docs, {}"))
+        self.assertLess(pruefung, self.senden.index("_mark_sent(docs, {"))
 
     def test_sonst_ein_fehler_mit_den_worten_der_bank(self):
         self.assertIn('return {"status": "error",', self.senden)

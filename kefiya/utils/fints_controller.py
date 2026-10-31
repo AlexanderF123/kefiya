@@ -1706,6 +1706,16 @@ class FinTSController(TanSession):
             return standing_orders.fetch_scheduled_debits(
                 self.fints_connection, account)
 
+    def get_fints_scheduled_transfers(self):
+        """The dated transfers the bank holds (HKCSB) -- see
+        standing_orders.fetch_scheduled_transfers."""
+        from kefiya.utils import standing_orders
+
+        with self.client_session():
+            account = self._require_fints_account()
+            return standing_orders.fetch_scheduled_transfers(
+                self.fints_connection, account)
+
     def get_fints_standing_orders(self):
         """The bestand of SEPA standing orders (HKCDB).
 
@@ -1718,7 +1728,8 @@ class FinTSController(TanSession):
         with self.client_session():
             account = self._require_fints_account()
             return standing_orders.fetch_standing_orders(
-                self.fints_connection, account)
+                self.fints_connection, account,
+                login=self.kefiya_login.name)
 
     def get_fints_statements(self):
         """List available electronic account statements
@@ -2148,7 +2159,8 @@ class FinTSController(TanSession):
                     fints_response.as_text(verdict) or "(the bank said nothing)"
                 ),
             )
-            result = {"status": "submitted"}
+            result = {"status": "submitted",
+                      "bank_said": fints_response.as_text(verdict)}
             if scheduled:
                 # The identifier under which the bank now holds the dated
                 # order. Without it the order can never be changed or called

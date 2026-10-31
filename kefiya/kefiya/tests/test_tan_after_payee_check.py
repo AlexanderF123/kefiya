@@ -84,7 +84,7 @@ class TestTheAnswerMarksTheOrder(unittest.TestCase):
 
     def test_a_sent_order_has_no_open_payee_check(self):
         client = _read("utils", "client.py")
-        marked = client.split("def _mark_sent(")[1][:1200]
+        marked = client.split("def _mark_sent(")[1].split("\ndef ")[0]
         self.assertIn('doc.db_set("vop_pending", 0)', marked)
 
 
