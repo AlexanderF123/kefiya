@@ -67,7 +67,6 @@ from kefiya.utils.fints_bank_errors import (  # noqa: F401
     FetchRefused,
     FetchTanRequired,
     LoginRejected,
-    bank_error_hints,
     bank_refusal_message,
     error_log_link,
     explain_login_rejection,

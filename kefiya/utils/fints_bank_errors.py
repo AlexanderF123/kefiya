@@ -30,6 +30,7 @@ from fints.exceptions import (
 )
 from frappe import _
 
+from kefiya.utils import fints_response
 from kefiya.utils.fints_errors import TanInteractionRequired
 
 
@@ -208,15 +209,17 @@ def bank_refusal_message(intro, error_log, extra_hints=None):
 
     :param intro: Translated sentence the reasons follow
     :param error_log: What log_bank_traffic_on_error yielded
-    :param extra_hints: Hints for codes that depend on the request, by code
+    :param extra_hints: Hints for codes that depend on the request, by code.
+        The general ones come from fints_response.KNOWN_CODES -- the one
+        table of codes this app explains, shared with the transfer path.
     """
     message = intro + "<br>" + "<br>".join(
         "{0}: {1}".format(code, frappe.utils.escape_html(text))
         for code, text in error_log.bank_errors
     )
-    hints = {**bank_error_hints(), **(extra_hints or {})}
-    for hint in dict.fromkeys(hints[code] for code, _text in error_log.bank_errors if code in hints):
-        message += "<br><br>" + hint
+    verdict = {"lines": [{"code": code} for code, _text in error_log.bank_errors]}
+    for hint in fints_response.advice(verdict, extra_hints):
+        message += "<br><br>" + _(hint)
     if error_log.name:
         message += error_log_link(error_log.name)
     return message
@@ -267,14 +270,3 @@ def fetch_fints_transactions(client, account, start_date, end_date):
             exc=FetchRefused,
             title=_("Bank Refused Request"),
         )
-
-
-def bank_error_hints():
-    """What the user can do about a bank's 9xxx code, for the codes we know."""
-    return {
-        "9040": _(
-            "Your chipTAN generator needs to be resynchronised. Do this in your"
-            " bank's online banking or app, usually in the TAN or security"
-            " settings, then try again."
-        ),
-    }
