@@ -9,12 +9,12 @@ from unittest.mock import MagicMock, patch
 import frappe
 import requests
 from fints.client import NeedTANResponse
-from fints.exceptions import FinTSConnectionError, FinTSSCARequiredError
+from fints.exceptions import FinTSClientError, FinTSClientPINError, FinTSConnectionError, FinTSSCARequiredError
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, getdate
 
 from kefiya.utils import fints_controller, fints_controller_legacy
-from kefiya.utils.fints_controller import FetchTanRequired
+from kefiya.utils.fints_controller import FetchRefused, FetchTanRequired
 from kefiya.utils.fints_controller_legacy import TanAuthenticationRequired
 
 CONTROLLERS = (fints_controller.FinTSController, fints_controller_legacy.FinTSController)
@@ -275,6 +275,64 @@ class TestAccountsBankRefusal(FrappeTestCase):
         self.assertNotIn("Bad status code 400", message)
         self.assertIn("chipTAN generator needs to be resynchronised", message)
         self.assertIn('href="/app/error-log/ERR-0001"', message)
+
+
+def bank_responds(code, text, exc):
+    """Mimic fints: log the bank's 9xxx response, then raise."""
+    def get_transactions(*args):
+        logging.getLogger("fints.client").error(
+            "Dialog response: %s - %s", code, text,
+            extra={"fints_response_code": code, "fints_response_text": text},
+        )
+        raise exc
+    return get_transactions
+
+
+class TestFetchBankRefusal(FrappeTestCase):
+    def test_9010_shows_the_bank_reason_instead_of_bpd(self):
+        # fints says "could not fetch BPD" for any 9010, also on the fetch
+        for cls in CONTROLLERS:
+            with self.subTest(controller=cls.__module__):
+                controller = make_controller(cls)
+                controller.fints_connection.connection.session = requests.Session()
+                controller.fints_connection.get_transactions.side_effect = bank_responds(
+                    "9010", "Zeitraum nicht zulässig",
+                    FinTSClientError("Error during dialog initialization, could not fetch BPD."),
+                )
+                with patch("frappe.log_error", return_value=frappe._dict(name="ERR-0002")), \
+                        self.assertRaises(FetchRefused) as ctx:
+                    controller.get_fints_transactions(add_days(getdate(), -400), add_days(getdate(), -1))
+
+                message = str(ctx.exception)
+                self.assertIn("9010: Zeitraum nicht zulässig", message)
+                self.assertNotIn("BPD", message)
+                self.assertIn("choose a later one", message)
+                self.assertIn('href="/app/error-log/ERR-0002"', message)
+
+    def test_errors_without_bank_reason_pass_through(self):
+        for cls in CONTROLLERS:
+            with self.subTest(controller=cls.__module__):
+                controller = make_controller(cls)
+                controller.fints_connection.connection.session = requests.Session()
+                controller.fints_connection.get_transactions.side_effect = FinTSClientPINError("PIN wrong?")
+                with patch("frappe.log_error"), self.assertRaises(FinTSClientPINError):
+                    controller.get_fints_transactions(add_days(getdate(), -30), add_days(getdate(), -1))
+
+    def test_tan_on_fetch_is_not_logged(self):
+        controller = make_controller(fints_controller.FinTSController)
+        controller.fints_connection.connection.session = requests.Session()
+        controller.fints_connection.get_transactions.side_effect = FinTSSCARequiredError("SCA required")
+        with patch("frappe.log_error") as log_error, self.assertRaises(FetchTanRequired):
+            controller.get_fints_transactions(add_days(getdate(), -120), add_days(getdate(), -1))
+        log_error.assert_not_called()
+
+    def test_import_passes_the_refusal_through_unwrapped(self):
+        for cls in CONTROLLERS:
+            with self.subTest(controller=cls.__module__):
+                controller = make_controller(cls)
+                controller.get_fints_transactions = MagicMock(side_effect=FetchRefused("refused"))
+                with patch("frappe.get_doc"), self.assertRaises(FetchRefused):
+                    controller.import_fints_transactions("KEFIYA-IMPORT-TEST")
 
 
 class TestTanChallenge(FrappeTestCase):
