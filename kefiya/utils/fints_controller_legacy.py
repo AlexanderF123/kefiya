@@ -10,7 +10,7 @@ import mt940
 
 from dateutil.relativedelta import relativedelta
 from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse
-from fints.exceptions import FinTSSCARequiredError
+from fints.exceptions import FinTSConnectionError, FinTSSCARequiredError
 
 from frappe import _
 from frappe.utils import now_datetime
@@ -24,8 +24,10 @@ from .import_bank_transaction import ImportBankTransaction
 from .assign_payment_controller import AssignmentController
 
 # Bank codes for a request the bank rejects because it lacks strong
-# customer authentication (PSD2). DKB answers HKSPA with 9210.
+# customer authentication (PSD2). DKB answers HKSPA with 9210, or with
+# HTTP 400 and no bank code at all.
 SCA_REJECTION_CODES = ("9075", "9210")
+SCA_REJECTION_HTTP_STATUS = "Bad status code 400"
 
 
 class TanAuthenticationRequired(frappe.ValidationError):
@@ -112,8 +114,18 @@ class FinTSController:
             except FinTSSCARequiredError:
                 throw_tan_authentication_required()
             except Exception as e:
-                # fints raises a plain Exception holding the bank response
-                if any("code='{0}'".format(c) in str(e) for c in SCA_REJECTION_CODES):
+                # The bank has most likely ended the dialog. Don't let fints
+                # send the dialog end (HKEND) on exit: it fails too, and its
+                # non-validation error turns this message into a server error
+                # with an empty "Message" dialog.
+                self.fints_connection._standing_dialog.open = False
+
+                # fints raises a plain Exception holding the bank response,
+                # or a FinTSConnectionError for the HTTP status
+                if (
+                    isinstance(e, FinTSConnectionError)
+                    and str(e) == SCA_REJECTION_HTTP_STATUS
+                ) or any("code='{0}'".format(c) in str(e) for c in SCA_REJECTION_CODES):
                     frappe.log_error(title="Kefiya: bank rejected account list")
                     throw_tan_authentication_required()
                 frappe.throw(_(

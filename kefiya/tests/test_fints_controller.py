@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import frappe
 from fints.client import NeedTANResponse
-from fints.exceptions import FinTSSCARequiredError
+from fints.exceptions import FinTSConnectionError, FinTSSCARequiredError
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, getdate
 
@@ -80,6 +80,20 @@ class TestLegacyTanAuthenticationRequired(FrappeTestCase):
             self.get_accounts(Exception(DKB_REJECTION))
         primary_action = frappe.message_log[-1]["primary_action"]
         self.assertEqual(primary_action["args"], ["Form", "Kefiya Settings"])
+
+    def test_http_400_on_account_list_points_to_settings(self):
+        with self.assertRaises(TanAuthenticationRequired):
+            self.get_accounts(FinTSConnectionError("Bad status code 400"))
+
+    def test_failed_account_list_skips_the_dialog_end(self):
+        # fints would send HKEND on exit; it fails too and hides the message
+        for error in (FinTSConnectionError("Bad status code 400"), Exception("code='9942'")):
+            with self.subTest(error=str(error)):
+                controller = make_controller(fints_controller_legacy.FinTSController)
+                controller.fints_connection.get_sepa_accounts.side_effect = error
+                with self.assertRaises(frappe.ValidationError):
+                    controller._FinTSController__get_fints_accounts()
+                self.assertFalse(controller.fints_connection._standing_dialog.open)
 
     def test_sca_required_error_points_to_settings(self):
         with self.assertRaises(TanAuthenticationRequired):
