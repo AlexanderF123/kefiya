@@ -248,7 +248,7 @@ kefiya.interactive = {
 				}
 			}
 
-			frappe.prompt(
+			const prompt = frappe.prompt(
 				fields,
 				(values) => {
 					kefiya.interactive.start_progress(frm);
@@ -270,6 +270,12 @@ kefiya.interactive = {
 				},
 				__("Verification required")
 			);
+
+			// Frappe focuses the first field, here the read-only TAN Mode.
+			// Put the cursor in the TAN field instead (after Frappe's own focus).
+			if (data.tan_required) {
+				prompt.$wrapper.one("shown.bs.modal", () => prompt.fields_dict.tan.set_focus());
+			}
 		});
 	},
 }
