@@ -21,10 +21,12 @@ BANKS = [
     ("GLS Tagesgeld", "GLS Bank", "Tagesgeld", "DE34777777770001234567", "77777777", 0, False),
 ]
 
+# Invented names only: a counterparty is a third party, and its name has no
+# place in the source (see CLAUDE.md).
 PARTIES = [
-    ("Müller Bürobedarf GmbH", -1), ("Stadtwerke Köln", -1), ("Telekom Deutschland", -1),
-    ("Hetzner Online GmbH", -1), ("Brecht Feinmechanik", 1), ("Gärtnerei Berger", 1),
-    ("Lillestoff GmbH", 1), ("Aquarath AG", 1), ("Finanzamt Köln-Mitte", -1),
+    ("Beispiel Bürobedarf GmbH", -1), ("Stadtwerke Musterstadt", -1), ("Muster Telefon AG", -1),
+    ("Beispiel Hosting GmbH", -1), ("Feinmechanik Muster KG", 1), ("Gärtnerei Beispiel", 1),
+    ("Musterstoffe GmbH", 1), ("Beispiel Handels AG", 1), ("Finanzamt Musterstadt", -1),
 ]
 
 

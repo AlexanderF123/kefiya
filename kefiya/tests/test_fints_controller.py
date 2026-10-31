@@ -390,7 +390,7 @@ class TestResolveTanInteraction(FrappeTestCase):
         with patch.object(client, "_use_tan_authentication", return_value=True), \
                 patch.object(fints_controller, "FinTSController", controller):
             return client.resolve_tan_interaction(
-                "DKB phamos", {"mfa_confirmation": 1, "tan": "123456"}
+                "DKB Test", {"mfa_confirmation": 1, "tan": "123456"}
             )
 
     def test_accepted_tan_returns_the_accounts(self):
