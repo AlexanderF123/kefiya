@@ -23,6 +23,31 @@ from .fints_controller import FetchTanRequired, throw_fetch_tan_required
 from .import_bank_transaction import ImportBankTransaction
 from .assign_payment_controller import AssignmentController
 
+# Bank codes for a request the bank rejects because it lacks strong
+# customer authentication (PSD2). DKB answers HKSPA with 9210.
+SCA_REJECTION_CODES = ("9075", "9210")
+
+
+class TanAuthenticationRequired(frappe.ValidationError):
+    """The bank wants a TAN for the login, which the legacy controller can't do."""
+
+
+def throw_tan_authentication_required():
+    """Tell the user to enable TAN authentication, with a button to the settings."""
+    frappe.throw(
+        _(
+            "Your bank requires a TAN to load the accounts. Enable TAN"
+            " Authentication in Kefiya Settings and try again."
+        ),
+        exc=TanAuthenticationRequired,
+        title=_("TAN Required"),
+        primary_action={
+            "label": _("Open Kefiya Settings"),
+            "client_action": "frappe.set_route",
+            "args": ["Form", "Kefiya Settings"],
+        },
+    )
+
 
 class FinTSController:
     def __init__(self, kefiya_login_docname, interactive=False):
@@ -71,7 +96,7 @@ class FinTSController:
         self.fints_connection.fetch_tan_mechanisms()
 
         if self.fints_connection.init_tan_response:
-            raise NotImplementedError
+            throw_tan_authentication_required()
 
     def __get_fints_accounts(self):
         """Fetch FinTS Accounts.
@@ -84,7 +109,13 @@ class FinTSController:
         if not hasattr(self, 'fints_accounts'):
             try:
                 self.fints_accounts = self.fints_connection.get_sepa_accounts()
+            except FinTSSCARequiredError:
+                throw_tan_authentication_required()
             except Exception as e:
+                # fints raises a plain Exception holding the bank response
+                if any("code='{0}'".format(c) in str(e) for c in SCA_REJECTION_CODES):
+                    frappe.log_error(title="Kefiya: bank rejected account list")
+                    throw_tan_authentication_required()
                 frappe.throw(_(
                     "Could not load sepa accounts with error:<br>{0}"
                 ).format(e))

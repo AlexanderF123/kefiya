@@ -12,6 +12,7 @@ from frappe.utils import add_days, getdate
 
 from kefiya.utils import fints_controller, fints_controller_legacy
 from kefiya.utils.fints_controller import FetchTanRequired
+from kefiya.utils.fints_controller_legacy import TanAuthenticationRequired
 
 CONTROLLERS = (fints_controller.FinTSController, fints_controller_legacy.FinTSController)
 
@@ -58,3 +59,33 @@ class TestFetchTanRequired(FrappeTestCase):
                 )
                 with patch("frappe.get_doc"), self.assertRaises(FetchTanRequired):
                     controller.import_fints_transactions("KEFIYA-IMPORT-TEST")
+
+
+# What fints raises when DKB rejects HKSPA, shortened
+DKB_REJECTION = (
+    "Error response: fints.message.FinTSInstituteMessage([...responses=["
+    "fints.formals.Response(code='9800', reference_element=None, text='Dialog abgebrochen.'), "
+    "fints.formals.Response(code='9210', reference_element=None, text='Auftrag abgelehnt')]"
+)
+
+
+class TestLegacyTanAuthenticationRequired(FrappeTestCase):
+    def get_accounts(self, side_effect):
+        controller = make_controller(fints_controller_legacy.FinTSController)
+        controller.fints_connection.get_sepa_accounts.side_effect = side_effect
+        controller._FinTSController__get_fints_accounts()
+
+    def test_rejected_account_list_points_to_settings(self):
+        with self.assertRaises(TanAuthenticationRequired):
+            self.get_accounts(Exception(DKB_REJECTION))
+        primary_action = frappe.message_log[-1]["primary_action"]
+        self.assertEqual(primary_action["args"], ["Form", "Kefiya Settings"])
+
+    def test_sca_required_error_points_to_settings(self):
+        with self.assertRaises(TanAuthenticationRequired):
+            self.get_accounts(FinTSSCARequiredError("SCA required"))
+
+    def test_other_errors_keep_the_bank_message(self):
+        with self.assertRaises(frappe.ValidationError) as ctx:
+            self.get_accounts(Exception("code='9942' PIN falsch"))
+        self.assertNotIsInstance(ctx.exception, TanAuthenticationRequired)
