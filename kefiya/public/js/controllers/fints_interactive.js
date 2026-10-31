@@ -52,12 +52,22 @@ kefiya.interactive = {
 		}
 	},
 
-	/** Reset the progress state before a new FinTS request. */
+	/**
+	 * Mark a FinTS request as started in this tab. Progress and TAN events go
+	 * by socket to every tab of the user; only the tab that started the
+	 * request follows them, so other open tabs don't stack dialogs.
+	 */
 	start_progress: function(frm) {
 		this.progressState[frm.doc.name] = {
 			progress: 0,
-			completed: false,
+			active: true,
 		};
+	},
+
+	/** True while this tab waits for the FinTS request it started. */
+	is_active: function(frm) {
+		const state = this.progressState[frm.doc.name];
+		return Boolean(state && state.active);
 	},
 
 	/**
@@ -68,7 +78,7 @@ kefiya.interactive = {
 	finish_progress: function(frm) {
 		this.progressState[frm.doc.name] = {
 			progress: 100,
-			completed: true,
+			active: false,
 		};
 		return this.enqueueUpdate(() => {
 			const dialog = frappe.cur_progress;
@@ -82,27 +92,17 @@ kefiya.interactive = {
 	},
 
 	progressbar: function(frm) {
-		this.start_progress(frm);
-
 		frappe.realtime.off("fints_progressbar");
 		frappe.realtime.on("fints_progressbar", function(data) {
 			if(data.docname === frm.doc.name) {
-				const state = kefiya.interactive.progressState[frm.doc.name] || {
-					progress: 0,
-					completed: false,
-				};
+				const state = kefiya.interactive.progressState[frm.doc.name];
 
-				if (state.completed && data.progress < 100) {
-					return;
-				}
-
-				if (data.progress < state.progress) {
+				if (!kefiya.interactive.is_active(frm) || data.progress < state.progress) {
 					return;
 				}
 
 				state.progress = data.progress;
-				state.completed = data.progress >= 100;
-				kefiya.interactive.progressState[frm.doc.name] = state;
+				state.active = data.progress < 100;
 
 				kefiya.interactive.enqueueUpdate(() => {
 					if(data.reload && data.reload === true) {
@@ -132,7 +132,7 @@ kefiya.interactive = {
 		 */
 		frappe.realtime.off("fints_tan_interaction_required");
 		frappe.realtime.on("fints_tan_interaction_required", async function(data) {
-			if(data.docname !== frm.doc.name) {
+			if(data.docname !== frm.doc.name || !kefiya.interactive.is_active(frm)) {
 				return;
 			}
 
