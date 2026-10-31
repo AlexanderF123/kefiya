@@ -28,13 +28,81 @@ kefiya.tools.KefiyaHub = class KefiyaHub {
 		this.page = frappe.ui.make_app_page({
 			parent: wrapper,
 			title: __("Kefiya"),
-			single_column: true,
+			single_column: false,
 		});
 		this.wrapper = $(wrapper);
 		this.wrapper.addClass("kefiya-hub-page");
 		this.$body = $('<div class="kefiya-hub"></div>').appendTo(this.page.main);
+		this.make_sidebar();
 		this.make_filters();
 		this.make_actions();
+	}
+
+	make_sidebar() {
+		const list = (doctype, query) => `/app/${frappe.router.slug(doctype)}${query || ""}`;
+		const sections = [
+			[null, [["overview", __("Overview"), "/app/kefiya-hub"]]],
+			[
+				__("Connect"),
+				[
+					["logins", __("Kefiya Login"), list("Kefiya Login")],
+					["", __("Bank Account Wizard"), "/app/bank_account_wizard"],
+				],
+			],
+			[
+				__("Import"),
+				[
+					["", __("Kefiya Import"), list("Kefiya Import")],
+					["", __("Bank Statement Import"), list("Kefiya Bank Statement Import")],
+					["", __("Kefiya Schedule"), list("Kefiya Schedule")],
+				],
+			],
+			[
+				__("Reconcile"),
+				[
+					["open", __("Bank Transaction"), list("Bank Transaction", "?status=Unreconciled")],
+					["", __("Bank Transaction Wizard"), "/app/bank-transaction-wiz"],
+					["", __("Assign Payment Entries"), "/app/assign_payment_entries"],
+					["", __("Bank Reconciliation Tool"), list("Bank Reconciliation Tool")],
+				],
+			],
+			[__("Settings"), [["", __("Kefiya Settings"), list("Kefiya Settings")]]],
+		];
+
+		this.$sidebar = $(`<div class="kefiya-sidebar">
+			${sections
+				.map(
+					([title, items]) => `<div class="kefiya-sidebar-section">
+					${title ? `<div class="kefiya-sidebar-title">${title}</div>` : ""}
+					${items
+						.map(
+							([key, label, href]) => `<a class="kefiya-sidebar-item ${key === "overview" ? "selected" : ""}" href="${href}">
+							<span class="kefiya-sidebar-label">${label}</span>
+							${key && key !== "overview" ? `<span class="kefiya-sidebar-count" data-count="${key}"></span>` : ""}
+						</a>`
+						)
+						.join("")}
+				</div>`
+				)
+				.join("")}
+		</div>`).appendTo(this.page.sidebar);
+	}
+
+	update_sidebar(d) {
+		const failed = d.logins.filter((l) => l.failed_connection).length;
+		const counts = {
+			logins: failed ? { value: failed, color: "red", title: __("Failing logins") } : null,
+			open: d.steps.open_count
+				? { value: d.steps.open_count, color: "orange", title: __("Open transactions") }
+				: null,
+		};
+		this.$sidebar.find("[data-count]").each((_, el) => {
+			const count = counts[$(el).attr("data-count")];
+			$(el)
+				.attr("class", `kefiya-sidebar-count ${count ? count.color : "hidden"}`)
+				.attr("title", count ? count.title : "")
+				.text(count ? count.value : "");
+		});
 	}
 
 	make_filters() {
@@ -144,6 +212,7 @@ kefiya.tools.KefiyaHub = class KefiyaHub {
 
 	render() {
 		const d = this.data;
+		this.update_sidebar(d);
 		this.$body.html(`
 			${this.render_kpis(d)}
 			${this.render_stepper(d.steps)}
