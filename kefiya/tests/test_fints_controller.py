@@ -242,3 +242,23 @@ class TestTanChallenge(FrappeTestCase):
                 controller.ask_for_tan(response)
                 kwargs = getattr(controller.interactive, request).call_args.kwargs
                 self.assertEqual(kwargs["challenge"], {"text": "Scan the code"})
+
+
+class TestResolveTanInteraction(FrappeTestCase):
+    """The form loads the accounts again once the TAN is resolved."""
+
+    def resolve(self, controller):
+        from kefiya.utils import client
+
+        with patch.object(client, "_use_tan_authentication", return_value=True), \
+                patch.object(fints_controller, "FinTSController", controller):
+            return client.resolve_tan_interaction(
+                "DKB phamos", {"mfa_confirmation": 1, "tan": "123456"}
+            )
+
+    def test_accepted_tan_is_reported(self):
+        self.assertEqual(self.resolve(MagicMock()), {"tan_resolved": True})
+
+    def test_further_interaction_is_reported(self):
+        controller = MagicMock(side_effect=fints_controller.TanInteractionRequired())
+        self.assertEqual(self.resolve(controller), {"tan_resolved": False})

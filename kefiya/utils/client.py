@@ -463,6 +463,9 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
     """
     When a user was requested to perform a 2FA, this method is called as a callback
     to resolve the interaction. If TAN is disabled, this is effectively a no-op.
+
+    :return: {"tan_resolved": True} once the bank accepted the TAN and no further
+        interaction is needed, so the form can carry on with what the user started
     """
     if not _use_tan_authentication(fints_login):
         # Old banks / legacy mode: nothing to resolve
@@ -489,4 +492,6 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
             FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium)
     except TanInteractionRequired:
         # will have triggered user interaction via socket
-        pass
+        return {"tan_resolved": False}
+
+    return {"tan_resolved": True}

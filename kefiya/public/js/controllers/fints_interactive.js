@@ -53,6 +53,18 @@ kefiya.interactive = {
 	},
 
 	/**
+	 * After the bank accepted the TAN, carry on with what the user started,
+	 * so they don't have to click it again. The server's own "reload" comes
+	 * by socket and usually arrives after the request has ended, when it is
+	 * ignored.
+	 */
+	continue_after_tan: function(frm) {
+		if (frm.doctype === "Kefiya Login") {
+			frm.events.call_get_login_accounts(frm);
+		}
+	},
+
+	/**
 	 * Mark a FinTS request as started in this tab. Progress and TAN events go
 	 * by socket to every tab of the user; only the tab that started the
 	 * request follows them, so other open tabs don't stack dialogs.
@@ -246,6 +258,11 @@ kefiya.interactive = {
 							values: { ...context, ...values },
 						},
 						always: () => kefiya.interactive.finish_progress(frm),
+					}).then((r) => {
+						// after "always", so the next request's progress isn't cut off
+						if (r && r.message && r.message.tan_resolved) {
+							kefiya.interactive.continue_after_tan(frm);
+						}
 					});
 				},
 				__("Verification required")
