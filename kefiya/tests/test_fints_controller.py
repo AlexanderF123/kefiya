@@ -208,10 +208,37 @@ class TestTanChallenge(FrappeTestCase):
         self.assertEqual(challenge["image"], "data:image/png;base64,iVBORw==")
 
     def test_non_image_matrix_is_dropped(self):
+        for mime_type in ("text/html", 'image/png" onerror="alert(1)'):
+            with self.subTest(mime_type=mime_type):
+                response = MagicMock(
+                    spec=NeedTANResponse,
+                    challenge=None,
+                    challenge_html=None,
+                    challenge_matrix=(mime_type, b"<script>"),
+                )
+                self.assertIsNone(fints_controller.tan_challenge(response))
+
+    def test_structured_text_comes_from_challenge_html(self):
         response = MagicMock(
             spec=NeedTANResponse,
-            challenge=None,
-            challenge_html=None,
-            challenge_matrix=("text/html", b"<script>"),
+            challenge="<b>Betrag</b>",
+            challenge_html="<b>Betrag</b>",
+            challenge_matrix=None,
         )
-        self.assertIsNone(fints_controller.tan_challenge(response))
+        self.assertEqual(fints_controller.tan_challenge(response), {"text": "<b>Betrag</b>"})
+
+    def test_ask_for_tan_sends_the_challenge(self):
+        for decoupled, request in ((False, "request_tan"), (True, "request_mfa_confirmation")):
+            with self.subTest(decoupled=decoupled):
+                controller = make_controller(fints_controller.FinTSController)
+                controller._FinTSController__persist_fints_state = MagicMock()
+                response = MagicMock(
+                    spec=NeedTANResponse,
+                    decoupled=decoupled,
+                    challenge="Scan the code",
+                    challenge_html=None,
+                    challenge_matrix=None,
+                )
+                controller.ask_for_tan(response)
+                kwargs = getattr(controller.interactive, request).call_args.kwargs
+                self.assertEqual(kwargs["challenge"], {"text": "Scan the code"})

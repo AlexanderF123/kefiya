@@ -50,6 +50,11 @@ def throw_fetch_tan_required():
         title=_("TAN Required"),
     )
 
+# Image types a bank may send as TAN challenge (chipTAN QR, photoTAN). The type
+# ends up in the prompt's <img src>, so only these exact values pass.
+TAN_CHALLENGE_IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif")
+
+
 def tan_challenge(response):
     """What the user needs to produce the TAN: the bank's text and, for chipTAN QR or photoTAN, the image.
 
@@ -65,7 +70,7 @@ def tan_challenge(response):
 
     if response.challenge_matrix:
         mime_type, data = response.challenge_matrix
-        if mime_type.startswith("image/"):
+        if mime_type in TAN_CHALLENGE_IMAGE_TYPES:
             challenge["image"] = "data:{0};base64,{1}".format(
                 mime_type, base64.b64encode(data).decode("ascii")
             )
