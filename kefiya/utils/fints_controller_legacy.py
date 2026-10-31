@@ -19,7 +19,7 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
-from .fints_controller import LOGIN_ERRORS, FetchFailed, explain_login_rejection, fetch_fints_transactions
+from .fints_bank_errors import LOGIN_ERRORS, FetchFailed, explain_login_rejection, fetch_fints_transactions
 from .import_bank_transaction import (
     ImportBankTransaction,
     resolve_incremental_from_date,
