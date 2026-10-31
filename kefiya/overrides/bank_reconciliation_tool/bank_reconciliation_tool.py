@@ -10,6 +10,38 @@ from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool 
     reconcile_vouchers,
 )
 
+from kefiya.utils.camt_statement import rate_between
+
+
+def bank_rate_of(bank_transaction_name):
+    """The exchange rate the bank's statement stated for this booking.
+
+    :return: {"from", "to", "rate"} or None -- None also where the custom
+        fields are not migrated yet, so this never stands in the way of a
+        Journal Entry.
+    """
+    if not frappe.get_meta("Bank Transaction").has_field("kefiya_fx_rate"):
+        return None
+    row = frappe.db.get_value(
+        "Bank Transaction", bank_transaction_name,
+        ["kefiya_fx_from", "kefiya_fx_to", "kefiya_fx_rate"], as_dict=True)
+    if not row or not row.kefiya_fx_rate:
+        return None
+    return {"from": row.kefiya_fx_from, "to": row.kefiya_fx_to,
+            "rate": row.kefiya_fx_rate}
+
+
+def exchange_rate_for(bank_fx, from_currency, to_currency, posting_date):
+    """The bank's rate where it is about these two currencies, else ERPNext's.
+
+    A statement in CHF that converted an incoming EUR payment states the
+    rate the bank actually applied; that is the rate the money moved at, and
+    it is preferred to the system's rate of the day. Any other pair is not
+    what the bank said anything about.
+    """
+    return (rate_between(bank_fx, from_currency, to_currency)
+            or get_exchange_rate(from_currency, to_currency, posting_date))
+
 @frappe.whitelist()
 def custom_create_journal_entry_bts(
     bank_transaction_name,
@@ -37,6 +69,7 @@ def custom_create_journal_entry_bts(
         fieldname=["name", "deposit", "withdrawal", "bank_account", "currency"],
         as_dict=True,
     )[0]
+    bank_fx = bank_rate_of(bank_transaction_name)
     company_account = frappe.get_value("Bank Account", bank_transaction.bank_account, "account")
     account_type = frappe.db.get_value("Account", second_account, "account_type")
     if account_type in ["Receivable", "Payable"]:
@@ -94,7 +127,9 @@ def custom_create_journal_entry_bts(
 
     # convert transaction amount to company currency
     if is_multi_currency:
-        exc_rate = get_exchange_rate(bank_transaction.currency, company_default_currency, posting_date)
+        exc_rate = exchange_rate_for(
+            bank_fx, bank_transaction.currency, company_default_currency,
+            posting_date)
         if not exc_rate:
             frappe.throw('Set the transaction exchange rate.')
         withdrawal_in_company_currency = flt(exc_rate * abs(bank_transaction.withdrawal))
@@ -105,7 +140,9 @@ def custom_create_journal_entry_bts(
 
     # if second account is of foreign currency, convert and set debit and credit fields.
     if second_account_currency != company_default_currency:
-        exc_rate = get_exchange_rate(second_account_currency, company_default_currency, posting_date)
+        exc_rate = exchange_rate_for(
+            bank_fx, second_account_currency, company_default_currency,
+            posting_date)
         second_account_dict.update(
             {
                 "exchange_rate": exc_rate,
@@ -148,7 +185,9 @@ def custom_create_journal_entry_bts(
 
     # if company account is of foreign currency, convert and set debit and credit fields.
     if company_account_currency != company_default_currency:
-        exc_rate = get_exchange_rate(company_account_currency, company_default_currency, posting_date)
+        exc_rate = exchange_rate_for(
+            bank_fx, company_account_currency, company_default_currency,
+            posting_date)
         company_account_dict.update(
             {
                 "exchange_rate": exc_rate,
