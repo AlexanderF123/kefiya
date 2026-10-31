@@ -7,10 +7,9 @@ from __future__ import unicode_literals
 import frappe
 import json
 import re
-import mt940
 
 from dateutil.relativedelta import relativedelta
-from fints.client import FinTS3PinTanClient, FinTSClientMode, NeedTANResponse
+from fints.client import FinTS3PinTanClient, FinTSClientMode
 from fints.exceptions import FinTSConnectionError, FinTSSCARequiredError
 
 from frappe import _
@@ -20,7 +19,7 @@ from frappe.utils.file_manager import (
     get_file,
     get_content_hash,
 )
-from .fints_controller import FetchTanRequired, throw_fetch_tan_required
+from .fints_controller import FetchFailed, fetch_fints_transactions
 from .import_bank_transaction import ImportBankTransaction
 from .assign_payment_controller import AssignmentController
 
@@ -259,22 +258,11 @@ class FinTSController:
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
 
-        with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
-            try:
-                transactions = self.fints_connection.get_transactions(
-                    account,
-                    start_date,
-                    end_date
-                )
-            except FinTSSCARequiredError:
-                throw_fetch_tan_required()
-            if isinstance(transactions, NeedTANResponse):
-                throw_fetch_tan_required()
-            return json.loads(
-                json.dumps(transactions, cls=mt940.JSONEncoder)
-            )
+        account = self.get_fints_account_by_iban(
+            self.kefiya_login.account_iban)
+        return fetch_fints_transactions(
+            self.fints_connection, account, start_date, end_date
+        )
 
     def import_fints_transactions(self, kefiya_import):
         """Create payment entries by FinTS transactions.
@@ -348,7 +336,7 @@ class FinTSController:
                 "payments": new_bank_transactions,
                 # "assignment": auto_assignment
             }
-        except FetchTanRequired:
+        except FetchFailed:
             # Already a clear message for the user; don't wrap it
             raise
         except Exception as e:

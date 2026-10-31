@@ -32,8 +32,16 @@ class InitFailedException(Exception):
 class TanInteractionRequired(InitFailedException):
     pass
 
-class FetchTanRequired(frappe.ValidationError):
+class FetchFailed(frappe.ValidationError):
+    """The transaction fetch failed with a message that is already clear for the user."""
+
+
+class FetchTanRequired(FetchFailed):
     """The bank asked for a TAN on the transaction fetch, which isn't supported yet."""
+
+
+class FetchRefused(FetchFailed):
+    """The bank refused the transaction fetch with a 9xxx response."""
 
 
 def throw_fetch_tan_required():
@@ -131,7 +139,7 @@ def log_bank_traffic_on_error(client, title):
                 yield error_log
             finally:
                 fints_logger.removeHandler(recorder)
-    except TanInteractionRequired:
+    except (TanInteractionRequired, FetchFailed):
         raise
     except Exception:
         error_log.bank_errors = recorder.bank_errors
@@ -144,6 +152,72 @@ def log_bank_traffic_on_error(client, title):
         raise
     finally:
         response_hooks.remove(keep_http_error)
+
+
+def bank_refusal_message(intro, error_log, extra_hints=None):
+    """The bank's 9xxx reasons, what the user can do about them and a link to the Error Log.
+
+    :param intro: Translated sentence the reasons follow
+    :param error_log: What log_bank_traffic_on_error yielded
+    :param extra_hints: Hints for codes that depend on the request, by code
+    """
+    message = intro + "<br>" + "<br>".join(
+        "{0}: {1}".format(code, frappe.utils.escape_html(text))
+        for code, text in error_log.bank_errors
+    )
+    hints = {**bank_error_hints(), **(extra_hints or {})}
+    for hint in dict.fromkeys(hints[code] for code, _text in error_log.bank_errors if code in hints):
+        message += "<br><br>" + hint
+    if error_log.name:
+        message += error_log_link(error_log.name)
+    return message
+
+
+def error_log_link(error_log_name):
+    # relative link: get_link_to_form uses the site's host_name, which
+    # can differ from the address the user opened the site with
+    return "<br><br>" + _("The bank traffic was saved in the {0}.").format(
+        '<a href="/app/error-log/{0}">{1}</a>'.format(error_log_name, _("Error Log"))
+    )
+
+
+def fetch_fints_transactions(client, account, start_date, end_date):
+    """Fetch transactions and turn the bank's refusals into clear messages.
+
+    Used by both controllers.
+
+    :return: Transactions as json object list
+    """
+    error_log = frappe._dict()
+    try:
+        with log_bank_traffic_on_error(client, _("Kefiya: Could not fetch transactions")) as error_log, client:
+            try:
+                transactions = client.get_transactions(account, start_date, end_date)
+            except FinTSSCARequiredError:
+                throw_fetch_tan_required()
+            if isinstance(transactions, NeedTANResponse):
+                throw_fetch_tan_required()
+            return json.loads(
+                json.dumps(transactions, cls=mt940.JSONEncoder)
+            )
+    except FetchFailed:
+        raise
+    except Exception:
+        if not error_log.bank_errors:
+            raise
+        # fints reports any 9010 as "could not fetch BPD ... bank identifier",
+        # also when the login is fine and only this fetch is refused
+        frappe.throw(
+            bank_refusal_message(
+                _("Your bank refused to send the transactions:"),
+                error_log,
+                {"9010": _(
+                    "If the From Date is more than 90 days ago, choose a later one."
+                )},
+            ),
+            exc=FetchRefused,
+            title=_("Bank Refused Request"),
+        )
 
 
 def bank_error_hints():
@@ -424,21 +498,11 @@ class FinTSController:
             if error_log.bank_errors:
                 # e.g. DKB ends the dialog with 9800 and says why (9040: chipTAN
                 # resync needed); fints goes on anyway and only gets HTTP 400 back
-                message = _("Your bank refused to load the accounts:<br>{0}").format("<br>".join(
-                    "{0}: {1}".format(code, frappe.utils.escape_html(text))
-                    for code, text in error_log.bank_errors
-                ))
-                hints = bank_error_hints()
-                for hint in dict.fromkeys(hints[code] for code, _text in error_log.bank_errors if code in hints):
-                    message += "<br><br>" + hint
+                message = bank_refusal_message(_("Your bank refused to load the accounts:"), error_log)
             else:
                 message = _("Could not load sepa accounts with error:<br>{0}").format(e)
-            if error_log.name:
-                # relative link: get_link_to_form uses the site's host_name, which
-                # can differ from the address the user opened the site with
-                message += "<br><br>" + _("The bank traffic was saved in the {0}.").format(
-                    '<a href="/app/error-log/{0}">{1}</a>'.format(error_log.name, _("Error Log"))
-                )
+                if error_log.name:
+                    message += error_log_link(error_log.name)
             frappe.throw(message)
 
         return False
@@ -538,22 +602,11 @@ class FinTSController:
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
 
-        with self.fints_connection:
-            account = self.get_fints_account_by_iban(
-                self.kefiya_login.account_iban)
-            try:
-                transactions = self.fints_connection.get_transactions(
-                    account,
-                    start_date,
-                    end_date
-                )
-            except FinTSSCARequiredError:
-                throw_fetch_tan_required()
-            if isinstance(transactions, NeedTANResponse):
-                throw_fetch_tan_required()
-            return json.loads(
-                json.dumps(transactions, cls=mt940.JSONEncoder)
-            )
+        account = self.get_fints_account_by_iban(
+            self.kefiya_login.account_iban)
+        return fetch_fints_transactions(
+            self.fints_connection, account, start_date, end_date
+        )
 
     def import_fints_transactions(self, kefiya_import):
         """Create payment entries by FinTS transactions.
@@ -622,7 +675,7 @@ class FinTSController:
                 "payments": new_bank_transactions,
                 # "assignment": auto_assignment
             }
-        except FetchTanRequired:
+        except FetchFailed:
             # Already a clear message for the user; don't wrap it
             raise
         except Exception as e:
