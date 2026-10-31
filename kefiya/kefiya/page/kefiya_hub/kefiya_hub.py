@@ -103,6 +103,11 @@ def get_recent_imports(company=None):
     for d in fints:
         d.source = "FinTS"
 
+    # Only System Managers may read statement imports; everyone else still
+    # gets the page, just without them
+    if not frappe.has_permission("Kefiya Bank Statement Import", "read"):
+        return fints
+
     statement_filters = {"company": company} if company else {}
     statements = frappe.get_list(
         "Kefiya Bank Statement Import",
