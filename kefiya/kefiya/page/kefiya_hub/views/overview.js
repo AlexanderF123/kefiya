@@ -22,55 +22,18 @@ kefiya.hub.register_view(
 	}
 
 	actions(page, hub) {
-		page.set_primary_action(__("Import now"), () => this.import_dialog(), "download");
+		page.set_primary_action(__("Import now"), () => kefiya.hub.views.imports.import_dialog(hub), "download");
 	}
 
 	bind($container, hub) {
 		$container.on("click", "[data-import]", (e) => {
 			e.preventDefault();
-			this.import_dialog($(e.currentTarget).attr("data-import"));
+			kefiya.hub.views.imports.import_dialog(hub, $(e.currentTarget).attr("data-import"));
 		});
 		$container.on("click", "[data-step]", (e) => {
 			const target = $container.find(`#kefiya-step-${$(e.currentTarget).attr("data-step")}`);
 			target[0] && target[0].scrollIntoView({ behavior: "smooth", block: "start" });
 		});
-	}
-
-	import_dialog(kefiya_login) {
-		const dialog = new frappe.ui.Dialog({
-			title: __("Import bank transactions"),
-			fields: [
-				{
-					fieldname: "kefiya_login",
-					label: __("Kefiya Login"),
-					fieldtype: "Link",
-					options: "Kefiya Login",
-					reqd: 1,
-					default: kefiya_login,
-				},
-				{ fieldtype: "Column Break" },
-				{
-					fieldname: "from_date",
-					label: __("From Date"),
-					fieldtype: "Date",
-					default: frappe.datetime.add_days(frappe.datetime.get_today(), -7),
-				},
-				{
-					fieldname: "to_date",
-					label: __("To Date"),
-					fieldtype: "Date",
-					default: frappe.datetime.get_today(),
-				},
-			],
-			primary_action_label: __("Continue"),
-			primary_action: (values) => {
-				dialog.hide();
-				// Until the Import view (#54) runs imports in the hub, the
-				// Kefiya Import form does, which handles TAN challenges
-				frappe.new_doc("Kefiya Import", values);
-			},
-		});
-		dialog.show();
 	}
 
 	render($container, hub) {

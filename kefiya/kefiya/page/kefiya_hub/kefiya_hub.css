@@ -280,3 +280,11 @@
 	background: var(--bg-red);
 	color: var(--text-on-red);
 }
+
+.kefiya-import-row {
+	cursor: pointer;
+}
+
+.kefiya-import-row:hover {
+	background: var(--subtle-fg);
+}
