@@ -35,6 +35,12 @@ kefiya.show_import_plan = function (plan) {
 	const unmatched = Object.keys(plan.unmatched || {}).map((k) =>
 		`${esc(k)} (${plan.unmatched[k]})`).join(", ");
 
+	// Only what the file actually produced: a CSV knows nothing of pending
+	// entries or currencies, and a row of zeros says nothing.
+	const counted = (label, value) => value
+		? `<li>${label}: <b>${value}</b></li>` : "";
+	const sameFile = (plan.same_file_imported_as || []).map(esc).join(", ");
+
 	frappe.msgprint({
 		title: __("Dry run — nothing was written"),
 		indicator: (plan.would_create || plan.created) ? "blue" : "orange",
@@ -45,7 +51,12 @@ kefiya.show_import_plan = function (plan) {
 				<li>${__("New")}: <b>${plan.would_create || plan.created || 0}</b></li>
 				<li>${__("Already present")}: <b>${plan.duplicates}</b></li>
 				<li>${__("Unreadable")}: <b>${plan.unreadable || 0}</b></li>
+				${counted(__("Other currency than the bank account"), plan.currency_mismatch)}
+				${counted(__("Not yet booked by the bank (pending)"), plan.pending)}
+				${counted(__("Repeated within the file"), plan.repeated)}
+				${counted(__("Account without IBAN, not assignable"), plan.unaddressable)}
 			</ul>
+			${sameFile ? `<p class="text-warning">${__("This exact file was already imported")}: ${sameFile}</p>` : ""}
 			${unmatched ? `<p class="text-muted">${__("Unknown accounts")}: ${unmatched}</p>` : ""}
 			<table class="table table-bordered">
 				<thead><tr><th>${__("Bank Account")}</th>
