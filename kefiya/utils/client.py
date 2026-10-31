@@ -63,11 +63,16 @@ def get_accounts(kefiya_login, user_scope):
         # the bank logo if the login has none yet.
         frappe.get_doc("Kefiya Login", kefiya_login).fetch_bank_logo_if_missing()
         return {"accounts": accounts}
-    except Exception:
-        # In TAN mode this can be TanInteractionRequired – handled via socket.
-        # For legacy mode we re-raise to not hide real errors.
-        if not _use_tan_authentication(kefiya_login):
-            raise
+    except Exception as e:
+        # In TAN mode the bank may ask for a TAN: the prompt goes out by
+        # socket, so the call ends without accounts. Every other error is
+        # raised, so the caller can count the failed connection.
+        if _use_tan_authentication(kefiya_login):
+            from kefiya.utils.fints_controller import TanInteractionRequired
+
+            if isinstance(e, TanInteractionRequired):
+                return None
+        raise
 
 
 @frappe.whitelist()

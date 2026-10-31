@@ -4,7 +4,6 @@
 // Views that the next children of #41 build into the hub. Until then each one
 // says so and opens the existing form or page.
 [
-	["connect", __("Bank logins"), 53, ["List", "Kefiya Login"]],
 	["bank_account_wizard", __("Bank Account Wizard"), 56, ["bank_account_wizard"]],
 	["imports", __("Imports"), 54, ["List", "Kefiya Import"]],
 	["schedule", __("Schedule"), 55, ["Form", "Kefiya Schedule"]],
