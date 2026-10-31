@@ -54,13 +54,14 @@ kefiya.interactive = {
 
 	/**
 	 * After the bank accepted the TAN, carry on with what the user started,
-	 * so they don't have to click it again. The server's own "reload" comes
-	 * by socket and usually arrives after the request has ended, when it is
-	 * ignored.
+	 * so they don't have to click it again: on Kefiya Login, offer the
+	 * accounts that were loaded with the TAN. (The server's own "reload"
+	 * comes by socket and usually arrives after the request has ended, when
+	 * it is ignored.)
 	 */
-	continue_after_tan: function(frm) {
-		if (frm.doctype === "Kefiya Login") {
-			frm.events.call_get_login_accounts(frm);
+	continue_after_tan: function(frm, result) {
+		if (frm.doctype === "Kefiya Login" && result.accounts) {
+			frm.events.choose_account(frm, result.accounts);
 		}
 	},
 
@@ -261,7 +262,7 @@ kefiya.interactive = {
 					}).then((r) => {
 						// after "always", so the next request's progress isn't cut off
 						if (r && r.message && r.message.tan_resolved) {
-							kefiya.interactive.continue_after_tan(frm);
+							kefiya.interactive.continue_after_tan(frm, r.message);
 						}
 					});
 				},

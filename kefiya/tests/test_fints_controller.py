@@ -245,7 +245,7 @@ class TestTanChallenge(FrappeTestCase):
 
 
 class TestResolveTanInteraction(FrappeTestCase):
-    """The form loads the accounts again once the TAN is resolved."""
+    """The form offers the accounts once the TAN is resolved."""
 
     def resolve(self, controller):
         from kefiya.utils import client
@@ -256,8 +256,13 @@ class TestResolveTanInteraction(FrappeTestCase):
                 "DKB phamos", {"mfa_confirmation": 1, "tan": "123456"}
             )
 
-    def test_accepted_tan_is_reported(self):
-        self.assertEqual(self.resolve(MagicMock()), {"tan_resolved": True})
+    def test_accepted_tan_returns_the_accounts(self):
+        controller = MagicMock()
+        controller.return_value.get_fints_accounts.return_value = [{"iban": "DE02120300000000202051"}]
+        self.assertEqual(
+            self.resolve(controller),
+            {"tan_resolved": True, "accounts": [{"iban": "DE02120300000000202051"}]},
+        )
 
     def test_further_interaction_is_reported(self):
         controller = MagicMock(side_effect=fints_controller.TanInteractionRequired())
