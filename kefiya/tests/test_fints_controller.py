@@ -85,6 +85,12 @@ class TestLegacyTanAuthenticationRequired(FrappeTestCase):
         with self.assertRaises(TanAuthenticationRequired):
             self.get_accounts(FinTSSCARequiredError("SCA required"))
 
+    def test_tan_at_dialog_start_points_to_settings(self):
+        controller = make_controller(fints_controller_legacy.FinTSController)
+        controller.fints_connection.init_tan_response = MagicMock(spec=NeedTANResponse)
+        with self.assertRaises(TanAuthenticationRequired):
+            controller._FinTSController__init_tan_processing()
+
     def test_other_errors_keep_the_bank_message(self):
         with self.assertRaises(frappe.ValidationError) as ctx:
             self.get_accounts(Exception("code='9942' PIN falsch"))
