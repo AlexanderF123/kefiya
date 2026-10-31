@@ -293,6 +293,9 @@ msgstr "{0} bei der Bank hinterlegt"
 msgid "cycle not yet verified"
 msgstr "Turnus noch nicht bestätigt"
 
+msgid "{0} without a readable cycle"
+msgstr "{0} ohne lesbaren Turnus"
+
 msgid "Transfer"
 msgstr "Überweisung"
 
