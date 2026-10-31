@@ -190,135 +190,24 @@ kefiya.interactive = {
 				kefiya.progress.hide();
 			});
 
-			let fields = [];
-
-			if (data.possible_tan_modes) {
-				fields.push(
-					{
-						fieldtype: "Select",
-						fieldname: "tan_mode",
-						label: __("TAN Mode"),
-						options: data.possible_tan_modes,
-						reqd: 1,
-					},
-				);
-
-				if (data.possible_tan_mediums) {
-					// if mediums are available for the selected mode, keep previously selected mode read-only
-					fields[0].default = data.possible_tan_modes[0];
-					fields[0].read_only = 1;
-
-					fields.push(
-						{
-							fieldtype: "Select",
-							fieldname: "tan_medium",
-							label: __("TAN Medium"),
-							options: data.possible_tan_mediums,
-							reqd: 1,
-						},
-					);
-				}
-			}
-
-			// TAN Mode selection
-			if (data.tan_required || data.mfa_required) {
-				if (data.possible_tan_modes && !fields[0].default) {
-					fields[0].default = data.possible_tan_modes[0];
-					fields[0].read_only = 1;
-				}
-
-				// if we're on confirmation already, keep previously selected mode read-only
-				if (data.possible_tan_mediums) {
-					const disableIdx = data.possible_tan_mediums ? 1 : 0;
-					fields[disableIdx].default = data.possible_tan_mediums[disableIdx];
-					fields[disableIdx].read_only = 1;
-				}
-
-				// User Interaction requirement for 2FA
-				fields.push(
-					{
-						fieldtype: "Check",
-						fieldname: "mfa_confirmation",
-						label: __("Confirm MFA"),
-						default: 1,
-						hidden: 1,
-					},
-				);
-
-				// The bank's instructions and, for chipTAN QR or photoTAN, the code
-				// to scan -- rendered by tan_prompt.js, which escapes the bank's text.
-				const challenge_field = data.challenge && kefiya.tan_challenge_field
-					? kefiya.tan_challenge_field(data)
-					: null;
-				if (challenge_field) {
-					fields.push(challenge_field);
-				}
-
-				if (data.tan_required) {
-					fields.push(
-						{
-							fieldtype: "Data",
-							fieldname: "tan",
-							label: __("TAN"),
-							reqd: 1,
-						},
-					);
-				} else if (data.mfa_required) {
-					fields.push(
-						{
-							fieldtype: "HTML",
-							fieldname: "waiting",
-							label: __("Waiting for Interaction"),
-							options: __("Follow the instructions on your banking app or device."),
-						},
-					);
-				}
-			}
-
-			// Prepended only now: everything above addresses the fields by
-			// index (fields[0] is the mode, fields[1] the medium), so an entry
-			// inserted ahead of them earlier would silently make the wrong
-			// field read-only.
-			if (data.account_detail) {
-				fields.unshift({
-					fieldtype: "HTML",
-					fieldname: "kefiya_tan_context",
-					options: '<div class="text-muted small" style="margin-bottom:8px">'
-						+ frappe.utils.escape_html(data.account_detail)
-						+ "</div>",
+			// The one TAN box (tan_prompt.js): mode and medium, the bank's
+			// challenge, the account it is for, TAN or app confirmation. It
+			// used to be built here a second time, field by field, and the two
+			// drifted -- this one named no account and showed no challenge.
+			kefiya.tan_prompt(data, (ok, message) => {
+				// after finish_progress, so the next request's progress
+				// isn't cut off
+				kefiya.interactive.finish_progress(frm).then(() => {
+					if (ok && message && message.status === "submitted") {
+						kefiya.interactive.continue_after_tan(frm, message);
+					}
 				});
-			}
-
-			const dialog = frappe.prompt(
-				fields,
-				(values) => {
-					kefiya.interactive.start_progress(frm);
-					// the server doesn't need the challenge (and its image) back
-					const { challenge, ...context } = data;
-					frappe.call({
-						method: "kefiya.utils.client.resolve_tan_interaction",
-						args: {
-							// The login the run belongs to, which is this form only
-							// on the Kefiya Login screen. A transfer's box used to
-							// answer against its own KEF-TRF-... name.
-							fints_login: data.fints_login || frm.doc.name,
-							values: { ...context, ...values },
-						},
-						always: () => kefiya.interactive.finish_progress(frm),
-					}).then((r) => {
-						// after "always", so the next request's progress isn't cut off
-						if (r && r.message && r.message.status === "submitted") {
-							kefiya.interactive.continue_after_tan(frm, r.message);
-						}
-					});
-				},
-				title
-			);
-
-			// Straight into the TAN field: the mode and the medium above it
-			// are read-only, so the only thing to do here is type. The rule
-			// itself lives in bank_refresh.js, which owns the other TAN box.
-			if (kefiya.focus_tan_field) kefiya.focus_tan_field(dialog);
+			}, {
+				// Nothing reports a release to a form; the box is how the
+				// user says it is given.
+				confirm_here: true,
+				before_answer: () => kefiya.interactive.start_progress(frm),
+			});
 		});
 	},
 }

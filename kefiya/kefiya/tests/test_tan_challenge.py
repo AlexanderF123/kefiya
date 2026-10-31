@@ -187,13 +187,13 @@ class TestTheCursorStartsInTheTanField(unittest.TestCase):
         # both. The statement is the only form that ends in a semicolon.
         self.assertIn("focusTanField(dialog);", self._js("tan_prompt.js"))
 
-    def test_the_form_box_asks_the_same_helper(self):
+    def test_the_form_box_is_the_same_box(self):
         # Not a second copy: these two boxes have drifted apart once already,
-        # which is why the rest of this file exists.
-        self.assertIn("kefiya.focus_tan_field(dialog)",
-                      self._js("fints_interactive.js"))
-        self.assertIn("kefiya.focus_tan_field = focusTanField",
-                      self._js("tan_prompt.js"))
+        # which is why the rest of this file exists. The form now opens
+        # tan_prompt itself, so the focus rule comes with it.
+        source = self._js("fints_interactive.js")
+        self.assertIn("kefiya.tan_prompt(data,", source)
+        self.assertNotIn("frappe.prompt(", source)
 
     def test_the_focus_waits_for_the_dialog_to_be_shown(self):
         # frappe.prompt returns before Bootstrap has finished showing the

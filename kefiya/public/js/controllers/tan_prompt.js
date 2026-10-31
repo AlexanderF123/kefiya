@@ -5,15 +5,21 @@
 //
 //   kefiya.tan_prompt(data, done, opts)
 //                                     data is the fints_tan_interaction_required
-//                                     payload; done fires once the answer is in;
+//                                     payload; done(ok, message) fires once the
+//                                     answer is in, message being the server's;
 //                                     opts.transfer = {login, names} answers a
-//                                     transfer's TAN for exactly those orders
+//                                     transfer's TAN for exactly those orders;
+//                                     opts.before_answer() runs as the answer
+//                                     goes out; opts.confirm_here: nothing
+//                                     closes the decoupled box by itself, the
+//                                     user confirms it here
 //   kefiya.focus_tan_field(dialog)    the focus rule on its own, for a caller
 //                                     that builds its own box
 //
-// Its own file because it has three callers -- the collective fetch, the
-// outgoing payments, and the Kefiya Login form -- and no share in what any of
-// them is doing otherwise. It sat in bank_refresh.js for historical reasons
+// Its own file because every box that asks for a TAN is this one -- the
+// collective fetch, the outgoing payments, the forms (fints_interactive.js)
+// and the Kefiya page (kefiya_hub/fints_session.js) -- and it has no share in
+// what any of them is doing otherwise. It sat in bank_refresh.js for historical reasons
 // while already being exported from it, which is the definition of the wrong
 // home.
 //
@@ -188,12 +194,19 @@ frappe.provide("kefiya");
                 fields.push({ fieldtype: "Data", fieldname: "tan",
                     label: __("TAN"), reqd: 1 });
             } else if (data.mfa_required) {
+                // Only the collective fetch and the outgoing payments learn
+                // of a release by themselves and close the box. Everywhere
+                // else the box IS the "I have confirmed" -- telling the user
+                // to press nothing there would leave them waiting forever.
                 fields.push({ fieldtype: "HTML", fieldname: "waiting",
                     label: __("Waiting for Interaction"),
-                    options: __("Confirm the release in your banking app."
-                        + " This box closes by itself once the bank reports"
-                        + " the release; you do not need to press anything"
-                        + " here.") });
+                    options: opts && opts.confirm_here
+                        ? __("Confirm the release in your banking app, then"
+                            + " press Submit here.")
+                        : __("Confirm the release in your banking app."
+                            + " This box closes by itself once the bank reports"
+                            + " the release; you do not need to press anything"
+                            + " here.") });
             }
         }
         // Prepended only now: everything above addresses the fields by index
@@ -218,11 +231,16 @@ frappe.provide("kefiya");
                 answerTransferTan(transfer, values.tan, done);
                 return;
             }
+            if (opts && opts.before_answer) opts.before_answer();
+            // The challenge stays here: the server does not need its own
+            // picture back.
+            var answer = Object.assign({}, data, values);
+            delete answer.challenge;
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
                 method: "kefiya.utils.client.resolve_tan_interaction",
                 args: { fints_login: data.fints_login || data.docname,
-                        values: Object.assign({}, data, values) },
+                        values: answer },
                 silent: true,
                 // done(ok). The flag is the whole point: it used to fire the
                 // same way whether the release went through or not, and the
@@ -230,7 +248,10 @@ frappe.provide("kefiya");
                 // then started a fetch, the bank asked again, the box came
                 // back, and the user confirmed their way around that circle
                 // for as long as they were willing to.
-                callback: function () { if (done) done(true); },
+                //
+                // The message rides along: {status, accounts} -- a form that
+                // loaded accounts with this TAN offers them right away.
+                callback: function (r) { if (done) done(true, r && r.message); },
                 error: function (r) {
                     frappe.show_alert({
                         message: __("TAN release failed.") + " "
@@ -345,9 +366,4 @@ frappe.provide("kefiya");
     // (it has the form's docname where this one has a login from a run) and
     // takes the focus rule from here rather than carrying a copy.
     kefiya.focus_tan_field = focusTanField;
-    // The bank's challenge as a dialog field, for every box that asks for a
-    // TAN -- the forms' own prompt (fints_interactive.js) and the Kefiya
-    // page's (kefiya_hub/fints_session.js) included. One renderer, so the
-    // bank's text is escaped the same way everywhere.
-    kefiya.tan_challenge_field = tanChallengeField;
 })();
