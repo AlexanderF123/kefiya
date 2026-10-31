@@ -136,6 +136,15 @@ frappe.provide("kefiya");
             var o = x.standing_orders;
             if (!o) return null;
             var txt = __("{0} held by the bank", [o.count || 0]);
+            if (o.count) {
+                txt += " · " + __("{0} new, {1} unchanged, {2} cancelled",
+                                  [o.created || 0, o.updated || 0,
+                                   o.cancelled || 0]);
+            }
+            if (o.skipped) {
+                txt += " · " + __("{0} without a readable cycle",
+                                  [o.skipped]);
+            }
             if (o.count && !o.schedule_confirmed) {
                 txt += " · " + __("cycle not yet verified");
             }

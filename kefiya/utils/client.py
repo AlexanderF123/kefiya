@@ -746,17 +746,31 @@ def fetch_all(kefiya_login, user_scope=None):
             summary, "scheduled_transfers", "scheduled_transfers",
             _fetch_scheduled_transfers)
 
+        # 3c) The standing orders the bank holds (HKCDB) -> forecast table,
+        #     one row per execution in the coming month. The schedule is read
+        #     by shape and still unconfirmed against a real answer; the raw
+        #     group stays on each order, and the bank's answer is written
+        #     down on the login (standing_order_evidence).
         def _fetch_standing_orders():
+            from kefiya.utils import bank_held_orders
+            from kefiya.utils.planned_payment import refresh_planned_payments
+
             rows = _to_jsonable(
                 FetchCtl(kefiya_login).get_fints_standing_orders())
             rows = rows if isinstance(rows, list) else []
-            return {
+            norm = bank_held_orders.items_from(rows, now_datetime().date())
+            result = refresh_planned_payments(
+                kefiya_login, norm["items"],
+                payment_kinds=(bank_held_orders.KIND,))
+            result.update({
                 "count": len(rows),
+                "skipped": norm["skipped"],
                 "orders": rows,
                 # Until the schedule's field order is confirmed against real
                 # orders, say so rather than let a number imply certainty.
                 "schedule_confirmed": False,
-            }
+            })
+            return result
 
         # Standing orders are a different business transaction from the
         # scheduled debits above, and were never asked for at all.

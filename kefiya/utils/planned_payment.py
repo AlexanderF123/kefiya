@@ -109,13 +109,47 @@ def expand_standing_order_occurrences(next_date, frequency):
     return occurrences
 
 
+def _is_blank(value):
+    """None, or an empty string or list.
+
+    Not ``value in (None, "", [])``: that compares with ``==``, and the
+    Amount of an MT940 entry answers ``== None`` with an AttributeError.
+    On 31.10.2026 that ended the pending-entry fetch at every account.
+    """
+    if value is None:
+        return True
+    if isinstance(value, (str, list, tuple, dict)):
+        return not value
+    return False
+
+
 def _first(mapping, keys):
     """Return the first non-empty value among ``keys`` in ``mapping``."""
     for k in keys:
         v = mapping.get(k)
-        if v not in (None, "", []):
+        if not _is_blank(v):
             return v
     return None
+
+
+def _number(value):
+    """A signed float out of a bare number, a string, a dict or an MT940
+    Amount object; None when there is none."""
+    if isinstance(value, dict):
+        value = _first(value, ["amount", "value"])
+    elif not _is_blank(value) and not isinstance(value, (int, float, str)) \
+            and hasattr(value, "amount"):
+        # mt940.models.Amount: the number sits in .amount, as a Decimal.
+        value = value.amount
+    if _is_blank(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        try:
+            return float(str(value).replace(",", "."))
+        except (TypeError, ValueError):
+            return None
 
 
 def _coerce_amount(value):
@@ -125,14 +159,8 @@ def _coerce_amount(value):
     ``{"amount": .., "currency": ..}`` object. Returns ``None`` if nothing
     numeric can be found (the item is then skipped rather than guessed).
     """
-    if isinstance(value, dict):
-        value = _first(value, ["amount", "value"])
-    if value in (None, ""):
-        return None
-    try:
-        return abs(flt(value))
-    except Exception:
-        return None
+    number = _number(value)
+    return None if number is None else abs(number)
 
 
 def normalize_scheduled_debits(raw_items):
@@ -316,10 +344,10 @@ def _pending_direction(entry, raw_amount):
         if token.startswith("C"):
             return "Incoming"
 
-    try:
-        return "Outgoing" if flt(raw_amount) < 0 else "Incoming"
-    except Exception:
+    number = _number(raw_amount)
+    if number is None:
         return "Outgoing"
+    return "Outgoing" if number < 0 else "Incoming"
 
 
 def refresh_planned_payments(kefiya_login, items, payment_kinds=None):
