@@ -175,24 +175,37 @@ class TestEveryPromptShowsIt(unittest.TestCase):
                 "{0} still opens a nameless dialog.".format(name))
 
     def test_the_context_is_prepended_after_the_fields_are_built(self):
-        """Both prompts address their fields by index -- fields[0] is the TAN
+        """The prompt addresses its fields by index -- fields[0] is the TAN
         mode, fields[1] the medium. An entry inserted before they are built
         would make the wrong field read-only."""
-        for name in ("tan_prompt.js", "fints_interactive.js"):
-            source = self._js(name)
-            self.assertIn(
-                "unshift", source,
-                "{0} must prepend the context, not push it first.".format(name))
-            self.assertLess(
-                source.index("fields[0]"), source.index("unshift"),
-                "{0} indexes fields before the context is prepended; "
-                "prepending earlier shifts every index by one.".format(name))
+        source = self._js("tan_prompt.js")
+        self.assertIn("unshift", source,
+                      "The context must be prepended, not pushed first.")
+        self.assertLess(
+            source.index("fields[0]"), source.index("unshift"),
+            "Fields are indexed before the context is prepended; "
+            "prepending earlier shifts every index by one.")
 
     def test_the_account_is_escaped_before_it_reaches_the_dom(self):
         """An account name is user-supplied text going into innerHTML."""
-        for name in ("tan_prompt.js", "fints_interactive.js"):
-            source = self._js(name)
-            self.assertIn("frappe.utils.escape_html", source, name)
+        self.assertIn("frappe.utils.escape_html", self._js("tan_prompt.js"))
+
+    def test_there_is_one_box(self):
+        """The form and the Kefiya page used to build the box a second and
+        a third time, field by field, and the copies drifted -- one named no
+        account, one showed no challenge. Both open tan_prompt now."""
+        import os
+        hub = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "page", "kefiya_hub", "fints_session.js")
+        with open(hub, encoding="utf-8") as handle:
+            hub_source = handle.read()
+        for name, source in (("fints_interactive.js",
+                              self._js("fints_interactive.js")),
+                             ("kefiya_hub/fints_session.js", hub_source)):
+            self.assertIn("kefiya.tan_prompt(data,", source, name)
+            self.assertNotIn("frappe.prompt(", source, name)
+            self.assertNotIn('fieldname: "tan"', source, name)
 
 
 class TestThePayloadIsBuiltOnce(unittest.TestCase):

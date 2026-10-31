@@ -41,10 +41,11 @@ class TestTheTransferFormAnswersForTheOrder(unittest.TestCase):
         self.assertIn("transfer: {", branch)
         self.assertIn("names: [frm.doc.name]", branch)
 
-    def test_it_branches_off_before_the_forms_own_box(self):
+    def test_it_branches_off_before_the_logins_answer(self):
+        """The box below answers for the login (resolve_tan_interaction)."""
         source = _js("fints_interactive.js")
         self.assertLess(source.index('frm.doctype === "Kefiya Transfer"'),
-                        source.index("frappe.prompt("))
+                        source.index("confirm_here: true"))
 
 
 class TestTheBoxNeverResolvesATransfer(unittest.TestCase):

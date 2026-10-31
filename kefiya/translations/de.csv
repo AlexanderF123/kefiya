@@ -499,6 +499,7 @@ Invalid Dates,Ungültige Datumsangaben
 Bank logo lookup failed for {0},Bank-Logo für {0} konnte nicht ermittelt werden
 "Ask for a TAN, e.g. a confirmation in the banking app, when the bank needs one to load accounts or transactions. Most banks need this since PSD2. Untick it only for a bank that works with the PIN alone.","Eine TAN anfordern, z. B. eine Bestätigung in der Banking-App, wenn die Bank sie zum Laden von Konten oder Umsätzen verlangt. Die meisten Banken brauchen das seit PSD2. Nur bei einer Bank abwählen, die mit der PIN allein auskommt."
 Bank Logo,Bank-Logo
+"Confirm the release in your banking app, then press Submit here.","Bestätigen Sie die Freigabe in Ihrer Banking-App und klicken Sie dann hier auf Absenden."
 "The bank has not reported the release yet. The order is still marked as not sent.","Die Bank hat die Freigabe noch nicht gemeldet. Der Auftrag gilt weiter als nicht gesendet."
 "Waiting for the bank to report the release. This page carries on by itself.","Warte darauf, dass die Bank die Freigabe meldet. Diese Seite macht von selbst weiter."
 "These lines could not be read and were skipped: {0}","Diese Zeilen konnten nicht gelesen werden und wurden übersprungen: {0}"
