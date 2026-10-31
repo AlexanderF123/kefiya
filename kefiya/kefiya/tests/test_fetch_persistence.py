@@ -147,7 +147,7 @@ class TestPendingEntriesGoIntoTheForecast(unittest.TestCase):
 
     def test_the_kind_exists_on_the_doctype(self):
         options = frappe.get_meta("Kefiya Planned Payment") \
-            .get_field("payment_kind").options or ""
+            .get_field("source_kind").options or ""
         self.assertIn(planned_payment.PENDING_KIND, options.split("\n"))
 
     def test_booking_the_entry_clears_the_forecast_by_itself(self):
@@ -155,7 +155,7 @@ class TestPendingEntriesGoIntoTheForecast(unittest.TestCase):
         source = inspect.getsource(planned_payment.match_on_bank_transaction)
         self.assertIn('"status": "Open"', source)
         self.assertNotIn(
-            "payment_kind", source,
+            "source_kind", source,
             "The matcher must not exclude Pending records -- clearing them on "
             "the real booking is the reconciliation.",
         )
@@ -170,12 +170,15 @@ class TestPendingEntriesGoIntoTheForecast(unittest.TestCase):
         """refresh_planned_payments cancels whatever it was not told about."""
         source = inspect.getsource(client.fetch_all)
         self.assertEqual(
-            source.count("payment_kinds="), 2,
-            "Standing orders and pending entries are written in two separate "
-            "calls; unscoped, each would cancel what the other just wrote.",
+            source.count("payment_kinds="), 3,
+            "Pending entries, dated debits and dated transfers are written in"
+            " three separate calls; unscoped, each would cancel what the"
+            " others just wrote.",
         )
         sweep = inspect.getsource(planned_payment.refresh_planned_payments)
-        self.assertIn('sweep_filters["payment_kind"] = ("in"', sweep)
+        self.assertIn('sweep_filters["source_kind"] = ("in"', sweep)
+        self.assertIn('"from_bank": 1}', sweep,
+                      "A row somebody planned is not the bank's to cancel.")
 
 
 class TestPendingFetchIsSafe(unittest.TestCase):

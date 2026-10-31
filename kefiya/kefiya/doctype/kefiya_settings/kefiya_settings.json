@@ -25,7 +25,8 @@
   "outgoing_section",
   "default_send_mode",
   "self_approval_up_to",
-  "self_approval_roles"
+  "self_approval_roles",
+  "pause_standing_orders"
  ],
  "fields": [
   {
@@ -167,12 +168,19 @@
    "fieldtype": "Table MultiSelect",
    "label": "Roles that may approve alone",
    "options": "Kefiya Self Approval Role"
+  },
+  {
+   "default": "0",
+   "fieldname": "pause_standing_orders",
+   "fieldtype": "Check",
+   "label": "Pause Standing Orders",
+   "description": "Ticked: standing orders kept here (execution \"System\") place no transfers. Unticked, each one goes into the outgoing payments on its date, approved, for somebody to send with a TAN."
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-26 16:30:00.000000",
+ "modified": "2026-10-30 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya Settings",

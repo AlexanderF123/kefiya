@@ -167,6 +167,9 @@ scheduler_events = {
         # at all while the document service is switched off, which is its
         # state until someone configures one.
         "kefiya.utils.document_service.fetch_statements_scheduled",
+        # Standing orders kept here: their transfers go into the outgoing
+        # payments on their date, approved. Never sent from here.
+        "kefiya.utils.standing_order_execute.place_due_transfers",
     ]
 }
 

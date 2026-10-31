@@ -120,6 +120,59 @@ class HKCDB1(FinTS3Segment):
         type="an", max_length=35, required=False, _d="Aufsetzpunkt")
 
 
+class HKCSB1(FinTS3Segment):
+    """Bestand terminierter SEPA-Ueberweisungen anfordern, version 1
+
+    The dated transfers the bank already holds for the account -- what
+    StarMoney lists as "terminierte Ueberweisungen". kefiya asked only for the
+    dated DIRECT DEBITS (HKDBS), which a payer never has, so the forecast of
+    bank-held orders was empty at every bank.
+
+    Same shape as HKDBS1, which the library ships for the debit side:
+    account, supported pain messages, an optional date window, a page size
+    and a touchdown point.
+
+    Source: FinTS Financial Transaction Services, Schnittstellenspezifikation,
+    Messages -- Multibankfaehige Geschaeftsvorfaelle
+    """
+
+    account = DataElementGroupField(
+        type=KTI1, _d="Kontoverbindung international")
+    supported_sepa_pain_messages = DataElementGroupField(
+        type=SupportedSEPAPainMessages1, _d="Unterstuetzte SEPA pain messages")
+    date_start = DataElementField(type="dat", required=False, _d="Von Datum")
+    date_end = DataElementField(type="dat", required=False, _d="Bis Datum")
+    max_number_responses = DataElementField(
+        type="num", max_length=4, required=False,
+        _d="Maximale Anzahl Eintraege")
+    touchdown_point = DataElementField(
+        type="an", max_length=35, required=False, _d="Aufsetzpunkt")
+
+
+class HICSB1(FinTS3Segment):
+    """Bestand terminierter SEPA-Ueberweisungen rueckmelden, version 1
+
+    Declared, unlike HICDB: its shape is HIDBS1's, which the library ships,
+    and everything that matters -- amount, recipient, purpose, execution date
+    -- travels inside the pain message, where the schema fixes its place.
+
+    Source: FinTS Financial Transaction Services, Schnittstellenspezifikation,
+    Messages -- Multibankfaehige Geschaeftsvorfaelle
+    """
+
+    account = DataElementGroupField(
+        type=KTI1, _d="Kontoverbindung international")
+    sepa_descriptor = DataElementField(
+        type="an", max_length=256, _d="SEPA Descriptor")
+    sepa_pain_message = DataElementField(type="bin", _d="SEPA pain message")
+    task_id = DataElementField(
+        type="an", max_length=99, required=False, _d="Auftragsidentifikation")
+    task_cancelable = DataElementField(
+        type="jn", required=False, _d="Auftrag loeschbar")
+    task_changeable = DataElementField(
+        type="jn", required=False, _d="Auftrag aenderbar")
+
+
 # HICDB is deliberately NOT declared.
 #
 # The answer carries the standing order's schedule -- cycle, rhythm, day of

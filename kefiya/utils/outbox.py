@@ -152,11 +152,12 @@ def _receipt_counts(names, referenced):
 
 
 @frappe.whitelist()
-def outbox_data(q=None, show_sent=0):
+def outbox_data(q=None, show_sent=0, standing_only=0):
     """Everything the outgoing-payments page shows.
 
     :param q: free-text filter over recipient, IBAN, reference, amount
     :param show_sent: include orders already handed to the bank
+    :param standing_only: only orders placed by a standing order
     :return: {"today", "rows", "payers", "can"}
     """
     frappe.has_permission("Kefiya Transfer", ptype="read", throw=True)
@@ -167,6 +168,10 @@ def outbox_data(q=None, show_sent=0):
     filters = {"docstatus": ["<", 2]}
     if not show_sent:
         filters["status"] = ["!=", "Sent"]
+    standing_only = 1 if str(standing_only or "") in ("1", "true", "True") \
+        else 0
+    if standing_only:
+        filters["standing_order"] = ["is", "set"]
 
     # get_list, not get_all: somebody who may not see an order must not find
     # it again inside a total at the bottom of the page.
@@ -175,7 +180,8 @@ def outbox_data(q=None, show_sent=0):
         fields=["name", "kefiya_login", "company", "execution_date", "status",
                 "docstatus", "total_amount", "payment_count", "on_hold",
                 "instant_payment", "manage_due_date", "bank_reference",
-                "vop_pending", "owner", "modified", "creation"],
+                "vop_pending", "owner", "modified", "creation",
+                "standing_order"],
         order_by='docstatus asc, ifnull(execution_date, "2999-12-31") asc,'
                  " creation asc",
         limit_page_length=0)
@@ -241,6 +247,7 @@ def outbox_data(q=None, show_sent=0):
             "docstatus": row["docstatus"],
             "on_hold": frappe.utils.cint(row.get("on_hold")),
             "vop_pending": frappe.utils.cint(row.get("vop_pending")),
+            "standing_order": row.get("standing_order"),
             "bank_reference": row.get("bank_reference"),
             "total_amount": frappe.utils.flt(row.get("total_amount")),
             "payment_count": (frappe.utils.cint(row.get("payment_count"))
@@ -260,7 +267,8 @@ def outbox_data(q=None, show_sent=0):
         })
 
     return {
-        "today": today, "q": q, "show_sent": show_sent, "rows": out,
+        "today": today, "q": q, "show_sent": show_sent,
+        "standing_only": standing_only, "rows": out,
         "payers": transfer_sources(),
         # Which way the send dialog offers first when several orders are
         # selected. It asks either way -- a collective order is ONE order at
