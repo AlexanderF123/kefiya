@@ -10,9 +10,11 @@
   "login_name",
   "fints_url",
   "blz",
+  "bank_logo",
   "column_break_6",
   "fints_login",
   "fints_password",
+  "enable_tan_authentication",
   "product_id",
   "import_settings_section",
   "get_accounts",
@@ -95,6 +97,13 @@
    "in_list_view": 1,
    "label": "Password",
    "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Ask for a TAN, e.g. a confirmation in the banking app, when the bank needs one to load accounts or transactions. Most banks need this since PSD2. Untick it only for a bank that works with the PIN alone.",
+   "fieldname": "enable_tan_authentication",
+   "fieldtype": "Check",
+   "label": "Use TAN Authentication"
   },
   {
    "fieldname": "import_settings_section",
@@ -323,11 +332,18 @@
    "fieldname": "fetch_interval_days",
    "fieldtype": "Int",
    "label": "Fetch at most every n days"
+  },
+  {
+   "fieldname": "bank_logo",
+   "fieldtype": "Attach Image",
+   "hidden": 1,
+   "label": "Bank Logo"
   }
  ],
  "icon": "fa fa-university",
+ "image_field": "bank_logo",
  "links": [],
- "modified": "2024-10-25 14:32:19.056703",
+ "modified": "2026-10-31 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya Login",

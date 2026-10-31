@@ -18,14 +18,14 @@ from kefiya.utils import release_outcome
 from kefiya.utils import release_pacing
 
 
-def _use_tan_authentication() -> bool:
-    """Helper: check Kefiya Settings for TAN toggle."""
+def _use_tan_authentication(kefiya_login) -> bool:
+    """Helper: check the Kefiya Login's TAN toggle."""
     return bool(
-        frappe.db.get_single_value("Kefiya Settings", "enable_tan_authentication")
+        frappe.db.get_value("Kefiya Login", kefiya_login, "enable_tan_authentication")
     )
 
 
-def _fetch_session():
+def _fetch_session(kefiya_logins):
     """A shared FinTS dialog -- but only where every caller knows about it.
 
     With the TAN toggle off, the transaction import runs through the legacy
@@ -39,19 +39,25 @@ def _fetch_session():
     So the session is only entered when the whole fetch goes through the
     session-aware controller. In legacy mode every command opens and closes its
     own dialog, as it did before any of this existed.
+
+    The toggle is per Kefiya Login, so the session is entered only when every
+    login of the fetch has it on: one legacy login among them would open the
+    second dialog this guards against.
+
+    :param kefiya_logins: names of the logins the fetch will touch
     """
     import contextlib
 
     from kefiya.utils.fints_controller import fints_session
 
-    if not _use_tan_authentication():
+    if not all(_use_tan_authentication(name) for name in kefiya_logins):
         return contextlib.nullcontext()
     return fints_session()
 
 
-def _get_fints_controller():
+def _get_fints_controller(kefiya_login):
     """Return the appropriate FinTSController class depending on TAN toggle."""
-    if _use_tan_authentication():
+    if _use_tan_authentication(kefiya_login):
         from kefiya.utils.fints_controller import FinTSController
     else:
         from kefiya.utils.fints_controller_legacy import FinTSController
@@ -75,7 +81,7 @@ def import_fints_transactions(kefiya_import, kefiya_login, user_scope):
     # otherwise callable by any logged-in user.
     frappe.has_permission("Kefiya Login", ptype="write",
                           doc=kefiya_login, throw=True)
-    FinTSController = _get_fints_controller()
+    FinTSController = _get_fints_controller(kefiya_login)
     interactive = {"docname": user_scope, "enabled": True}
 
     return FinTSController(kefiya_login, interactive) \
@@ -94,7 +100,7 @@ def import_fints_holdings(kefiya_login, user_scope):
                           doc=kefiya_login, throw=True)
     from kefiya.utils.securities import refresh_holdings
 
-    FinTSController = _get_fints_controller()
+    FinTSController = _get_fints_controller(kefiya_login)
     interactive = {"docname": user_scope, "enabled": True}
 
     controller = FinTSController(kefiya_login, interactive)
@@ -268,7 +274,7 @@ def fetch_group(logins, user_scope=None, run=None):
     failed = {}
     held = None
 
-    with _fetch_session():
+    with _fetch_session(ordered):
         for name in ordered:
             # The bank is waiting for a release on an earlier account of this
             # same access, and the access holds ONE dialog: fetching on would
@@ -546,7 +552,7 @@ def fetch_all(kefiya_login, user_scope=None):
     # login. Inside the session they share a client and a standing dialog,
     # and a caller that wraps several logins of the same bank access (see
     # fetch_group) pays the handshake once for all of them.
-    with _fetch_session():
+    with _fetch_session([kefiya_login]):
         from frappe.utils import now_datetime
         from kefiya.utils.import_bank_transaction import resolve_incremental_from_date
 
@@ -1883,30 +1889,38 @@ def get_accounts(kefiya_login, user_scope):
     # Reading the bank's account list exposes account data of that login.
     frappe.has_permission("Kefiya Login", ptype="read",
                           doc=kefiya_login, throw=True)
-    FinTSController = _get_fints_controller()
+    FinTSController = _get_fints_controller(kefiya_login)
 
     interactive = {"docname": user_scope, "enabled": True}
 
     # New controller may raise TanInteractionRequired – we just ignore and let
     # the realtime handler + UI deal with it. Legacy controller won’t raise it.
     try:
-        return {
-            "accounts": FinTSController(
-                kefiya_login,
-                interactive
-            ).get_fints_accounts()
-        }
-    except Exception:
-        # In TAN mode this can be TanInteractionRequired – handled via socket.
-        # For legacy mode we re-raise to not hide real errors.
-        if not _use_tan_authentication():
-            raise
+        accounts = FinTSController(
+            kefiya_login,
+            interactive
+        ).get_fints_accounts()
+        # The bank answered, so its endpoint is right: a good moment to add
+        # the bank logo if the login has none yet.
+        frappe.get_doc("Kefiya Login", kefiya_login).fetch_bank_logo_if_missing()
+        return {"accounts": accounts}
+    except Exception as e:
+        # In TAN mode the bank may ask for a TAN: the prompt goes out by
+        # socket, so the call ends without accounts. Every other error is
+        # raised, so the caller can count the failed connection.
+        if _use_tan_authentication(kefiya_login):
+            from kefiya.utils.fints_controller import TanInteractionRequired
+
+            if isinstance(e, TanInteractionRequired):
+                return None
+        raise
 
 
 @frappe.whitelist()
-def is_tan_enabled():
+def is_tan_enabled(kefiya_login):
     """Small helper for JS if needed."""
-    return _use_tan_authentication()
+    frappe.has_permission("Kefiya Login", "read", kefiya_login, throw=True)
+    return _use_tan_authentication(kefiya_login)
 
 
 @frappe.whitelist()
@@ -2366,12 +2380,18 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
     """
     When a user was requested to perform a 2FA, this method is called as a callback
     to resolve the interaction. If TAN is disabled, this is effectively a no-op.
+
+    :return: {"status": "submitted", "accounts": [...]} once the bank
+        accepted the TAN and no further interaction is needed: the accounts
+        were loaded with it, so the form can offer them right away (None if
+        loading them failed). {"status": "tan_required"} while the bank needs
+        more. Both carry "docname", the login.
     """
     # Permission gate: this continues an authenticated bank dialog with a
     # user-supplied TAN, so it must require write rights on that login.
     frappe.has_permission("Kefiya Login", ptype="write",
                           doc=fints_login, throw=True)
-    if not _use_tan_authentication():
+    if not _use_tan_authentication(fints_login):
         # Old banks / legacy mode: nothing to resolve
         return
 
@@ -2390,14 +2410,30 @@ def resolve_tan_interaction(fints_login: str, values: str | dict):
     try:
         if values.get("mfa_confirmation"):
             # for tan generators, the TAN is permitted here (may also be empty for Mobile TAN 2.0)
-            FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium, tan=values.get("tan"))
+            controller = FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium, tan=values.get("tan"))
         else:
             # get index of tan_mode in possible_tan_modes
-            FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium)
+            controller = FinTSController(fints_login, {"docname": fints_login, "enabled": True}, tan_mode=tan_mode, tan_medium=tan_medium)
     except TanInteractionRequired:
         # will have triggered user interaction via socket -- or, on a
         # decoupled procedure, the bank has not seen the release yet. Said
         # so, rather than returning None for both outcomes: the box used to
         # take silence for success.
         return {"status": "tan_required", "docname": fints_login}
-    return {"status": "submitted", "docname": fints_login}
+
+    # The release went through. The login form offers the accounts right
+    # away, so they are loaded on the dialog the TAN just opened. Best effort:
+    # the release itself has succeeded, and a failure here must not make the
+    # prompt report a refused TAN -- a fetch run would then not resume.
+    accounts = None
+    try:
+        accounts = controller.get_fints_accounts()
+    except Exception:
+        frappe.log_error(
+            title="Kefiya: loading accounts after the TAN release failed",
+            message=frappe.get_traceback(),
+            reference_doctype="Kefiya Login",
+            reference_name=fints_login,
+        )
+    return {"status": "submitted", "docname": fints_login,
+            "accounts": accounts}

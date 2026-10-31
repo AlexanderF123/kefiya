@@ -381,7 +381,8 @@ def read_entries(file_url, bank_account=None):
 
     profile_name, columns, rows, header_index = formats.read_rows(text)
 
-    notes = {"header_row": header_index, "unreadable": 0, "unmatched": {}}
+    notes = {"header_row": header_index, "unreadable": 0, "unmatched": {},
+             "pending": 0}
     if not profile_name:
         return None, [], notes
 
@@ -389,6 +390,11 @@ def read_entries(file_url, bank_account=None):
     parsed = []
     for row in rows:
         if not any(str(cell).strip() for cell in row):
+            continue
+        # Not a booking yet: a pending card payment comes back as booked in
+        # a later export. Counted, so the summary says why rows are missing.
+        if not formats.is_booked(row, columns, profile):
+            notes["pending"] += 1
             continue
         entry = formats.to_entry(row, columns, profile)
         if entry is None:
