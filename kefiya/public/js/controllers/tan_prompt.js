@@ -32,6 +32,11 @@ frappe.provide("kefiya");
     // reason.
     var openBoxes = {};
 
+    // The logins whose decoupled release is being asked for right now, by
+    // awaitRelease. Its later requests are what marks the orders sent; the
+    // box must not answer the same parked challenge alongside them.
+    var awaitingRelease = {};
+
     function bindReleaseArrived() {
         if (kefiya._tan_release_realtime) return;
         kefiya._tan_release_realtime = true;
@@ -109,6 +114,7 @@ frappe.provide("kefiya");
     //
     // done(ok) fires once, true only for a release the bank accepted.
     function answerTransferTan(transfer, tan, done) {
+        var decoupled = !tan;
         frappe.call({
             method: "kefiya.utils.client.send_transfer_tan",
             args: { kefiya_login: transfer.login, tan: tan || "",
@@ -126,7 +132,10 @@ frappe.provide("kefiya");
                     if (done) done(true);
                 } else if (m.status === "tan_required") {
                     frappe.show_alert({
-                        message: __("The bank asks for another TAN."),
+                        message: decoupled
+                            ? __("The bank has not reported the release yet."
+                                + " The order is still marked as not sent.")
+                            : __("The bank asks for another TAN."),
                         indicator: "orange" }, 8);
                     if (done) done(false);
                 } else {
@@ -205,6 +214,25 @@ frappe.provide("kefiya");
             // send.
             if (transfer && data.tan_required) {
                 answerTransferTan(transfer, values.tan, done);
+                return;
+            }
+            // The same for a release in the banking app. Pressing the button
+            // here used to go to resolve_tan_interaction below: it collected
+            // the release from the bank and marked nothing, and the page's
+            // own polling (awaitRelease) then found nothing parked and said
+            // "Release failed" -- for an order the bank had executed, still
+            // marked as not sent, which is the state that invites a second
+            // send. While that polling runs it does the asking; otherwise
+            // the box asks once, through the path that marks the orders.
+            if (transfer && data.mfa_required) {
+                if (awaitingRelease[transfer.login]) {
+                    frappe.show_alert({
+                        message: __("Waiting for the bank to report the"
+                            + " release. This page carries on by itself."),
+                        indicator: "blue" }, 8);
+                    return;
+                }
+                answerTransferTan(transfer, "", done);
                 return;
             }
             // Explicit feedback, because the run mutes the standard error box.
@@ -297,10 +325,12 @@ frappe.provide("kefiya");
         var every = opts.every || 3000;
         var ceiling = opts.ceiling || 180000;
         var started = Date.now(), stopped = false;
+        awaitingRelease[login] = true;
 
         function finish(status, message) {
             if (stopped) return;
             stopped = true;
+            delete awaitingRelease[login];
             if (opts.done) opts.done(status, message);
         }
         function ask() {
@@ -326,7 +356,10 @@ frappe.provide("kefiya");
             });
         }
         setTimeout(ask, every);
-        return { stop: function () { stopped = true; } };
+        return { stop: function () {
+            stopped = true;
+            delete awaitingRelease[login];
+        } };
     }
     kefiya.await_release = awaitRelease;
 
