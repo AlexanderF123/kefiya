@@ -193,3 +193,25 @@ class TestMoveTanAuthenticationPatch(FrappeTestCase):
                         {"doctype": "Kefiya Settings", "field": "enable_tan_authentication"},
                     )
                 )
+
+
+class TestTanChallenge(FrappeTestCase):
+    def test_qr_image_and_escaped_text(self):
+        response = MagicMock(
+            spec=NeedTANResponse,
+            challenge="Scan the code <now>",
+            challenge_html=None,
+            challenge_matrix=("image/png", b"\x89PNG"),
+        )
+        challenge = fints_controller.tan_challenge(response)
+        self.assertEqual(challenge["text"], "Scan the code &lt;now&gt;")
+        self.assertEqual(challenge["image"], "data:image/png;base64,iVBORw==")
+
+    def test_non_image_matrix_is_dropped(self):
+        response = MagicMock(
+            spec=NeedTANResponse,
+            challenge=None,
+            challenge_html=None,
+            challenge_matrix=("text/html", b"<script>"),
+        )
+        self.assertIsNone(fints_controller.tan_challenge(response))

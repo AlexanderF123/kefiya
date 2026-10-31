@@ -193,6 +193,25 @@ kefiya.interactive = {
 					},
 				);
 
+				// The bank's instructions and, for chipTAN QR or photoTAN, the code to scan.
+				// The server sends the text HTML-safe and the image as a data URI.
+				if (data.challenge) {
+					let challenge_html = "";
+					if (data.challenge.text) {
+						challenge_html += `<p>${data.challenge.text}</p>`;
+					}
+					if (data.challenge.image) {
+						challenge_html += `<img src="${data.challenge.image}" alt="${__("TAN challenge")}" style="max-width: 100%;">`;
+					}
+					fields.push(
+						{
+							fieldtype: "HTML",
+							fieldname: "challenge",
+							options: challenge_html,
+						},
+					);
+				}
+
 				if (data.tan_required) {
 					fields.push(
 						{
@@ -218,11 +237,13 @@ kefiya.interactive = {
 				fields,
 				(values) => {
 					kefiya.interactive.start_progress(frm);
+					// the server doesn't need the challenge (and its image) back
+					const { challenge, ...context } = data;
 					frappe.call({
 						method: "kefiya.utils.client.resolve_tan_interaction",
 						args: {
 							fints_login: frm.doc.name,
-							values: { ...data, ...values },
+							values: { ...context, ...values },
 						},
 						always: () => kefiya.interactive.finish_progress(frm),
 					});
