@@ -49,6 +49,9 @@ from datetime import datetime
 #:   details_in_brackets   the description is the merchant, followed by the
 #:                         posting text in brackets -- the way the card
 #:                         statement itself reads.
+#:   counterparty_by_sign  the export names both sides, payer and payee, and
+#:                         one of them is the account itself: the payee of
+#:                         money out, the payer of money in is the other side.
 #:   booked_status         (field, accepted values): rows whose field holds
 #:                         anything else are not bookings yet -- pending card
 #:                         payments -- and are left out, not counted as
@@ -132,6 +135,36 @@ PROFILES = {
             "foreign_amount": ("fremdwaehrungsbetrag",),
         },
         "required": ("date", "amount", "status", "posting_text"),
+    },
+    # DKB Girokonto, "Umsatzliste". Above the header the account and its
+    # balance; dates as dd.mm.yy, amounts without trailing zeros ("-450",
+    # "2.380,5") -- hence decimal_comma, as for the card. Both parties are
+    # named; which one is the other side depends on the direction. Pending
+    # rows ("Vorgemerkt") are not booked.
+    #
+    # Kundenreferenz is deliberately not read as the reference: a reference
+    # is the booking's identity here (reference_number), and a customer
+    # reference repeats -- a standing order carries the same one every month,
+    # and a second booking under a known identity would be dropped as a
+    # duplicate. From the original (phamos-eu/kefiya#60), where it is stored
+    # as the Bank Transaction's reference_number instead.
+    "dkb_giro": {
+        "label": "DKB Girokonto",
+        "charges_are_positive": False,
+        "decimal_comma": True,
+        "counterparty_by_sign": True,
+        "booked_status": ("status", ("gebucht",)),
+        "columns": {
+            "date": ("buchungsdatum",),
+            "value_date": ("wertstellung",),
+            "status": ("status",),
+            "payer": ("zahlungspflichtige r",),
+            "payee": ("zahlungsempfaenger in",),
+            "description": ("verwendungszweck",),
+            "iban": ("iban",),
+            "amount": ("betrag",),
+        },
+        "required": ("date", "amount", "status", "payer", "payee"),
     },
     # The layout the very first importer could read, and the only one it could
     # read: seven rows of preamble, then columns by position. It used to be a
@@ -424,6 +457,33 @@ def is_booked(row, columns, profile):
     return _normalise_header(row[index]) in accepted
 
 
+def entries_of(rows, columns, profile, header_index):
+    """The bookings among the data rows of a file.
+
+    :param rows: the rows after the header, as read_rows returns them
+    :param header_index: the header's record, 0-based, as read_rows returns it
+    :return: (entries, pending, unreadable_lines). Pending rows are not
+        bookings yet -- a pending card payment comes back as booked in a later
+        export -- and are only counted. An unreadable row is skipped, not
+        guessed at, and reported by its line in the file, so it can be found
+        there (from the original, phamos-eu/kefiya#60, which does the same).
+    """
+    first_line = (header_index if header_index is not None else -1) + 2
+    entries, pending, unreadable_lines = [], 0, []
+    for offset, row in enumerate(rows):
+        if not any(str(cell).strip() for cell in row):
+            continue
+        if not is_booked(row, columns, profile):
+            pending += 1
+            continue
+        entry = to_entry(row, columns, profile)
+        if entry is None:
+            unreadable_lines.append(first_line + offset)
+            continue
+        entries.append(entry)
+    return entries, pending, unreadable_lines
+
+
 def to_entry(row, columns, profile):
     """One canonical entry out of one row, or None if unreadable."""
     def cell(field):
@@ -464,11 +524,15 @@ def to_entry(row, columns, profile):
         if foreign_amount:
             description = "{0} ({1})".format(description, foreign_amount)
 
+    counterparty = cell("counterparty")
+    if profile.get("counterparty_by_sign"):
+        counterparty = cell("payee") if amount < 0 else cell("payer")
+
     return {
         "date": date,
         "amount": amount,
         "description": description,
-        "counterparty": cell("counterparty"),
+        "counterparty": counterparty,
         "iban": cell("iban").replace(" ", "").upper() or None,
         # The account the booking belongs TO, where the format names it. A
         # file covering twenty accesses is split by this rather than by hand.

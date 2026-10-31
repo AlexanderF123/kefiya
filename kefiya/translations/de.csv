@@ -501,3 +501,5 @@ Bank logo lookup failed for {0},Bank-Logo für {0} konnte nicht ermittelt werden
 Bank Logo,Bank-Logo
 "The bank has not reported the release yet. The order is still marked as not sent.","Die Bank hat die Freigabe noch nicht gemeldet. Der Auftrag gilt weiter als nicht gesendet."
 "Waiting for the bank to report the release. This page carries on by itself.","Warte darauf, dass die Bank die Freigabe meldet. Diese Seite macht von selbst weiter."
+"These lines could not be read and were skipped: {0}","Diese Zeilen konnten nicht gelesen werden und wurden übersprungen: {0}"
+lines,Zeilen
