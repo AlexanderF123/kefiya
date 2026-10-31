@@ -313,19 +313,32 @@ KNOWN_CODES = {
         "The bank rejected the order data. The detail in brackets usually"
         " names the field it objected to."
     ),
+    # DKB ends the dialog with 9800 and gives this as the reason; python-fints
+    # carries on and only gets HTTP 400 back. From the original
+    # (phamos-eu/kefiya), which kept it in a table of its own.
+    "9040": (
+        "Your chipTAN generator needs to be resynchronised. Do this in your"
+        " bank's online banking or app, usually in the TAN or security"
+        " settings, then try again."
+    ),
 }
 
 
-def advice(verdict):
+def advice(verdict, overrides=None):
     """What to do about it, for the codes we know. Empty for the rest.
 
     Only the codes this instance has actually run into, and each says the next
     step rather than restating the number. An explanation invented for a code
     nobody here has seen is a guess wearing the clothes of documentation.
+
+    :param overrides: hints that depend on the request, by code. They replace
+        the general one: a 9010 on a transaction fetch is about the date
+        range, not about a message nobody could process.
     """
     seen = []
     for line in (verdict or {}).get("lines", []):
-        hint = KNOWN_CODES.get(line.get("code"))
+        code = line.get("code")
+        hint = (overrides or {}).get(code) or KNOWN_CODES.get(code)
         if hint and hint not in seen:
             seen.append(hint)
     return seen
