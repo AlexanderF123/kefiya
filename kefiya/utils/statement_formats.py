@@ -251,6 +251,30 @@ def detect_profile(header):
 _AMOUNT_NOISE = re.compile(r"[^\d,.\-+]")
 
 
+def _one_kind_of_separator(digits, separator):
+    """Digits with only commas or only dots in them, as a float-ready string.
+
+    Thousands come in groups of three. So the separator is a thousands
+    separator only where every group after it has exactly three digits --
+    "1,500", "1.234.567" -- and a decimal separator everywhere else: "12,5",
+    "-4,8", "1.05", "1,2345". Reading a single trailing digit as a thousands
+    group made "12,5" a hundred and twenty-five, ten times the amount; DKB
+    writes its amounts like that.
+
+    Three digits after a single separator stay a thousands group: "1,500" is
+    ambiguous on its own, and a format that means 1,5 there says so with
+    decimal_comma.
+    """
+    groups = digits.split(separator)
+    if len(groups) > 1 and all(len(g) == 3 for g in groups[1:]):
+        return "".join(groups)
+    if len(groups) == 2:
+        return groups[0] + "." + groups[1]
+    # Several separators but not all thousands groups ("1.2.3"): not an
+    # amount anyone wrote; float() refuses it below.
+    return digits
+
+
 def parse_amount(value, decimal_comma=False):
     """Read an amount without guessing which separator means what.
 
@@ -264,8 +288,9 @@ def parse_amount(value, decimal_comma=False):
 
     :param decimal_comma: the format declares the comma the decimal separator
         and the dot the thousands separator, so "12,5" is twelve and a half
-        and "1.500" fifteen hundred. Without it, a comma followed by anything
-        but two digits counts as a thousands separator.
+        and "1.500" fifteen hundred. Without it, a lone separator followed by
+        exactly three digits is read as a thousands separator, any other as
+        the decimal separator -- see _one_kind_of_separator.
     :return: float, or None when the text is not an amount
     """
     if value is None:
@@ -299,13 +324,8 @@ def parse_amount(value, decimal_comma=False):
             digits = digits.replace(".", "").replace(",", ".")
         else:
             digits = digits.replace(",", "")
-    elif last_comma >= 0:
-        # "1,50" is fifty cents, "1,500" is a thousand and a half.
-        digits = (digits.replace(",", ".") if len(digits) - last_comma - 1 == 2
-                  else digits.replace(",", ""))
-    elif last_dot >= 0:
-        digits = (digits if len(digits) - last_dot - 1 == 2
-                  else digits.replace(".", ""))
+    elif last_comma >= 0 or last_dot >= 0:
+        digits = _one_kind_of_separator(digits, "," if last_comma >= 0 else ".")
 
     try:
         amount = float(digits)
