@@ -8,7 +8,7 @@
 //   kefiya.forecast.create(defaults, done) -- a plan of one's own
 //
 // Bundled rather than kept with the doctype, because the form, the list and
-// any page that shows the forecast (a cockpit, a liquidity view) all want the
+// any other page that shows the forecast all want the
 // same three dialogs. done() receives the server's answer.
 //
 // Why "remove" cancels instead of deleting: nearly every line is written by
