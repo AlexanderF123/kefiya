@@ -74,3 +74,57 @@ def payment_entry_values(payment_type, bank_amount, bank_currency,
             "received_amount": in_party_currency,
             "source_exchange_rate": bank_to_company,
             "target_exchange_rate": party_to_company}
+
+
+def _cents(value):
+    return int(round(float(value or 0) * 100))
+
+
+def invoice_allocation(unallocated, outstanding, bank_to_party):
+    """How much of a booking pays how much of an invoice, across currencies.
+
+    The booking is in the bank account's currency, the invoice's outstanding
+    amount in the party account's. Compared directly, 940 CHF against a
+    1.000 EUR invoice reads as "the booking does not cover the invoice" --
+    which is what the assignment wizard did. Converted at the rate the
+    money moved at, it covers it exactly.
+
+    Equal to the cent counts as equal: a rate with nine decimals never turns
+    940,00 into exactly 1.000,00, and a remainder of a fraction of a cent on
+    either side is a booking nobody can reconcile.
+
+    :param unallocated: open amount of the booking, bank currency
+    :param outstanding: open amount of the invoice, party currency
+    :param bank_to_party: 1 bank currency = this much party currency
+    :return: {"bank_amount", "party_amount", "remaining_bank",
+              "remaining_party", "settles_invoice", "settles_booking"}
+    """
+    unallocated = abs(float(unallocated or 0))
+    outstanding = abs(float(outstanding or 0))
+    rate = float(bank_to_party)
+    if rate <= 0:
+        raise ValueError("an exchange rate must be positive")
+
+    covers = unallocated * rate
+    if _cents(covers) >= _cents(outstanding):
+        # The booking pays the whole invoice; what is left stays on it.
+        party_amount = outstanding
+        # Never more than the booking has: rounding to the cent may not
+        # take what is not there.
+        bank_amount = min(round(outstanding / rate, 2), unallocated)
+        if _cents(covers) == _cents(outstanding):
+            bank_amount = unallocated
+    else:
+        bank_amount = unallocated
+        party_amount = round(covers, 2)
+
+    remaining_bank = round(unallocated - bank_amount, 2)
+    remaining_party = round(outstanding - party_amount, 2)
+    return {
+        "bank_amount": bank_amount,
+        "party_amount": party_amount,
+        "remaining_bank": remaining_bank,
+        "remaining_party": remaining_party,
+        "settles_invoice": _cents(remaining_party) == 0,
+        "settles_booking": _cents(remaining_bank) == 0,
+    }

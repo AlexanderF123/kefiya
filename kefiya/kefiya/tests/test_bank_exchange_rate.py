@@ -10,7 +10,8 @@ the bank's statement saying 1 EUR = 0.94 CHF for the conversion it did.
 import os
 import unittest
 
-from kefiya.utils.bank_exchange_rate import FIELDS, payment_entry_values
+from kefiya.utils.bank_exchange_rate import (
+    FIELDS, invoice_allocation, payment_entry_values)
 
 EUR_CHF = {"from": "EUR", "to": "CHF", "rate": 0.94}
 
@@ -132,6 +133,125 @@ class TestThePaymentEntryWrapper(unittest.TestCase):
     def test_no_request_argument_reaches_erpnext_unnamed(self):
         signature = self.body[:self.body.index("):")]
         self.assertNotIn("**", signature)
+
+
+class TestABookingPaysAnInvoiceInItsCurrency(unittest.TestCase):
+    """940 CHF against a 1.000 EUR invoice, at 1 CHF = 1/0.94 EUR."""
+
+    RATE = 1 / 0.94
+
+    def test_the_booking_settles_the_invoice_exactly(self):
+        plan = invoice_allocation(940.0, 1000.0, self.RATE)
+        self.assertEqual(plan["bank_amount"], 940.0)
+        self.assertEqual(plan["party_amount"], 1000.0)
+        self.assertTrue(plan["settles_invoice"])
+        self.assertTrue(plan["settles_booking"])
+
+    def test_compared_without_converting_it_would_not(self):
+        """What the wizard did: 940 < 1000, invoice left open by 60."""
+        plan = invoice_allocation(940.0, 1000.0, 1.0)
+        self.assertFalse(plan["settles_invoice"])
+        self.assertEqual(plan["remaining_party"], 60.0)
+
+    def test_a_larger_booking_keeps_its_remainder_in_its_currency(self):
+        plan = invoice_allocation(1034.0, 1000.0, self.RATE)
+        self.assertEqual(plan["party_amount"], 1000.0)
+        self.assertEqual(plan["bank_amount"], 940.0)
+        self.assertEqual(plan["remaining_bank"], 94.0)
+        self.assertTrue(plan["settles_invoice"])
+        self.assertFalse(plan["settles_booking"])
+
+    def test_a_smaller_booking_pays_part_of_the_invoice(self):
+        plan = invoice_allocation(470.0, 1000.0, self.RATE)
+        self.assertEqual(plan["bank_amount"], 470.0)
+        self.assertEqual(plan["party_amount"], 500.0)
+        self.assertEqual(plan["remaining_party"], 500.0)
+        self.assertFalse(plan["settles_invoice"])
+        self.assertTrue(plan["settles_booking"])
+
+    def test_equal_to_the_cent_is_equal(self):
+        """A nine-decimal rate never lands on the cent by itself."""
+        plan = invoice_allocation(940.0, 1000.0, 1.0638297)
+        self.assertTrue(plan["settles_invoice"] and plan["settles_booking"])
+        self.assertEqual(plan["bank_amount"], 940.0)
+
+    def test_rounding_never_takes_more_than_the_booking_has(self):
+        plan = invoice_allocation(940.0, 1000.004, self.RATE)
+        self.assertLessEqual(plan["bank_amount"], 940.0)
+
+    def test_one_currency_is_the_old_rule(self):
+        plan = invoice_allocation(300.0, 250.0, 1.0)
+        self.assertEqual((plan["bank_amount"], plan["party_amount"],
+                          plan["remaining_bank"]), (250.0, 250.0, 50.0))
+
+    def test_a_rate_must_be_positive(self):
+        with self.assertRaises(ValueError):
+            invoice_allocation(1.0, 1.0, 0)
+
+
+class TestTheWizardReconcilesInBothCurrencies(unittest.TestCase):
+    """Read as text: client.py needs a bench to load."""
+
+    def setUp(self):
+        text = _source("utils", "client.py")
+        self.client = text
+        self.create = text[text.index("def create_payment_entry("):
+                           text.index("def _same_currency_for_the_card")]
+        self.wizard = _source("kefiya", "page", "bank_transaction_wiz",
+                              "bank_transaction_wiz.js")
+
+    def test_erpnext_is_told_the_bank_account_and_both_amounts(self):
+        """Without the bank account ERPNext took the company's default one,
+        in that one's currency."""
+        for argument in ("party_amount=plan.party_amount",
+                         "bank_account=plan.gl_account",
+                         "bank_amount=(plan.bank_amount"):
+            self.assertIn(argument, self.create)
+
+    def test_the_account_is_no_longer_swapped_afterwards(self):
+        self.assertNotIn("payment_entry.paid_to = gl_account", self.create)
+        self.assertNotIn("payment_entry.paid_from = gl_account", self.create)
+
+    def test_confirmation_and_booking_share_one_plan(self):
+        preview = self.client[self.client.index(
+            "def preview_invoice_payment"):self.client.index(
+            "def _allocate_references")]
+        self.assertIn("invoice_payment_plan(bank_transaction, invoice_doc)",
+                      preview)
+        self.assertIn("invoice_payment_plan(bank_transaction, invoice_doc)",
+                      self.create)
+
+    def test_the_bank_rate_is_set_before_the_entry_is_saved(self):
+        self.assertLess(self.create.index("payment_entry_values("),
+                        self.create.index("payment_entry.insert()"))
+
+    def test_a_partial_payment_is_not_allocated_per_term_twice(self):
+        self.assertIn("_allocate_references(payment_entry.references, "
+                      "plan.party_amount)", self.create)
+        self.assertNotIn("reference.allocated_amount = paid_amount",
+                         self.create)
+
+    def test_the_card_reconciliation_refuses_a_foreign_currency(self):
+        card = self.create[:self.create.index("_wizard_documents(")]
+        self.assertLess(
+            card.index("_same_currency_for_the_card(invoice_doc"),
+            card.index("create_mastercard_journal_entry_from_purchase_"
+                       "invoice(invoice_doc"))
+
+    def test_the_wizard_shows_a_booking_in_its_own_currency(self):
+        self.assertIn('"currency"\n\t\t\t];', self.wizard)
+        self.assertIn("format_currency(payment.unallocated_amount, "
+                      "payment.currency || this.data.currency)", self.wizard)
+
+    def test_the_wizard_no_longer_compares_across_currencies(self):
+        self.assertNotIn("unallocated_amount > outstanding_amount",
+                         self.wizard)
+        self.assertIn("result.settles_invoice", self.wizard)
+
+    def test_a_foreign_booking_is_always_confirmed_with_its_rate(self):
+        self.assertIn("kefiya.utils.client.preview_invoice_payment",
+                      self.wizard)
+        self.assertIn("if (!(show_dialog || foreign))", self.wizard)
 
 
 if __name__ == "__main__":

@@ -545,3 +545,12 @@ already answered by a booking,bereits durch eine Buchung erledigt
 not cancelled,nicht storniert
 Direction must be Incoming or Outgoing.,Die Richtung muss Eingang oder Ausgang sein.
 Batch bookings split into single bookings,Sammelbuchungen in Einzelbuchungen aufgeteilt
+as stated by the bank,laut Bank
+system rate of the booking day,Systemkurs des Buchungstags
+{0} of the transaction pay {1} of the invoice. Exchange rate: 1 {2} = {3} {4} ({5}).,{0} der Buchung begleichen {1} der Rechnung. Kurs: 1 {2} = {3} {4} ({5}).
+There is no exchange rate from {0} to {1} for {2}. Enter one under Currency Exchange.,Es gibt keinen Kurs von {0} nach {1} für den {2}. Bitte unter „Wechselkurs“ erfassen.
+Cannot reconcile against {0}.,Gegen {0} kann nicht abgeglichen werden.
+Nothing is left to reconcile between {0} and {1}.,Zwischen {0} und {1} ist nichts mehr abzugleichen.
+{0} {1} would not be paid in the direction of the booking.,{0} {1} würde nicht in Richtung der Buchung bezahlt.
+"The card account is in {0}, the invoice in {1} and the company in {2}. Card reconciliation works in one currency only; reconcile this invoice as a Purchase Invoice instead.","Das Kartenkonto führt {0}, die Rechnung {1} und das Unternehmen {2}. Der Kartenabgleich funktioniert nur in einer Währung; bitte diese Rechnung als Eingangsrechnung abgleichen."
+Bank Account {0} has no account set.,Für das Bankkonto {0} ist kein Buchungskonto hinterlegt.
