@@ -58,6 +58,23 @@ from kefiya.utils.fints_errors import (  # noqa: F401
     InitFailedException,
     TanInteractionRequired,
 )
+# The bank's refusals in words a user can act on -- see fints_bank_errors.
+# Passed on under their old address: the legacy controller and the original's
+# tests import them from here.
+from kefiya.utils.fints_bank_errors import (  # noqa: F401
+    LOGIN_ERRORS,
+    FetchFailed,
+    FetchRefused,
+    FetchTanRequired,
+    LoginRejected,
+    bank_refusal_message,
+    error_log_link,
+    explain_login_rejection,
+    fetch_fints_transactions,
+    log_bank_traffic_on_error,
+    throw_fetch_tan_required,
+    throw_login_rejected,
+)
 
 
 #: How many of the bank's IBANs an "account not found" message lists before it
@@ -312,6 +329,8 @@ def _advice_block(verdict):
     return "\n\n" + _("What this means:") + "\n" + "\n".join(
         "• " + _(hint) for hint in hints)
 
+
+
 class FinTSController(TanSession):
     def __init__(self, kefiya_login_docname:str, interactive:bool=False, tan_mode:str=None, tan_medium:str=None, tan:str=...):
         self.kefiya_login = frappe.get_doc("Kefiya Login", kefiya_login_docname)
@@ -327,92 +346,93 @@ class FinTSController(TanSession):
         # that was reading the wrong document.
         self.interactive.fints_login = self.kefiya_login.name
 
-        self.__init_fints_connection()
+        with explain_login_rejection(self.name):
+            self.__init_fints_connection()
 
-        # If state is new and did not setup tan requirements, init tan mode (and probably ask user for mode and medium).
-        if self.__init_tan_mode(tan_mode, tan_medium, tan) is False:
-            raise TanInteractionRequired()
+            # If state is new and did not setup tan requirements, init tan mode (and probably ask user for mode and medium).
+            if self.__init_tan_mode(tan_mode, tan_medium, tan) is False:
+                raise TanInteractionRequired()
 
-        # What became of a parked release, in one word -- see release_outcome.
-        # Set BEFORE the block below, so a caller that reads it always finds
-        # one: an access with nothing parked has nothing released either.
-        self.release_outcome = release_outcome.NOTHING_PARKED
-        self.release_failure = ""
+            # What became of a parked release, in one word -- see release_outcome.
+            # Set BEFORE the block below, so a caller that reads it always finds
+            # one: an access with nothing parked has nothing released either.
+            self.release_outcome = release_outcome.NOTHING_PARKED
+            self.release_failure = ""
 
-        # If there is an open TAN request, try to fulfill it.
-        #
-        # Not while a dialog of this access is already standing: resume_dialog()
-        # refuses to run inside one, and it would be pointless anyway -- an open
-        # dialog means the access is authenticated, so this login's parked
-        # challenge is a leftover from an earlier attempt and has nothing left
-        # to unlock.
-        if self.kefiya_login.stored_tan_blob \
-                and not self.fints_connection._standing_dialog:
-            # A challenge lives only as long as the bank keeps the dialog
-            # behind it. Nothing expired it on our side, so an unanswered
-            # challenge stayed parked forever -- and replaying it does not
-            # fail quietly: the bank answers without a TAN status, fints
-            # raises, and the raise ends every attempt to use this access. One
-            # challenge nobody released in July made an account unable to send
-            # anything in August.
-            if self.__parked_challenge_is_stale():
-                self.__discard_parked_challenge()
-            else:
-                self.release_outcome = release_outcome.PENDING
-                try:
-                    self._resume_and_answer_the_parked_tan(tan)
-                except TanInteractionRequired:
-                    # The legitimate "ask the user" path, not a failure -- but
-                    # the dialog behind it is gone all the same. The exception
-                    # leaves resume_dialog()'s block, its __exit__ ends the
-                    # dialog, and the client goes on holding a reference to it.
-                    # Dropping that reference is what lets the next attempt
-                    # open a fresh dialog instead of sending on a dead one.
-                    discard_unusable_dialog(self.fints_connection)
-                    raise
-                except Exception:
-                    # Two things are wrong here at once, and each needs its own
-                    # cleanup.
-                    #
-                    # resume_dialog() clears the client's reference to the
-                    # dialog when its block ends -- but it has no try/finally,
-                    # so an exception inside skips that line and leaves an
-                    # ENDED dialog registered. Inside a fetch session that
-                    # client is shared by every login of the bank access, so
-                    # each of them in turn joins the wreck: "Cannot send on
-                    # dialog that is not open", for one account after another.
-                    discard_unusable_dialog(self.fints_connection)
-
-                    # And the bank does not accept this challenge any more.
-                    # Keeping it would brick the access; throwing it away costs
-                    # one fresh TAN, which the ordinary login now asks for.
+            # If there is an open TAN request, try to fulfill it.
+            #
+            # Not while a dialog of this access is already standing: resume_dialog()
+            # refuses to run inside one, and it would be pointless anyway -- an open
+            # dialog means the access is authenticated, so this login's parked
+            # challenge is a leftover from an earlier attempt and has nothing left
+            # to unlock.
+            if self.kefiya_login.stored_tan_blob \
+                    and not self.fints_connection._standing_dialog:
+                # A challenge lives only as long as the bank keeps the dialog
+                # behind it. Nothing expired it on our side, so an unanswered
+                # challenge stayed parked forever -- and replaying it does not
+                # fail quietly: the bank answers without a TAN status, fints
+                # raises, and the raise ends every attempt to use this access. One
+                # challenge nobody released in July made an account unable to send
+                # anything in August.
+                if self.__parked_challenge_is_stale():
                     self.__discard_parked_challenge()
+                else:
+                    self.release_outcome = release_outcome.PENDING
+                    try:
+                        self._resume_and_answer_the_parked_tan(tan)
+                    except TanInteractionRequired:
+                        # The legitimate "ask the user" path, not a failure -- but
+                        # the dialog behind it is gone all the same. The exception
+                        # leaves resume_dialog()'s block, its __exit__ ends the
+                        # dialog, and the client goes on holding a reference to it.
+                        # Dropping that reference is what lets the next attempt
+                        # open a fresh dialog instead of sending on a dead one.
+                        discard_unusable_dialog(self.fints_connection)
+                        raise
+                    except Exception:
+                        # Two things are wrong here at once, and each needs its own
+                        # cleanup.
+                        #
+                        # resume_dialog() clears the client's reference to the
+                        # dialog when its block ends -- but it has no try/finally,
+                        # so an exception inside skips that line and leaves an
+                        # ENDED dialog registered. Inside a fetch session that
+                        # client is shared by every login of the bank access, so
+                        # each of them in turn joins the wreck: "Cannot send on
+                        # dialog that is not open", for one account after another.
+                        discard_unusable_dialog(self.fints_connection)
 
-                    # Swallowed on purpose -- the fetch path goes on with a
-                    # fresh login -- but not silently, and not as a success.
-                    # This branch wrote nothing anywhere, and send_transfer_tan
-                    # then read a constructor that had not raised as a release
-                    # that had gone through: Auftrag A, 03.09.2026,
-                    # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
-                    # ausgefuehrt". The word below is what the transfer path
-                    # reads instead, and the log carries the bank's own
-                    # sentences, which python-fints' exception replaces with
-                    # one about a wrong bank URL.
-                    self.release_outcome = release_outcome.FAILED
-                    self.release_failure = self.__note_the_failed_release()
+                        # And the bank does not accept this challenge any more.
+                        # Keeping it would brick the access; throwing it away costs
+                        # one fresh TAN, which the ordinary login now asks for.
+                        self.__discard_parked_challenge()
 
-        # After successful login/tan verification fetch available accounts if not already present
-        if self.__fetch_fints_accounts() is False:
-            raise InitFailedException()
+                        # Swallowed on purpose -- the fetch path goes on with a
+                        # fresh login -- but not silently, and not as a success.
+                        # This branch wrote nothing anywhere, and send_transfer_tan
+                        # then read a constructor that had not raised as a release
+                        # that had gone through: Auftrag A, 03.09.2026,
+                        # marked "Sent" on the bank's 9010 "Auftrag wurde nicht
+                        # ausgefuehrt". The word below is what the transfer path
+                        # reads instead, and the log carries the bank's own
+                        # sentences, which python-fints' exception replaces with
+                        # one about a wrong bank URL.
+                        self.release_outcome = release_outcome.FAILED
+                        self.release_failure = self.__note_the_failed_release()
 
-        # Afterwards the controller/connection is ready to go for further operations
-        if self.kefiya_login.failed_connection:
-            self.kefiya_login.failed_connection = 0
-            self.kefiya_login.save()
+            # After successful login/tan verification fetch available accounts if not already present
+            if self.__fetch_fints_accounts() is False:
+                raise InitFailedException()
 
-        self.interactive.show_progress_realtime(
-           _("Connection established"), 100, reload=False
-        )
+            # Afterwards the controller/connection is ready to go for further operations
+            if self.kefiya_login.failed_connection:
+                self.kefiya_login.failed_connection = 0
+                self.kefiya_login.save()
+
+            self.interactive.show_progress_realtime(
+               _("Connection established"), 100, reload=False
+            )
 
     def _refuse_a_refused_order(self, response=None):
         """Stop where the bank turned the order down. Answers the verdict.
@@ -1038,8 +1058,10 @@ class FinTSController(TanSession):
                 self.fints_accounts = [frappe._dict(acc) for acc in cached_accounts]
                 return True
 
+        error_log = frappe._dict()
         try:
-            with self.trusted_client_context() as client:
+            with log_bank_traffic_on_error(self.fints_connection, _("Kefiya: Could not load accounts")) as error_log, \
+                    self.trusted_client_context() as client:
                 self.interactive.show_progress_realtime(
                     _("Loading accounts"), 30, reload=False
                 )
@@ -1064,10 +1086,18 @@ class FinTSController(TanSession):
 
         except TanInteractionRequired:
             raise
+        except LOGIN_ERRORS as e:
+            throw_login_rejected(self.name, e, error_log)
         except Exception as e:
-            frappe.throw(_(
-                "Could not load sepa accounts with error:<br>{0}"
-            ).format(e))
+            if error_log.bank_errors:
+                # e.g. DKB ends the dialog with 9800 and says why (9040: chipTAN
+                # resync needed); fints goes on anyway and only gets HTTP 400 back
+                message = bank_refusal_message(_("Your bank refused to load the accounts:"), error_log)
+            else:
+                message = _("Could not load sepa accounts with error:<br>{0}").format(e)
+                if error_log.name:
+                    message += error_log_link(error_log.name)
+            frappe.throw(message)
 
         return False
 
@@ -1382,9 +1412,9 @@ class FinTSController(TanSession):
     def get_fints_transactions(self, start_date=None, end_date=None):
         """Get FinTS transactions.
 
-        The fetch window is limited to the login's allowed_sync_days_in_past
-        (default 90). Also only transaction from atleast one day ago can be
-        fetched
+        Defaults to the login's allowed_sync_days_in_past (90 when unset) up
+        to yesterday. Older history can be requested; whether the bank serves
+        it is up to the bank (PSD2).
 
         :param start_date: Date to start the fetch
         :param end_date: Date to end the fetch
@@ -1399,13 +1429,6 @@ class FinTSController(TanSession):
 
         if end_date is None:
             end_date = now_datetime().date() - relativedelta(days=1)
-
-        if (now_datetime().date() - start_date).days > allowed_days:
-            raise NotImplementedError(
-                _("Start date is more than the allowed {0} days in the past").format(
-                    allowed_days
-                )
-            )
 
         # Ohne das klebt der Verwendungszweck zusammen: die Bibliothek fuegt
         # die Teilfelder ?20-?29 des Feldes :86: ohne Trenner aneinander, und
@@ -2489,6 +2512,9 @@ class FinTSController(TanSession):
                 "payments": new_bank_transactions,
                 # "assignment": auto_assignment
             }
+        except FetchFailed:
+            # Already a clear message for the user; don't wrap it
+            raise
         except TanInteractionRequired:
             # Not a parsing error: the bank wants the session authenticated
             # first. Wrapping it in a ValidationError hid that from every

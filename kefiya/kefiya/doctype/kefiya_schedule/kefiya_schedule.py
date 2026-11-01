@@ -279,7 +279,8 @@ def scheduled_import_fints_payments(manual=None):
                     login_name,
                     schedule_settings.name
                 )
-            elif frappe.db.get_single_value("Kefiya Settings", "enable_tan_authentication"):
+            elif frappe.db.get_value(
+                    "Kefiya Login", login_name, "enable_tan_authentication"):
                 FinTSController(login_name) \
                     .import_fints_transactions(kefiya_import.name)
             else:

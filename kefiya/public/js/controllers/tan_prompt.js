@@ -5,15 +5,21 @@
 //
 //   kefiya.tan_prompt(data, done, opts)
 //                                     data is the fints_tan_interaction_required
-//                                     payload; done fires once the answer is in;
+//                                     payload; done(ok, message) fires once the
+//                                     answer is in, message being the server's;
 //                                     opts.transfer = {login, names} answers a
-//                                     transfer's TAN for exactly those orders
+//                                     transfer's TAN for exactly those orders;
+//                                     opts.before_answer() runs as the answer
+//                                     goes out; opts.confirm_here: nothing
+//                                     closes the decoupled box by itself, the
+//                                     user confirms it here
 //   kefiya.focus_tan_field(dialog)    the focus rule on its own, for a caller
 //                                     that builds its own box
 //
-// Its own file because it has three callers -- the collective fetch, the
-// outgoing payments, and the Kefiya Login form -- and no share in what any of
-// them is doing otherwise. It sat in bank_refresh.js for historical reasons
+// Its own file because every box that asks for a TAN is this one -- the
+// collective fetch, the outgoing payments, the forms (fints_interactive.js)
+// and the Kefiya page (kefiya_hub/fints_session.js) -- and it has no share in
+// what any of them is doing otherwise. It sat in bank_refresh.js for historical reasons
 // while already being exported from it, which is the definition of the wrong
 // home.
 //
@@ -31,6 +37,11 @@ frappe.provide("kefiya");
     // that has already been given is a box the user has to dismiss for no
     // reason.
     var openBoxes = {};
+
+    // The logins whose decoupled release is being asked for right now, by
+    // awaitRelease. Its later requests are what marks the orders sent; the
+    // box must not answer the same parked challenge alongside them.
+    var awaitingRelease = {};
 
     function bindReleaseArrived() {
         if (kefiya._tan_release_realtime) return;
@@ -79,15 +90,26 @@ frappe.provide("kefiya");
         var c = data.challenge;
         if (!c || (!c.image && !c.text)) return null;
 
+        // The server sends the image as {mime, data} (tan_challenge.py).
+        // A ready data URI is accepted too, but only for a raster image type:
+        // it ends up in src="", and nothing else belongs there.
+        var src = null;
+        if (c.image && c.image.data) {
+            src = "data:" + (c.image.mime || "image/png") + ";base64,"
+                + c.image.data;
+        } else if (typeof c.image === "string"
+                && /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+\/=]+$/.test(c.image)) {
+            src = c.image;
+        }
+
         var html = '<div class="kefiya-tan-challenge" '
             + 'style="text-align:center;margin-bottom:10px">';
-        if (c.image && c.image.data) {
+        if (src) {
             html += '<img alt="' + __("Bank challenge") + '" '
                 + 'style="width:40mm;height:40mm;image-rendering:pixelated;'
                 + 'border:1px solid var(--border-color);border-radius:4px;'
-                + 'background:#fff;padding:4px" src="data:'
-                + frappe.utils.escape_html(c.image.mime || "image/png")
-                + ";base64," + frappe.utils.escape_html(c.image.data) + '">';
+                + 'background:#fff;padding:4px" src="'
+                + frappe.utils.escape_html(src) + '">';
             html += '<div class="text-muted small" style="margin-top:6px">'
                 + __("Scan this with your banking app, then enter the TAN it"
                     + " shows.") + "</div>";
@@ -109,6 +131,7 @@ frappe.provide("kefiya");
     //
     // done(ok) fires once, true only for a release the bank accepted.
     function answerTransferTan(transfer, tan, done) {
+        var decoupled = !tan;
         frappe.call({
             method: "kefiya.utils.client.send_transfer_tan",
             args: { kefiya_login: transfer.login, tan: tan || "",
@@ -126,7 +149,10 @@ frappe.provide("kefiya");
                     if (done) done(true);
                 } else if (m.status === "tan_required") {
                     frappe.show_alert({
-                        message: __("The bank asks for another TAN."),
+                        message: decoupled
+                            ? __("The bank has not reported the release yet."
+                                + " The order is still marked as not sent.")
+                            : __("The bank asks for another TAN."),
                         indicator: "orange" }, 8);
                     if (done) done(false);
                 } else {
@@ -177,12 +203,19 @@ frappe.provide("kefiya");
                 fields.push({ fieldtype: "Data", fieldname: "tan",
                     label: __("TAN"), reqd: 1 });
             } else if (data.mfa_required) {
+                // Only the collective fetch and the outgoing payments learn
+                // of a release by themselves and close the box. Everywhere
+                // else the box IS the "I have confirmed" -- telling the user
+                // to press nothing there would leave them waiting forever.
                 fields.push({ fieldtype: "HTML", fieldname: "waiting",
                     label: __("Waiting for Interaction"),
-                    options: __("Confirm the release in your banking app."
-                        + " This box closes by itself once the bank reports"
-                        + " the release; you do not need to press anything"
-                        + " here.") });
+                    options: opts && opts.confirm_here
+                        ? __("Confirm the release in your banking app, then"
+                            + " press Submit here.")
+                        : __("Confirm the release in your banking app."
+                            + " This box closes by itself once the bank reports"
+                            + " the release; you do not need to press anything"
+                            + " here.") });
             }
         }
         // Prepended only now: everything above addresses the fields by index
@@ -207,11 +240,35 @@ frappe.provide("kefiya");
                 answerTransferTan(transfer, values.tan, done);
                 return;
             }
+            // The same for a release in the banking app. Pressing the button
+            // here used to go to resolve_tan_interaction below: it collected
+            // the release from the bank and marked nothing, and the page's
+            // own polling (awaitRelease) then found nothing parked and said
+            // "Release failed" -- for an order the bank had executed, still
+            // marked as not sent, which is the state that invites a second
+            // send. While that polling runs it does the asking; otherwise
+            // the box asks once, through the path that marks the orders.
+            if (transfer && data.mfa_required) {
+                if (awaitingRelease[transfer.login]) {
+                    frappe.show_alert({
+                        message: __("Waiting for the bank to report the"
+                            + " release. This page carries on by itself."),
+                        indicator: "blue" }, 8);
+                    return;
+                }
+                answerTransferTan(transfer, "", done);
+                return;
+            }
+            if (opts && opts.before_answer) opts.before_answer();
+            // The challenge stays here: the server does not need its own
+            // picture back.
+            var answer = Object.assign({}, data, values);
+            delete answer.challenge;
             // Explicit feedback, because the run mutes the standard error box.
             frappe.call({
                 method: "kefiya.utils.client.resolve_tan_interaction",
                 args: { fints_login: data.fints_login || data.docname,
-                        values: Object.assign({}, data, values) },
+                        values: answer },
                 silent: true,
                 // done(ok). The flag is the whole point: it used to fire the
                 // same way whether the release went through or not, and the
@@ -219,7 +276,10 @@ frappe.provide("kefiya");
                 // then started a fetch, the bank asked again, the box came
                 // back, and the user confirmed their way around that circle
                 // for as long as they were willing to.
-                callback: function () { if (done) done(true); },
+                //
+                // The message rides along: {status, accounts} -- a form that
+                // loaded accounts with this TAN offers them right away.
+                callback: function (r) { if (done) done(true, r && r.message); },
                 error: function (r) {
                     frappe.show_alert({
                         message: __("TAN release failed.") + " "
@@ -297,10 +357,12 @@ frappe.provide("kefiya");
         var every = opts.every || 3000;
         var ceiling = opts.ceiling || 180000;
         var started = Date.now(), stopped = false;
+        awaitingRelease[login] = true;
 
         function finish(status, message) {
             if (stopped) return;
             stopped = true;
+            delete awaitingRelease[login];
             if (opts.done) opts.done(status, message);
         }
         function ask() {
@@ -326,7 +388,10 @@ frappe.provide("kefiya");
             });
         }
         setTimeout(ask, every);
-        return { stop: function () { stopped = true; } };
+        return { stop: function () {
+            stopped = true;
+            delete awaitingRelease[login];
+        } };
     }
     kefiya.await_release = awaitRelease;
 

@@ -50,7 +50,10 @@ kefiya.show_import_plan = function (plan) {
 				<li>${__("Rows read")}: <b>${plan.total}</b></li>
 				<li>${__("New")}: <b>${plan.would_create || plan.created || 0}</b></li>
 				<li>${__("Already present")}: <b>${plan.duplicates}</b></li>
-				<li>${__("Unreadable")}: <b>${plan.unreadable || 0}</b></li>
+				<li>${__("Unreadable")}: <b>${plan.unreadable || 0}</b>${
+					(plan.unreadable_lines || []).length
+						? ` (${__("lines")} ${plan.unreadable_lines.slice(0, 20).map((n) => esc(n)).join(", ")}${plan.unreadable_lines.length > 20 ? ", …" : ""})`
+						: ""}</li>
 				${counted(__("Other currency than the bank account"), plan.currency_mismatch)}
 				${counted(__("Not yet booked by the bank (pending)"), plan.pending)}
 				${counted(__("Repeated within the file"), plan.repeated)}

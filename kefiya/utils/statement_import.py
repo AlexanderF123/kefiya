@@ -465,20 +465,15 @@ def read_entries(file_url, bank_account=None):
     profile_name, columns, rows, header_index = formats.read_rows(text)
 
     notes = {"header_row": header_index, "unreadable": 0, "unmatched": {},
-             "file_hash": file_hash}
+             "pending": 0, "unreadable_lines": [], "file_hash": file_hash}
     if not profile_name:
         return None, [], notes
 
-    profile = PROFILES[profile_name]
-    parsed = []
-    for row in rows:
-        if not any(str(cell).strip() for cell in row):
-            continue
-        entry = formats.to_entry(row, columns, profile)
-        if entry is None:
-            notes["unreadable"] += 1
-            continue
-        parsed.append(entry)
+    parsed, pending, unreadable_lines = formats.entries_of(
+        rows, columns, PROFILES[profile_name], header_index)
+    notes["pending"] = pending
+    notes["unreadable"] = len(unreadable_lines)
+    notes["unreadable_lines"] = unreadable_lines
 
     return _address_entries(profile_name, parsed, bank_account, notes)
 

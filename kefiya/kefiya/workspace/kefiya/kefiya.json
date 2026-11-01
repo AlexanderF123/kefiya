@@ -70,6 +70,16 @@
   {
    "hidden": 0,
    "is_query_report": 0,
+   "label": "Kefiya Overview",
+   "link_count": 0,
+   "link_to": "kefiya-hub",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
    "label": "Bank Account Wizard",
    "link_to": "bank_account_wizard",
    "link_type": "Page",
@@ -86,7 +96,7 @@
    "type": "Link"
   }
  ],
- "modified": "2021-10-09 14:26:25.697594",
+ "modified": "2026-10-27 19:50:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya",

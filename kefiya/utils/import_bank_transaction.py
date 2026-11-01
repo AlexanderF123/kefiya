@@ -113,6 +113,17 @@ def extract_iban_from_name(name):
     return None, name
 
 
+def make_transaction_id(date, amount, applicant_name, posting_text, purpose):
+    """The id the MT940 import used to store as reference_number.
+
+    Kept for the original's callers. The hash itself has one home,
+    booking_fingerprint.legacy -- two copies of it were two things to keep
+    character-identical with what is already in the database.
+    """
+    return booking_fingerprint.legacy(
+        date, amount, applicant_name, posting_text, purpose)
+
+
 class ImportBankTransaction:
     def __init__(self, kefiya_login, interactive, allow_error=False):
         self.allow_error = allow_error
@@ -485,8 +496,12 @@ class ImportBankTransaction:
                 )
                 frappe.msgprint("There were some transactions with error. Please, have a look on Error Log.")
 
-    def get_bank_account_data(self, IBAN):
+    @staticmethod
+    def get_bank_account_data(IBAN):
         party, party_type, bank_party_account_number = '', '', ''
+        if not IBAN:
+            return [party, party_type, bank_party_account_number]
+
         bank_account_exists = frappe.db.exists('Bank Account', {'iban': IBAN})
         
         if bank_account_exists:

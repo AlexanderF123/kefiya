@@ -1,0 +1,118 @@
+# GitLab (https://git.phamos.eu/phamos/kefiya) is the primary repository.
+# GitHub is a push mirror of the protected branches and stays open for
+# external contributors. This workflow forwards their issues and pull
+# requests to GitLab:
+#
+#   GitHub issue  -> GitLab issue (label "github") + link comment on GitHub
+#   GitHub PR     -> GitLab branch github-pr/<number> + merge request
+#                    (label "github") + link comment on GitHub
+#
+# Review and merge happen on GitLab. Merge with a merge commit or
+# fast-forward (no squash) so GitHub marks the PR as merged once the
+# mirror pushes the target branch.
+#
+# Requires the repository secret GITLAB_TOKEN: a GitLab project access
+# token (role Developer, scopes api + write_repository).
+#
+# Security: pull_request_target runs with write permissions, so the PR
+# code is only fetched and pushed as git objects. It is never checked out
+# or executed. Titles and bodies are passed via env, never inlined.
+
+name: Forward to GitLab
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+env:
+  GITLAB_URL: https://git.phamos.eu
+  GITLAB_PROJECT: phamos%2Fkefiya
+
+jobs:
+  issue:
+    name: Forward issue
+    if: github.event_name == 'issues' && github.repository == 'phamos-eu/kefiya'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create GitLab issue
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          TITLE: ${{ github.event.issue.title }}
+          BODY: ${{ github.event.issue.body }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          HTML_URL: ${{ github.event.issue.html_url }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -n \
+            --arg title "[GitHub #$NUMBER] $TITLE" \
+            --arg description "$(printf 'Forwarded from GitHub issue %s by @%s (GitHub user).\n\nPlease reply to the reporter on GitHub.\n\n---\n\n%s' "$HTML_URL" "$AUTHOR" "$BODY")" \
+            '{title: $title, description: $description, labels: "github"}')
+          web_url=$(curl --fail-with-body -sS -X POST \
+            -H "PRIVATE-TOKEN: $GITLAB_TOKEN" -H "Content-Type: application/json" \
+            -d "$payload" "$GITLAB_URL/api/v4/projects/$GITLAB_PROJECT/issues" | jq -r .web_url)
+          gh issue comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+            "Thanks! This issue is tracked internally at $web_url. Discussion with you continues here on GitHub."
+
+  pull-request:
+    name: Forward pull request
+    if: github.event_name == 'pull_request_target' && github.repository == 'phamos-eu/kefiya'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Push PR head to GitLab
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git init -q pr && cd pr
+          git fetch -q "https://github.com/$GITHUB_REPOSITORY.git" "refs/pull/$NUMBER/head"
+          git push -q --force \
+            "https://oauth2:$GITLAB_TOKEN@${GITLAB_URL#https://}/phamos/kefiya.git" \
+            "FETCH_HEAD:refs/heads/github-pr/$NUMBER"
+
+      - name: Open GitLab merge request
+        if: github.event.action != 'synchronize'
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          HTML_URL: ${{ github.event.pull_request.html_url }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          api="$GITLAB_URL/api/v4/projects/$GITLAB_PROJECT"
+          auth=(-H "PRIVATE-TOKEN: $GITLAB_TOKEN")
+          source="github-pr/$NUMBER"
+
+          existing=$(curl --fail-with-body -sS "${auth[@]}" -G "$api/merge_requests" \
+            --data-urlencode "state=opened" --data-urlencode "source_branch=$source" | jq -r '.[0].web_url // empty')
+          if [ -n "$existing" ]; then
+            echo "Merge request already open: $existing"
+            exit 0
+          fi
+
+          # Fall back to develop if the PR targets a branch GitLab doesn't have
+          if ! curl -sS -o /dev/null --fail "${auth[@]}" "$api/repository/branches/$(jq -rn --arg b "$BASE" '$b|@uri')"; then
+            BASE=develop
+          fi
+
+          payload=$(jq -n \
+            --arg source "$source" --arg target "$BASE" \
+            --arg title "[GitHub PR #$NUMBER] $TITLE" \
+            --arg description "$(printf 'Forwarded from GitHub pull request %s by @%s (GitHub user).\n\nMerge with a merge commit or fast-forward (no squash) so GitHub marks the PR as merged after mirroring. Please reply to the contributor on GitHub.\n\n---\n\n%s' "$HTML_URL" "$AUTHOR" "$BODY")" \
+            '{source_branch: $source, target_branch: $target, title: $title, description: $description, labels: "github", remove_source_branch: true, squash: false}')
+          web_url=$(curl --fail-with-body -sS -X POST "${auth[@]}" -H "Content-Type: application/json" \
+            -d "$payload" "$api/merge_requests" | jq -r .web_url)
+          gh pr comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+            "Thanks! This pull request is reviewed and merged on GitLab: $web_url. New commits pushed here are forwarded automatically, and the PR is marked as merged here once it lands."

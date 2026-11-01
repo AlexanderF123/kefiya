@@ -73,6 +73,13 @@ class KefiyaBankStatementImport(Document):
 		elif any(summary.get(key) for key in (
 				"failed", "unreadable", "currency_mismatch")):
 			self.update_status('Partial Success')
+
+		if summary.get("unreadable_lines"):
+			# Skipped, not guessed at -- and said where, so the row can be
+			# found in the file.
+			frappe.msgprint(_(
+				"These lines could not be read and were skipped: {0}"
+			).format(", ".join(str(n) for n in summary["unreadable_lines"])))
 		else:
 			self.update_status('Success')
 

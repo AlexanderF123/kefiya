@@ -293,6 +293,9 @@ msgstr "{0} bei der Bank hinterlegt"
 msgid "cycle not yet verified"
 msgstr "Turnus noch nicht bestätigt"
 
+msgid "{0} without a readable cycle"
+msgstr "{0} ohne lesbaren Turnus"
+
 msgid "Transfer"
 msgstr "Überweisung"
 
@@ -730,3 +733,12 @@ msgstr "Dauerauftrag bei der Bank"
 
 msgid "Scheduled Debit"
 msgstr "Terminierte Lastschrift"
+
+msgid "Forecast"
+msgstr "Vorschau"
+
+msgid "{0} replaced by a higher stage, {1} back"
+msgstr "{0} durch eine höhere Stufe ersetzt, {1} wieder offen"
+
+msgid "{0} not unique, left standing"
+msgstr "{0} nicht eindeutig, stehen gelassen"

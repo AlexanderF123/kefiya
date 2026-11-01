@@ -43,6 +43,12 @@ import re
 #: parts making sense together.
 _MIME_MAX = 64
 
+#: The image types a bank sends as a challenge, and the only ones passed on.
+#: The type ends up in an <img src="data:...">, so it is an allow-list rather
+#: than "starts with image/": that would let 'image/png" onerror="...' through
+#: as a type. Taken from the original (phamos-eu/kefiya, TAN challenge).
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif")
+
 _TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"\s+")
 
@@ -70,7 +76,7 @@ def matrix_code(raw):
         mime = data[2:2 + mime_length].decode("ascii")
     except UnicodeDecodeError:
         return None
-    if not mime.startswith("image/"):
+    if mime not in IMAGE_TYPES:
         return None
 
     start = 2 + mime_length
@@ -130,7 +136,7 @@ def picture_of(response):
         mime, image = matrix
         mime = mime.decode("ascii", "replace") if isinstance(
             mime, (bytes, bytearray)) else str(mime or "")
-        if mime.startswith("image/") and isinstance(
+        if mime in IMAGE_TYPES and isinstance(
                 image, (bytes, bytearray)) and image:
             return mime, bytes(image)
 

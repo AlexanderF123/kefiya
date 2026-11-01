@@ -49,7 +49,7 @@ def get_custom_fields():
 		{
 			"fieldname": "kefiya_column_break",
 			"fieldtype": "Column Break",
-			"insert_after": "company",
+			"insert_after": "kefiya_section",
 		},
 		{
 			"label": "Company Bank Account",

@@ -16,8 +16,6 @@
   "column_break_qzdrd",
   "payment_request_export_action",
   "recipient_email",
-  "toggle_tan_authentication_section",
-  "enable_tan_authentication",
   "auto_reconcile_section",
   "auto_reconcile_after_import",
   "auto_create_advance_payments",
@@ -103,17 +101,6 @@
    "options": "Mastercard Supplier"
   },
   {
-   "fieldname": "toggle_tan_authentication_section",
-   "fieldtype": "Section Break",
-   "label": "Toggle TAN Authentication"
-  },
-  {
-   "default": "0",
-   "fieldname": "enable_tan_authentication",
-   "fieldtype": "Check",
-   "label": "Enable TAN Authentication"
-  },
-  {
    "fieldname": "auto_reconcile_section",
    "fieldtype": "Section Break",
    "label": "Automatic Reconciliation"
@@ -180,7 +167,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-30 21:00:00.000000",
+ "modified": "2026-10-31 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kefiya",
  "name": "Kefiya Settings",

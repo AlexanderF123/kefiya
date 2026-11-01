@@ -340,6 +340,10 @@ class TestAFeedFromOutsideIsReadTheSameWay(unittest.TestCase):
 KNOWN_BUILDERS = [
     "kefiya/utils/statement_import.py",
     "kefiya/utils/import_bank_transaction.py",
+    # The original's demo data for the Kefiya page (phamos-eu/kefiya#52).
+    # Not a booking path: run by hand with bench execute, not whitelisted,
+    # every row tagged "kefiya-demo" so delete() finds exactly those again.
+    "kefiya/utils/demo_data.py",
 ]
 
 

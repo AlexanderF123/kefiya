@@ -351,7 +351,7 @@ class TestFetchGroup(unittest.TestCase):
         """_fetch_session() is the session in legacy-safe form: it opens a
         shared dialog where the whole fetch is session-aware and a no-op where
         it is not. Asserting the raw context manager missed that rename."""
-        self.assertIn("with _fetch_session():", self._source())
+        self.assertIn("with _fetch_session(ordered):", self._source())
         self.assertIn("fints_session", inspect.getsource(client._fetch_session))
 
     def test_one_failure_does_not_abandon_the_rest(self):
@@ -371,11 +371,11 @@ class TestFetchGroup(unittest.TestCase):
 
     def test_a_single_fetch_also_shares_its_dialog(self):
         """Five retrievals per login used to mean five dialogs."""
-        self.assertIn("with _fetch_session():",
+        self.assertIn("with _fetch_session([kefiya_login]):",
                       inspect.getsource(client.fetch_all))
 
     def test_the_group_runs_through_the_same_helper(self):
-        self.assertIn("with _fetch_session():",
+        self.assertIn("with _fetch_session(ordered):",
                       inspect.getsource(client.fetch_group))
 
     def test_one_failed_login_does_not_commit_its_leftovers(self):
@@ -405,8 +405,12 @@ class TestLegacyModeOpensNoSecondDialog(unittest.TestCase):
     """
 
     def test_the_session_is_skipped_without_the_tan_controller(self):
+        # The toggle is per Kefiya Login: every login of the fetch must have
+        # it on, one legacy login among them is enough to skip the session.
         source = inspect.getsource(client._fetch_session)
-        self.assertIn("_use_tan_authentication()", source)
+        self.assertIn(
+            "all(_use_tan_authentication(name) for name in kefiya_logins)",
+            source)
         self.assertIn(
             "nullcontext()", source,
             "In legacy mode every command must open and close its own dialog, "
