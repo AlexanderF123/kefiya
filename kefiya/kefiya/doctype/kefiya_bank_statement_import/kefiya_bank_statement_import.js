@@ -57,6 +57,7 @@ kefiya.show_import_plan = function (plan) {
 				${counted(__("Other currency than the bank account"), plan.currency_mismatch)}
 				${counted(__("Not yet booked by the bank (pending)"), plan.pending)}
 				${counted(__("Repeated within the file"), plan.repeated)}
+				${counted(__("Batch bookings split into single bookings"), plan.batches_split)}
 				${counted(__("Account without IBAN, not assignable"), plan.unaddressable)}
 			</ul>
 			${sameFile ? `<p class="text-warning">${__("This exact file was already imported")}: ${sameFile}</p>` : ""}

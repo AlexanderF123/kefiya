@@ -37,9 +37,11 @@ Read, not guessed. In particular:
 * **An exchange rate is taken only where it is unambiguous.** See
   ``exchange_rate_of``.
 
-One booking per entry (``Ntry``), as the bank booked it. A batch entry with
-several transaction details stays one booking; its details are kept in the
-description.
+A batch entry -- one ``Ntry`` with several transaction details, as Swiss
+banks book QR-bill credits -- becomes one booking per detail, so each can be
+reconciled against its own invoice. Only where the details account for every
+cent of the entry; otherwise it stays one booking, as the bank booked it,
+with its details in the description.
 """
 
 import re
@@ -287,72 +289,152 @@ def _details_text(details, credit):
     return name, iban, " ".join(purpose)
 
 
-def _entry(node, own_iban, account_currency):
-    """One canonical entry out of one ``Ntry``.
+def _details_amount(details, currency):
+    """The amount of one ``TxDtls`` in the account's currency, or None.
 
-    :return: (entry, None) or (None, reason) -- reason one of "pending",
-        "unreadable"
+    ``TxDtls/Amt`` where the version has it, else the transaction amount
+    under ``AmtDtls``. The instructed amount is not it: that is what the
+    payer sent, possibly in another currency, before the bank converted it.
+    """
+    for path in (("Amt",), ("AmtDtls", "TxAmt", "Amt")):
+        value, unit = _amount(_child(details, *path))
+        if value is not None and (unit or currency) == currency:
+            return value
+    return None
+
+
+def _split(details, signed, currency, credit):
+    """The single bookings of a batch entry, or None where it cannot be split.
+
+    Split only where the file accounts for every cent: each detail names its
+    amount in the account's currency, and together they are exactly the
+    entry. A detail without an amount, or a sum that does not come out, means
+    the details are information about the entry, not its parts -- and a
+    booking split on a guess is a balance that no longer matches the bank.
+
+    :return: list of (signed amount, detail) or None
+    """
+    parts = []
+    for one in details:
+        value = _details_amount(one, currency)
+        if value is None:
+            return None
+        indicator = _text(one, "CdtDbtInd").upper()
+        if indicator == "CRDT":
+            part = abs(value)
+        elif indicator == "DBIT":
+            part = -abs(value)
+        else:
+            # Older versions name the direction only on the entry.
+            part = abs(value) if credit else -abs(value)
+        parts.append((part, one))
+    cents = sum(int(round(part * 100)) for part, _ in parts)
+    if cents != int(round(signed * 100)):
+        return None
+    return parts
+
+
+def _part_references(entry_reference, details):
+    """A stable reference for each part of a split batch.
+
+    The details' own ``AcctSvcRef`` where every one has one and they are
+    distinct -- some banks copy the entry's reference onto every detail, and
+    then it identifies nothing. Otherwise the entry's reference with the
+    part's position, which is the same on every import of the same file.
+    """
+    own = [_text(one, "Refs", "AcctSvcRef") for one in details]
+    if all(own) and len(set(own)) == len(own) \
+            and entry_reference not in own:
+        return own
+    if entry_reference:
+        return ["{0}#{1}".format(entry_reference, k)
+                for k in range(1, len(details) + 1)]
+    return [None] * len(details)
+
+
+def _entry(node, own_iban, account_currency):
+    """The canonical entries out of one ``Ntry``.
+
+    One, as the bank booked it -- or, for a batch whose details account for
+    every cent of it, one per detail (see _split).
+
+    :return: (entries, None, split) or ([], reason, False) -- reason one of
+        "pending", "unreadable"; split says whether a batch was taken apart
     """
     if _status(node) != "BOOK":
-        return None, "pending"
+        return [], "pending", False
 
     amount, currency = _amount(_child(node, "Amt"))
     indicator = _text(node, "CdtDbtInd").upper()
     day = _booking_day(node)
     if amount is None or indicator not in ("CRDT", "DBIT") or day is None:
-        return None, "unreadable"
+        return [], "unreadable", False
     if account_currency and currency and currency != account_currency:
         # Ntry/Amt is in the account's currency by definition. A file that
         # says otherwise is not read as if it agreed with itself.
-        return None, "unreadable"
+        return [], "unreadable", False
 
+    currency = currency or account_currency or None
     credit = indicator == "CRDT"
     signed = abs(amount) if credit else -abs(amount)
+    posting_text = _text(node, "AddtlNtryInf")
+    reference = _text(node, "AcctSvcRef")
+    entry_fx = exchange_rate_of(_child(node, "AmtDtls"))
 
     details = []
     for block in _children(node, "NtryDtls"):
         details.extend(_children(block, "TxDtls"))
 
-    counterparty, iban, purpose = "", None, ""
-    if len(details) == 1:
-        counterparty, iban, purpose = _details_text(details[0], credit)
-    elif details:
-        parts = []
+    def booking(part_amount, detail, part_reference, fx):
+        counterparty, iban, purpose = ("", None, "")
+        if detail is not None:
+            counterparty, iban, purpose = _details_text(
+                detail, part_amount > 0)
+        return {
+            "date": day,
+            "amount": part_amount,
+            "description": " ".join(p for p in (posting_text, purpose) if p),
+            "counterparty": counterparty,
+            "iban": iban,
+            "own_iban": own_iban,
+            "reference": part_reference or None,
+            "currency": currency,
+            "fx": fx,
+        }
+
+    if len(details) > 1:
+        parts = _split(details, signed, currency, credit)
+        if parts:
+            references = _part_references(reference, details)
+            return [booking(part, one, ref,
+                            exchange_rate_of(_child(one, "AmtDtls"))
+                            or entry_fx)
+                    for (part, one), ref in zip(parts, references)], \
+                None, True
+
+        # Kept as one booking: its details go into the description.
+        pieces = []
         for one in details:
             name, text = _details_text(one, credit)[0::2]
-            value, unit = _amount(_child(one, "Amt"))
-            if value is None:
-                value, unit = _amount(_child(one, "AmtDtls", "TxAmt", "Amt"))
+            value = _details_amount(one, currency)
             piece = " ".join(p for p in (
                 name, text,
-                "{0:.2f} {1}".format(value, unit or "") if value else "")
+                "{0:.2f} {1}".format(value, currency or "") if value else "")
                 if p)
             if piece:
-                parts.append(piece.strip())
-        purpose = "; ".join(parts)
+                pieces.append(piece.strip())
+        entry = booking(signed, None, reference, entry_fx)
+        entry["description"] = " ".join(
+            p for p in (posting_text, "; ".join(pieces)) if p)
+        return [entry], None, False
 
-    reference = _text(node, "AcctSvcRef")
-    if not reference and len(details) == 1:
-        reference = _text(details[0], "Refs", "AcctSvcRef")
-
-    fx = exchange_rate_of(_child(node, "AmtDtls"))
-    if fx is None and len(details) == 1:
-        fx = exchange_rate_of(_child(details[0], "AmtDtls"))
-
-    description = " ".join(p for p in (
-        _text(node, "AddtlNtryInf"), purpose) if p)
-
-    return {
-        "date": day,
-        "amount": signed,
-        "description": description,
-        "counterparty": counterparty,
-        "iban": iban,
-        "own_iban": own_iban,
-        "reference": reference or None,
-        "currency": currency or account_currency or None,
-        "fx": fx,
-    }, None
+    detail = details[0] if details else None
+    if not reference and detail is not None:
+        reference = _text(detail, "Refs", "AcctSvcRef")
+    fx = entry_fx
+    if fx is None and detail is not None:
+        fx = exchange_rate_of(_child(detail, "AmtDtls"))
+    return [booking(signed, detail, reference, fx)], None, False
 
 
 def read_statement(raw):
@@ -361,7 +443,7 @@ def read_statement(raw):
     :param raw: the file's bytes (or text)
     :return: (entries, notes) -- notes counts what was not read and why:
         {"format", "version", "unreadable", "pending", "repeated",
-         "accounts_without_iban", "unaddressable"}
+         "accounts_without_iban", "unaddressable", "batches_split"}
     :raises CamtError: for a camt file this reader does not book from
     """
     if isinstance(raw, str):
@@ -394,7 +476,8 @@ def read_statement(raw):
 
     notes = {"format": "camt053", "version": "camt.053.001." + version,
              "unreadable": 0, "pending": 0, "repeated": 0,
-             "accounts_without_iban": 0, "unaddressable": 0}
+             "accounts_without_iban": 0, "unaddressable": 0,
+             "batches_split": 0}
     statement_root = _child(root, "BkToCstmrStmt")
     if statement_root is None:
         raise CamtError("no BkToCstmrStmt in this document")
@@ -417,20 +500,23 @@ def read_statement(raw):
         account_currency = _text(account, "Ccy").upper() or None
 
         for node in _children(statement, "Ntry"):
-            entry, reason = _entry(node, own_iban, account_currency)
-            if entry is None:
+            found, reason, split = _entry(node, own_iban, account_currency)
+            if reason:
                 notes[reason] += 1
                 continue
-            # The same entry in two overlapping statements of one file is
-            # one booking. Only by the bank's reference: two entries that
-            # merely look alike are two bookings (see wiederholung).
-            if entry["reference"]:
-                key = (own_iban, entry["reference"])
-                if key in seen:
-                    notes["repeated"] += 1
-                    continue
-                seen.add(key)
-            entries.append(entry)
+            if split:
+                notes["batches_split"] += 1
+            for entry in found:
+                # The same entry in two overlapping statements of one file
+                # is one booking. Only by the bank's reference: two entries
+                # that merely look alike are two bookings (wiederholung).
+                if entry["reference"]:
+                    key = (own_iban, entry["reference"])
+                    if key in seen:
+                        notes["repeated"] += 1
+                        continue
+                    seen.add(key)
+                entries.append(entry)
 
     notes["accounts_without_iban"] = len(without_iban)
     if len(without_iban) > 1:

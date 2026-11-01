@@ -58,19 +58,26 @@ def _entry(amount="100.00", ccy="CHF", ind="CRDT", status="BOOK",
 
 
 def _tx(name="Erika Beispiel", iban=PAYER, side="Dbtr", purpose="Rechnung 1",
-        v8=True, qr=None, amount_details=""):
+        v8=True, qr=None, amount_details="", amount=None, ccy="CHF",
+        ref=None, ind=None):
     party = ("<{s}><Pty><Nm>{n}</Nm></Pty></{s}>" if v8
              else "<{s}><Nm>{n}</Nm></{s}>").format(s=side, n=name)
     strd = ("<Strd><CdtrRefInf><Ref>{0}</Ref></CdtrRefInf></Strd>".format(qr)
             if qr else "")
+    head = "<Refs>{0}<EndToEndId>E2E</EndToEndId></Refs>".format(
+        "<AcctSvcRef>{0}</AcctSvcRef>".format(ref) if ref else "")
+    if amount is not None:
+        head += '<Amt Ccy="{0}">{1}</Amt>'.format(ccy, amount)
+    if ind:
+        head += "<CdtDbtInd>{0}</CdtDbtInd>".format(ind)
     return """<TxDtls>
-       <Refs><EndToEndId>E2E</EndToEndId></Refs>
+       {head}
        {amtdtls}
        <RltdPties>{party}<{s}Acct><Id><IBAN>{iban}</IBAN></Id></{s}Acct>
        </RltdPties>
        <RmtInf><Ustrd>{purpose}</Ustrd>{strd}</RmtInf>
       </TxDtls>""".format(party=party, s=side, iban=iban, purpose=purpose,
-                          strd=strd, amtdtls=amount_details)
+                          strd=strd, amtdtls=amount_details, head=head)
 
 
 def _details(*txs):
@@ -259,8 +266,8 @@ class TestTheCounterparty(unittest.TestCase):
         self.assertIn(qr, entries[0]["description"])
         self.assertIn("Gutschrift", entries[0]["description"])
 
-    def test_a_batch_entry_stays_one_booking(self):
-        """The bank booked one amount; one booking is what it booked."""
+    def test_a_batch_without_amounts_stays_one_booking(self):
+        """Details without amounts are information, not parts."""
         entries, _ = camt.read_statement(_statement(_entry(
             amount="300.00", details=_details(
                 _tx(name="Erika Beispiel", purpose="R1"),
@@ -270,6 +277,109 @@ class TestTheCounterparty(unittest.TestCase):
         self.assertEqual(entries[0]["counterparty"], "")
         self.assertIn("Erika Beispiel", entries[0]["description"])
         self.assertIn("Max Muster", entries[0]["description"])
+
+
+class TestABatchIsSplitWhereItAddsUp(unittest.TestCase):
+    """A Swiss bank books a day's QR-bill credits as one entry. Each detail
+    is one invoice paid -- split, each can be reconciled on its own."""
+
+    def _batch(self, total="300.00", first="100.00", second="200.00",
+               ref="BATCH-1", **tx):
+        return camt.read_statement(_statement(_entry(
+            amount=total, ref=ref, details=_details(
+                _tx(name="Erika Beispiel", purpose="R1", amount=first, **tx),
+                _tx(name="Max Muster", iban=PAYEE, purpose="R2",
+                    amount=second, **tx)))))
+
+    def test_one_booking_per_detail(self):
+        entries, notes = self._batch()
+        self.assertEqual([e["amount"] for e in entries], [100.0, 200.0])
+        self.assertEqual([e["counterparty"] for e in entries],
+                         ["Erika Beispiel", "Max Muster"])
+        self.assertEqual([e["iban"] for e in entries], [PAYER, PAYEE])
+        self.assertEqual(notes["batches_split"], 1)
+
+    def test_each_part_keeps_its_own_purpose(self):
+        entries, _ = self._batch()
+        self.assertIn("R1", entries[0]["description"])
+        self.assertNotIn("R2", entries[0]["description"])
+        self.assertIn("Gutschrift", entries[1]["description"])
+
+    def test_the_parts_add_up_to_what_the_bank_booked(self):
+        entries, _ = self._batch()
+        self.assertEqual(sum(e["amount"] for e in entries), 300.0)
+
+    def test_a_sum_that_does_not_come_out_is_not_split(self):
+        """A balance split on a guess no longer matches the bank."""
+        entries, notes = self._batch(total="300.00", first="100.00",
+                                     second="199.99")
+        self.assertEqual([e["amount"] for e in entries], [300.0])
+        self.assertEqual(notes["batches_split"], 0)
+
+    def test_a_detail_without_an_amount_prevents_the_split(self):
+        entries, _ = camt.read_statement(_statement(_entry(
+            amount="300.00", details=_details(
+                _tx(amount="100.00"), _tx(purpose="R2")))))
+        self.assertEqual(len(entries), 1)
+
+    def test_an_amount_in_another_currency_is_not_a_part(self):
+        """The instructed EUR amount is not what the CHF account received."""
+        entries, _ = self._batch(ccy="EUR")
+        self.assertEqual(len(entries), 1)
+
+    def test_parts_are_identified_by_position_under_the_entry(self):
+        entries, _ = self._batch(ref="BATCH-1")
+        self.assertEqual([e["reference"] for e in entries],
+                         ["BATCH-1#1", "BATCH-1#2"])
+
+    def test_distinct_own_references_of_the_details_are_used(self):
+        entries, _ = camt.read_statement(_statement(_entry(
+            amount="300.00", ref="BATCH-1", details=_details(
+                _tx(amount="100.00", ref="TX-A"),
+                _tx(amount="200.00", ref="TX-B")))))
+        self.assertEqual([e["reference"] for e in entries], ["TX-A", "TX-B"])
+
+    def test_a_reference_copied_onto_every_detail_is_not_used(self):
+        entries, _ = camt.read_statement(_statement(_entry(
+            amount="300.00", ref="BATCH-1", details=_details(
+                _tx(amount="100.00", ref="BATCH-1"),
+                _tx(amount="200.00", ref="BATCH-1")))))
+        self.assertEqual([e["reference"] for e in entries],
+                         ["BATCH-1#1", "BATCH-1#2"])
+
+    def test_the_same_batch_in_two_overlapping_statements_is_one(self):
+        batch = _entry(amount="300.00", ref="BATCH-1", details=_details(
+            _tx(amount="100.00"), _tx(amount="200.00")))
+        second = """<Stmt><Id>S2</Id>
+          <Acct><Id><IBAN>{0}</IBAN></Id><Ccy>CHF</Ccy></Acct>
+          {1}</Stmt>""".format(OWN, batch)
+        entries, notes = camt.read_statement(_statement(
+            batch, extra_statements=second))
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(notes["repeated"], 2)
+
+    def test_a_debit_batch_with_a_returned_part(self):
+        """Details with their own direction: 500 out, 50 back, 450 booked."""
+        entries, _ = camt.read_statement(_statement(_entry(
+            amount="450.00", ind="DBIT", details=_details(
+                _tx(side="Cdtr", amount="500.00", ind="DBIT"),
+                _tx(side="Cdtr", amount="50.00", ind="CRDT")))))
+        self.assertEqual([e["amount"] for e in entries], [-500.0, 50.0])
+
+    def test_each_part_carries_its_own_rate(self):
+        def details(eur, chf, rate):
+            return """<AmtDtls>
+              <InstdAmt><Amt Ccy="EUR">{0}</Amt><CcyXchg><SrcCcy>EUR</SrcCcy>
+              <TrgtCcy>CHF</TrgtCcy><UnitCcy>EUR</UnitCcy>
+              <XchgRate>{2}</XchgRate></CcyXchg></InstdAmt>
+              <TxAmt><Amt Ccy="CHF">{1}</Amt></TxAmt></AmtDtls>""".format(
+                eur, chf, rate)
+        entries, _ = camt.read_statement(_statement(_entry(
+            amount="282.00", details=_details(
+                _tx(amount_details=details("100.00", "94.00", "0.94")),
+                _tx(amount_details=details("200.00", "188.00", "0.94"))))))
+        self.assertEqual([e["amount"] for e in entries], [94.0, 188.0])
+        self.assertEqual([e["fx"]["rate"] for e in entries], [0.94, 0.94])
 
 
 class TestTheBanksExchangeRate(unittest.TestCase):
