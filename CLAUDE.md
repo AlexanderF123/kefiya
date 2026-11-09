@@ -101,6 +101,35 @@ HKSAL. Beim Zählen aus MT940 gilt: **`entry_date` (Buchungstag), nicht
 `date` (Valuta)** — kefiya speichert den Buchungstag, und die beiden weichen
 regelmäßig um Tage ab.
 
+## Einmalige Schreibvorgänge: Util-API-Script, kein Scheduler-Job
+
+Ein einmaliger Schreibvorgang auf der Instanz — Datensätze anlegen, Felder
+nachziehen, Werte korrigieren — läuft als **API-Server-Script mit
+`?mode=plan|execute`**:
+
+- `plan` schreibt nichts. Es zeigt, was sich ändern würde (Anzahl,
+  Stichprobe, alter und neuer Wert).
+- `execute` ruft der Nutzer selbst auf, nachdem er den Plan gesehen hat.
+- Das Script ist idempotent: ein zweiter `execute` findet nichts mehr zu tun
+  und schreibt nichts, auch keinen Comment.
+
+**Nie ein Scheduler-Event-Script, das sich nach dem ersten Lauf selbst
+abschaltet.** So lief es einmal schief:
+
+> Drei Einmal-Jobs sollten sich nach dem ersten Lauf per
+> `frappe.db.set_value("Server Script", …, "disabled", 1)` abschalten.
+> `db.set_value` geht an `validate`/`on_update` vorbei, also blieb der
+> zugehörige Scheduled Job Type auf `stopped=0` — und
+> `execute_scheduled_method` prüft `disabled` nicht. Die Jobs liefen acht
+> Tage alle 5 Minuten weiter, je rund 2.180 Läufe. Jeder Lauf setzte das
+> `transfer_limit` der betroffenen Logins zurück und hinterließ einen leeren
+> Comment, zusammen rund 6.940.
+
+Daraus: Ein Job, der nur einmal laufen soll, darf nicht von seiner eigenen
+Abschaltung abhängen. Und ein Schreibvorgang, der nicht idempotent ist,
+richtet bei jeder Wiederholung neuen Schaden an — er überschreibt auch
+Werte, die inzwischen jemand bewusst geändert hat.
+
 ## Nichts löschen, nichts senden ohne Zustimmung
 
 Löschungen von Buchungen und das Absenden von Aufträgen brauchen die
