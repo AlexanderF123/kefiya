@@ -649,3 +649,4 @@ Fetch Holdings Now,Bestände jetzt abrufen
 Asking the bank for the holdings ...,Bestände werden bei der Bank abgefragt …
 Holdings not fetched,Bestände nicht abgerufen
 Enter Holding,Bestand erfassen
+"Executed by the bank: debited on {0} ({1}).","Von der Bank ausgeführt: abgebucht am {0} ({1})."

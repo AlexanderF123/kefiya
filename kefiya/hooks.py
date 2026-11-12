@@ -186,6 +186,10 @@ scheduler_events = {
         # Standing orders kept here: their transfers go into the outgoing
         # payments on their date, approved. Never sent from here.
         "kefiya.utils.standing_order_execute.place_due_transfers",
+        # What the bank executed on its own -- dated transfers it held and
+        # standing orders it keeps -- read from the statement. Also runs after
+        # every import; this catches debits imported before it existed.
+        "kefiya.utils.bank_execution.settle_executed",
     ]
 }
 
