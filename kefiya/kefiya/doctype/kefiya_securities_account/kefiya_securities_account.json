@@ -1,0 +1,162 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:account_number",
+ "naming_rule": "By fieldname",
+ "creation": "2026-06-28 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "account_number",
+  "account_name",
+  "company",
+  "online_banking_url",
+  "column_break_main",
+  "kefiya_login",
+  "subaccount_number",
+  "bank",
+  "description",
+  "section_break_fetch",
+  "fetch_holdings",
+  "last_holdings_status",
+  "column_break_fetch",
+  "last_holdings_fetch",
+  "last_holdings_message"
+ ],
+ "fields": [
+  {
+   "description": "Securities account (Depot) number -- used as the unique identifier.",
+   "fieldname": "account_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Account Number",
+   "reqd": 1,
+   "set_only_once": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "account_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Account Name"
+  },
+  {
+   "description": "The company that owns this securities account.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "kefiya_login",
+   "fieldtype": "Link",
+   "label": "Kefiya Login",
+   "options": "Kefiya Login"
+  },
+  {
+   "fieldname": "bank",
+   "fieldtype": "Link",
+   "label": "Bank",
+   "options": "Bank"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "online_banking_url",
+   "fieldtype": "Data",
+   "options": "URL",
+   "label": "Online Banking Link",
+   "description": "The bank's own page for this securities account. Opens from the form and from the securities page."
+  },
+  {
+   "fieldname": "subaccount_number",
+   "fieldtype": "Data",
+   "label": "Subaccount Number",
+   "depends_on": "kefiya_login",
+   "description": "Only if the bank needs one to address this securities account. Leave blank: it is read from the bank's account list."
+  },
+  {
+   "fieldname": "section_break_fetch",
+   "fieldtype": "Section Break",
+   "label": "Holdings Fetch"
+  },
+  {
+   "fieldname": "fetch_holdings",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Fetch Holdings from the Bank",
+   "depends_on": "kefiya_login",
+   "description": "Fetch the holdings over the linked login, at most once a day. Untick to maintain the holdings by hand."
+  },
+  {
+   "fieldname": "last_holdings_status",
+   "fieldtype": "Select",
+   "options": "\nOK\nEmpty\nFailed",
+   "label": "Last Fetch Status",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_fetch",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_holdings_fetch",
+   "fieldtype": "Datetime",
+   "label": "Last Fetch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_holdings_message",
+   "fieldtype": "Small Text",
+   "label": "Last Fetch Message",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-01 19:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kefiya",
+ "name": "Kefiya Securities Account",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
