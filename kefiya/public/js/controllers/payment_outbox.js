@@ -252,25 +252,65 @@ kefiya.payment_outbox = function (root) {
 	if (!root) return null;
 	kefiya.outbox_style(root);
 
-	// Two parts: the orders waiting to be sent, and below them the standing
-	// orders -- the ones kept here place some of those orders. Each draws into
-	// its own element, because render() below rewrites its element on every
-	// draw and would take the other part with it.
+	// Two parts: the orders waiting to be sent, and the standing orders -- the
+	// ones kept here place some of those orders. One is shown at a time,
+	// chosen by the two buttons on top; a third button refreshes the part on
+	// show, and it is the only refresh on the page. Each part draws into its
+	// own element, because render() below rewrites its element on every draw
+	// and would take the other part with it.
+	//
+	// This replaced a checkbox "only standing orders" that filtered the
+	// transfers down to those a standing order had placed, with the standing
+	// orders themselves listed underneath, each part with its own refresh
+	// button. Two ways to say "standing orders" and two refresh buttons on one
+	// page is one of each too many.
 	const host = root;
-	host.innerHTML = "<div class='zk-main'></div><div class='zk-so'></div>";
-	root = host.querySelector(".zk-main");
-	if (kefiya.standing_orders_panel) {
-		kefiya.standing_orders_panel(host.querySelector(".zk-so"));
-	}
-
 	const esc = frappe.utils.escape_html;
 	const kept = kefiya.outbox_settings.read();
+	const PARTS = [["transfers", __("Outgoing transfers")],
+		["standing", __("Standing orders")]];
+	let part = kept.part === "standing" && kefiya.standing_orders_panel
+		? "standing" : "transfers";
+
+	let tabs = "<div class='zk-bar zk-parts'>";
+	PARTS.forEach(function (p) {
+		if (p[0] === "standing" && !kefiya.standing_orders_panel) return;
+		tabs += "<button data-part='" + p[0] + "'>" + esc(p[1]) + "</button>";
+	});
+	tabs += "<button data-part-act='reload'>" + __("refresh the list")
+		+ "</button></div>";
+	host.innerHTML = tabs
+		+ "<div class='zk-main'></div><div class='zk-so'></div>";
+	root = host.querySelector(".zk-main");
+	const soEl = host.querySelector(".zk-so");
+	const standingPanel = kefiya.standing_orders_panel
+		? kefiya.standing_orders_panel(soEl) : null;
+
+	function showPart(name) {
+		part = name;
+		root.style.display = part === "transfers" ? "" : "none";
+		soEl.style.display = part === "standing" ? "" : "none";
+		host.querySelectorAll("[data-part]").forEach(function (b) {
+			b.className = b.getAttribute("data-part") === part
+				? "zk-primary" : "";
+		});
+	}
+	host.querySelectorAll("[data-part]").forEach(function (b) {
+		b.onclick = function () {
+			showPart(b.getAttribute("data-part"));
+			remember();
+		};
+	});
+	host.querySelector("[data-part-act='reload']").onclick = function () {
+		if (part === "standing" && standingPanel) standingPanel.reload();
+		else load();
+	};
+	showPart(part);
 
 	const view = {
 		rows: [], payers: [], can: {}, today: "",
 		query: "", selected: {},
 		showSent: !!kept.show_sent,
-		standingOnly: !!kept.standing_only,
 		sortBy: kept.sort_by || null,
 		sortDir: kept.sort_dir === "desc" ? "desc" : "asc",
 		busy: false,
@@ -308,7 +348,7 @@ kefiya.payment_outbox = function (root) {
 		kefiya.outbox_settings.write({
 			sort_by: view.sortBy, sort_dir: view.sortDir,
 			show_sent: view.showSent ? 1 : 0,
-			standing_only: view.standingOnly ? 1 : 0,
+			part: part,
 		});
 	}
 
@@ -322,8 +362,7 @@ kefiya.payment_outbox = function (root) {
 			// nothing in a stored script notices; here every one of them is a
 			// source string with a translation a test reads.
 			method: "kefiya.utils.outbox.outbox_data",
-			args: { q: view.query, show_sent: view.showSent ? 1 : 0,
-				standing_only: view.standingOnly ? 1 : 0 },
+			args: { q: view.query, show_sent: view.showSent ? 1 : 0 },
 		}).then(function (r) {
 			const m = (r && r.message) || {};
 			view.rows = m.rows || [];
@@ -413,11 +452,7 @@ kefiya.payment_outbox = function (root) {
 		h += "<label class='zk-chk'><input type='checkbox' data-act='sent'"
 			+ (view.showSent ? " checked" : "") + "> "
 			+ __("show sent") + "</label>";
-		// Orders a standing order placed, and only those.
-		h += "<label class='zk-chk'><input type='checkbox' data-act='standing'"
-			+ (view.standingOnly ? " checked" : "") + "> "
-			+ __("only standing orders") + "</label>";
-		h += "<button data-act='reload'>" + __("Refresh") + "</button></div>";
+		h += "</div>";
 		return h;
 	}
 
@@ -586,14 +621,6 @@ kefiya.payment_outbox = function (root) {
 			if (act === "sent") {
 				el.onchange = function () {
 					view.showSent = el.checked;
-					remember();
-					load();
-				};
-				return;
-			}
-			if (act === "standing") {
-				el.onchange = function () {
-					view.standingOnly = el.checked;
 					remember();
 					load();
 				};

@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Phamos GmbH and contributors
 // For license information, please see license.txt
 //
-// The standing orders, below the outgoing payments.
+// The standing orders, the second part of the outgoing payments page.
 //
 //   kefiya.standing_orders_panel(el)
 //
@@ -89,7 +89,7 @@ kefiya.standing_orders_panel = function (el) {
 
 	function render() {
 		const d = view.data;
-		let h = "<h4 style='margin:28px 0 8px'>" + __("Standing orders")
+		let h = "<h4 style='margin:8px 0 8px'>" + __("Standing orders")
 			+ " <span class='zk-sub' style='font-weight:normal'>"
 			+ __("active: {0} a month", [money(d.monthly)]) + "</span></h4>";
 
@@ -104,7 +104,9 @@ kefiya.standing_orders_panel = function (el) {
 				+ (view.scope === s[0] ? " class='zk-primary'" : "") + ">"
 				+ esc(s[1]) + " (" + n + ")</button>";
 		});
-		h += "<button data-so='reload'>" + __("Refresh") + "</button></div>";
+		// No refresh of its own: the page has one, on top, for whichever part
+		// is shown (payment_outbox.js). It calls reload() below.
+		h += "</div>";
 
 		if (!d.rows.length) {
 			el.innerHTML = h + "<div class='zk-empty'>"

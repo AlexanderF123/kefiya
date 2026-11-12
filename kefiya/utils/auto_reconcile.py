@@ -55,6 +55,11 @@ def run_after_import(kefiya_login, from_date, to_date):
     :param from_date: imported window start
     :param to_date: imported window end
     """
+    # Before the reconciliation switch: recording that the bank executed a
+    # dated transfer or a standing order is bookkeeping about our own orders,
+    # not a booking, and must not wait for a setting about bookings.
+    _settle_executed_orders(kefiya_login)
+
     settings = frappe.get_single("Kefiya Settings")
     if not settings.auto_reconcile_after_import:
         return
@@ -103,6 +108,27 @@ def run_after_import(kefiya_login, from_date, to_date):
         # an import whose transactions are already booked.
         frappe.log_error(
             title="Kefiya auto-reconcile skipped",
+            message=frappe.get_traceback(),
+            reference_doctype="Kefiya Login",
+            reference_name=kefiya_login,
+        )
+
+
+def _settle_executed_orders(kefiya_login):
+    """Dated transfers and bank-kept standing orders the statement shows paid.
+
+    Guarded like every stage here: it may never fail an import.
+    """
+    try:
+        from kefiya.utils.bank_execution import settle_executed
+
+        bank_account = frappe.db.get_value("Kefiya Login", kefiya_login,
+                                           "bank_account")
+        if bank_account:
+            settle_executed(bank_account=bank_account)
+    except Exception:
+        frappe.log_error(
+            title="Kefiya: execution by the bank not recorded",
             message=frappe.get_traceback(),
             reference_doctype="Kefiya Login",
             reference_name=kefiya_login,

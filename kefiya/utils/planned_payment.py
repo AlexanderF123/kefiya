@@ -618,14 +618,27 @@ def apply_stage_ladder():
             "status": "Open", "cancellation_reason": None,
             "superseded_by": None})
 
-    rows = frappe.get_all(
+    fields = ["name", "source_kind", "from_bank", "status", "bank_account",
+              "direction", "expected_amount", "due_date", "counterparty_iban",
+              "party_type", "party", "purpose"]
+    rows = [dict(r) for r in frappe.get_all(
         DOCTYPE,
         filters={"status": ("in", list(fs.OPEN_STATES))},
-        fields=["name", "source_kind", "from_bank", "status", "bank_account",
-                "direction", "expected_amount", "due_date",
-                "counterparty_iban", "party_type", "party"],
-        limit_page_length=0)
-    rows = [dict(r) for r in rows]
+        fields=fields, limit_page_length=0)]
+    # Settled lines may replace an open one too (see forecast_stages.decide),
+    # but only recent ones can: two stages of a payment lie at most MAX_DAYS
+    # apart, and the oldest open line bounds how far back that reaches.
+    dues = [getdate(r["due_date"]) for r in rows if r.get("due_date")]
+    if dues:
+        oldest = min(dues)
+        if oldest:
+            settled = [s for s in fs.ALIVE_STATES
+                       if s not in fs.OPEN_STATES]
+            rows += [dict(r) for r in frappe.get_all(
+                DOCTYPE,
+                filters={"status": ("in", settled),
+                         "due_date": (">=", add_days(oldest, -fs.MAX_DAYS))},
+                fields=fields, limit_page_length=0)]
     _party_ibans(rows)
     decision = fs.decide(rows)
     for lower, higher in decision["supersede"]:

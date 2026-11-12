@@ -320,11 +320,19 @@ class KefiyaTransfer(Document):
         # holding that order until its date, so the date is no longer ours to
         # move. Changing it here would only make this document disagree with
         # what the bank will actually do.
+        #
+        # Only a changed DATE is refused. This used to throw on every save of
+        # such an order, so not even its status could be written: a dated
+        # transfer the bank had long executed stayed "Scheduled at Bank" in
+        # the outgoing payments, and setting it to "Sent" was refused with a
+        # message about its date.
         if self.status in ("Sent", "Scheduled at Bank"):
-            frappe.throw(_(
-                "This transfer has gone to the bank. Its date cannot be"
-                " changed here -- recall it with your bank if it must not be"
-                " executed as it stands."))
+            if self.has_value_changed("execution_date"):
+                frappe.throw(_(
+                    "This transfer has gone to the bank. Its date cannot be"
+                    " changed here -- recall it with your bank if it must not"
+                    " be executed as it stands."))
+            return
 
         # A date that is not in the future is not something a bank can be
         # asked to hold -- it is ours to hold. The same silent correction
