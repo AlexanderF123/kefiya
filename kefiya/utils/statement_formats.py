@@ -250,6 +250,10 @@ def detect_profile(header):
 
 _AMOUNT_NOISE = re.compile(r"[^\d,.\-+]")
 
+#: An amount written the German way: dots only between groups of three
+#: digits, a decimal comma followed by at least one digit.
+_GERMAN_AMOUNT = re.compile(r"(\d{1,3}(\.\d{3})+|\d+)(,\d+)?")
+
 
 def _one_kind_of_separator(digits, separator):
     """Digits with only commas or only dots in them, as a float-ready string.
@@ -311,10 +315,15 @@ def parse_amount(value, decimal_comma=False):
     digits = text.lstrip("-")
 
     if decimal_comma:
-        try:
-            amount = float(digits.replace(".", "").replace(",", "."))
-        except ValueError:
+        # The dot separates thousands only, so it stands between groups of
+        # three: "1.500", "2.380,5". "12.50" is no amount such a format
+        # writes -- read as German it would be 1250, but it is far more
+        # likely a decimal point. Unreadable, so the row is skipped and
+        # named, rather than booked at a hundred times its value. From the
+        # original (phamos-eu/kefiya#62).
+        if not _GERMAN_AMOUNT.fullmatch(digits):
             return None
+        amount = float(digits.replace(".", "").replace(",", "."))
         return -amount if negative else amount
 
     last_dot, last_comma = digits.rfind("."), digits.rfind(",")
