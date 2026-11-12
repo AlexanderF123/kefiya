@@ -128,29 +128,57 @@ def same_payment(higher, lower, max_days=MAX_DAYS):
     return bool(mine) and mine in _ibans(lower)
 
 
+#: Leading letters and digits of a purpose that must agree. Enough to tell
+#: "102 Management fee ..." from "206 Management fee ...", short enough to
+#: survive a bank that cuts the purpose into lines.
+PURPOSE_KEY_LENGTH = 16
+
+
+def purpose_key(text):
+    return "".join(ch for ch in str(text or "").upper()
+                   if ch.isalnum())[:PURPOSE_KEY_LENGTH]
+
+
+def purposes_agree(one, other):
+    """Do two lines name the same purpose? False when either names none."""
+    a, b = purpose_key(one.get("purpose")), purpose_key(other.get("purpose"))
+    return bool(a) and bool(b) and a == b
+
+
 def decide(rows, max_days=MAX_DAYS):
     """Which open lines are superseded, and by which.
 
+    Only an open line is replaced, but the line replacing it may already be
+    settled: once the bank has booked a standing order, its report of it is
+    Matched -- and the standing order's own line for the same run is no less
+    a duplicate for that. Looking for replacements among open lines only left
+    exactly those duplicates standing, overdue, after the money had gone.
+
+    Where amount, IBAN and date leave more than one candidate -- two monthly
+    fees of the same size to the same payee are an ordinary case -- the
+    purpose decides, and only if it names exactly one (purposes_agree).
+
     :param rows: forecast lines as dicts -- name, source_kind, from_bank,
         status, bank_account, direction, expected_amount, due_date,
-        counterparty_iban, optional party_ibans
+        counterparty_iban, optional party_ibans, optional purpose
     :return: {"supersede": [(lower_name, higher_name)],
               "ambiguous": [(higher_name, [candidate names])]}
     """
     open_rows = [r for r in rows if r.get("status") in OPEN_STATES]
+    for r in rows:
+        r["stage"] = stage_of(r.get("source_kind"), r.get("from_bank"))
     # Only lines on the same account, in the same direction, of the same
     # amount can be one payment. Grouping first keeps a forecast of a few
     # thousand lines from being compared pair by pair.
     groups = {}
     for r in open_rows:
-        r["stage"] = stage_of(r.get("source_kind"), r.get("from_bank"))
         key = (r.get("bank_account") or "", r.get("direction") or "Outgoing",
                int(round(float(r.get("expected_amount") or 0) * 100)))
         groups.setdefault(key, []).append(r)
 
     chosen = {}
     ambiguous = []
-    for higher in open_rows:
+    for higher in [r for r in rows if r.get("status") in ALIVE_STATES]:
         cents = int(round(float(higher.get("expected_amount") or 0) * 100))
         pool = []
         for c in (cents - 1, cents, cents + 1):
@@ -166,15 +194,26 @@ def decide(rows, max_days=MAX_DAYS):
         # not yet replaced is the invoice's business, not the bank's.
         top = max(c["stage"] for c in candidates)
         nearest = [c for c in candidates if c["stage"] == top]
+        if len(nearest) > 1:
+            named = [c for c in nearest if purposes_agree(higher, c)]
+            if len(named) == 1:
+                nearest = named
         if len(nearest) == 1:
             chosen.setdefault(nearest[0]["name"], []).append(higher["name"])
         else:
             ambiguous.append((higher["name"],
                               sorted(c["name"] for c in nearest)))
 
+    by_name = {r.get("name"): r for r in rows}
     supersede = []
     for lower_name in sorted(chosen):
         highers = chosen[lower_name]
+        if len(highers) > 1:
+            lower = by_name.get(lower_name) or {}
+            named = [h for h in highers
+                     if purposes_agree(by_name.get(h) or {}, lower)]
+            if len(named) == 1:
+                highers = named
         if len(highers) == 1:
             supersede.append((lower_name, highers[0]))
         else:

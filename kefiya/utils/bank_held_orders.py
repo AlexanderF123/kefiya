@@ -335,14 +335,33 @@ def standing_order_values(row):
     }, None
 
 
+def task_id_stem(task_id):
+    """The part of a bank's order identifier that stays the same.
+
+    Measured 11/2026 at a Volksbank: the identifier of one standing order
+    ends in a counter that the bank raises with every execution --
+    ``..._33`` before the run on the 1st, ``..._34`` after it. Compared as a
+    whole, the same order looked new after each run, and the fetch filed it
+    a second time: every one of those orders twice in the list, twice in the
+    monthly total and twice in the forecast.
+    """
+    text = str(task_id or "").strip()
+    head, sep, tail = text.rpartition("_")
+    if sep and head and tail.isdigit():
+        return head
+    return text
+
+
 def same_order(values, existing):
     """Is the bank's order the one already on file?
 
-    The bank's order identifier decides where both have it. Without one:
-    same IBAN, same amount to the cent, same day.
+    The bank's order identifier decides where both have it -- without its
+    run counter, see task_id_stem. Without one: same IBAN, same amount to the
+    cent, same day.
     """
     if values.get("bank_task_id") and existing.get("bank_task_id"):
-        return values["bank_task_id"] == existing["bank_task_id"]
+        return (task_id_stem(values["bank_task_id"])
+                == task_id_stem(existing["bank_task_id"]))
     iban = "".join((existing.get("counterparty_iban") or "").split()).upper()
     return (iban == values["counterparty_iban"]
             and abs(float(existing.get("amount") or 0)

@@ -174,8 +174,21 @@ class TestATransferCanStartOne(unittest.TestCase):
                       endpoint)
 
     def test_the_outbox_filters_by_it(self):
+        """The server still filters; the page shows the standing orders as
+        their own part instead (asked for 12.11.2026)."""
         server = _read("utils", "outbox.py")
         self.assertIn('filters["standing_order"] = ["is", "set"]', server)
+
+    def test_transfers_and_standing_orders_are_two_parts_of_one_page(self):
         page = _read("public", "js", "controllers", "payment_outbox.js")
-        self.assertIn("data-act='standing'", page)
-        self.assertIn("standing_only: view.standingOnly ? 1 : 0", page)
+        self.assertNotIn("data-act='standing'", page)
+        self.assertIn('__("Outgoing transfers")', page)
+        self.assertIn('__("Standing orders")', page)
+        # One refresh on the page, for the part on show.
+        self.assertEqual(page.count('__("refresh the list")'), 1)
+        self.assertIn("standingPanel.reload()", page)
+        self.assertNotIn('__("Refresh")', page)
+        panel = _read("public", "js", "controllers",
+                      "standing_orders_panel.js")
+        self.assertNotIn('__("Refresh")', panel)
+        self.assertIn("return { reload: load };", panel)

@@ -312,6 +312,24 @@ class TestOnFileAsAStandingOrder(unittest.TestCase):
         self.assertFalse(orders.same_order(
             values, dict(same, bank_task_id="8")))
 
+    def test_the_run_counter_does_not_make_a_new_order(self):
+        """Measured at a Volksbank: ..._33 before a run, ..._34 after it.
+        Compared whole, every run filed the order a second time."""
+        new = {"bank_task_id": "CghFexampleAAAGN_34",
+               "counterparty_iban": "DE89999999990001111111",
+               "amount": 208.25, "day_of_month": 1}
+        old = dict(new, bank_task_id="CghFexampleAAAGN_33")
+        other = dict(new, bank_task_id="CghFotherAAAGN_34")
+        self.assertTrue(orders.same_order(new, old))
+        self.assertFalse(orders.same_order(new, other))
+
+    def test_the_stem_of_an_identifier(self):
+        self.assertEqual(orders.task_id_stem("ab/c+d_33"), "ab/c+d")
+        self.assertEqual(orders.task_id_stem("7"), "7")
+        # Only a numeric tail is a counter.
+        self.assertEqual(orders.task_id_stem("abc_x1"), "abc_x1")
+        self.assertEqual(orders.task_id_stem("_12"), "_12")
+
 
 if __name__ == "__main__":
     unittest.main()

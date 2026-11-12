@@ -131,6 +131,60 @@ class TestTheSamePayment(unittest.TestCase):
         ])
         self.assertEqual(got["supersede"], [])
 
+    def test_a_booked_report_still_replaces_the_open_plan(self):
+        """The bank's line was Matched when the debit came in; the standing
+        order's own line for the same run stayed open and overdue."""
+        got = fs.decide([
+            line("KSO-1", "Bank Standing Order", "2026-11-01"),
+            line("bank-1", "Bank Standing Order", "2026-11-01", from_bank=1,
+                 status="Matched"),
+        ])
+        self.assertEqual(got["supersede"], [("KSO-1", "bank-1")])
+
+    def test_a_superseded_or_expired_line_replaces_nothing(self):
+        for status in ("Cancelled", "Expired"):
+            got = fs.decide([
+                line("KSO-1", "Bank Standing Order", "2026-11-01"),
+                line("bank-1", "Bank Standing Order", "2026-11-01",
+                     from_bank=1, status=status),
+            ])
+            self.assertEqual(got["supersede"], [], status)
+
+
+class TestThePurposeDecides(unittest.TestCase):
+    """Two monthly fees of the same size to the same payee."""
+
+    def test_two_pairs(self):
+        got = fs.decide([
+            line("KSO-102", "Bank Standing Order", "2026-11-01",
+                 purpose="102 Management fee Example Road"),
+            line("KSO-206", "Bank Standing Order", "2026-11-01",
+                 purpose="206 Management fee Sample Lane"),
+            line("bank-206", "Bank Standing Order", "2026-11-01",
+                 from_bank=1, purpose="206 Management fee Sample Lane"),
+            line("bank-102", "Bank Standing Order", "2026-11-01",
+                 from_bank=1, purpose="102 Management fee Example Road"),
+        ])
+        self.assertEqual(sorted(got["supersede"]), [
+            ("KSO-102", "bank-102"), ("KSO-206", "bank-206")])
+        self.assertEqual(got["ambiguous"], [])
+
+    def test_the_same_purpose_twice_stays_ambiguous(self):
+        got = fs.decide([
+            line("a", "Bank Standing Order", "2026-11-01", purpose="Fee"),
+            line("b", "Bank Standing Order", "2026-11-01", purpose="Fee"),
+            line("bank", "Bank Standing Order", "2026-11-01", from_bank=1,
+                 purpose="Fee"),
+        ])
+        self.assertEqual(got["supersede"], [])
+
+    def test_no_purpose_decides_nothing(self):
+        self.assertFalse(fs.purposes_agree({"purpose": ""},
+                                           {"purpose": ""}))
+        self.assertTrue(fs.purposes_agree(
+            {"purpose": "Rent  Example 10/2026"},
+            {"purpose": "RENT EXAMPLE 10/2026 / DA-3"}))
+
 
 class TestWhenInDoubtBothStay(unittest.TestCase):
 
