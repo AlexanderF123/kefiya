@@ -261,5 +261,90 @@ class TestBeideLesewegeSetzenDieReparaturEin(unittest.TestCase):
         self.assertGreaterEqual(abschnitt.count("except Exception"), 4)
 
 
+class TestDieReparaturWirktWirklich(unittest.TestCase):
+    """Nicht "steht die Zeile da", sondern "kommt der Zweck getrennt an".
+
+    Die funf Tests der Klasse darueber lesen den Quelltext als Text. Alle funf
+    waren gruen, waehrend auf der Instanz jeder mehrzeilige Verwendungszweck
+    weiter zusammenklebte -- sechs Wochen lang, nachweisbar an den Daten vom
+    14.11.2026, nicht an der Testsuite.
+
+    Diese Klasse schickt deshalb eine erfundene Buchung durch den echten
+    Parser und ruft den echten Einbau auf. Faellt die Bibliothek weg, wird
+    uebersprungen; eine Kopie des Einbaus nachzubauen waere sinnlos, denn eine
+    Kopie lief auf der Instanz nie.
+    """
+
+    def setUp(self):
+        try:
+            import mt940  # noqa: F401
+        except ImportError:
+            self.skipTest("mt940 ist in dieser Umgebung nicht installiert")
+        from kefiya.utils import mt940_compat, mt940_probe
+        self.compat = mt940_compat
+        self.probe = mt940_probe
+        self.unrepariert()
+        self.addCleanup(self.unrepariert)
+
+    def unrepariert(self):
+        """Setzt Parser und Merker auf den Zustand vor dem Einbau zurueck."""
+        from mt940 import models, processors
+        models.Transactions.DEFAULT_PROCESSORS["post_transaction_details"] = [
+            processors.transaction_details_post_processor]
+        self.compat._SPACES_INSTALLED = False
+        self.compat._SPACES_COMPLAINED = False
+
+    def test_ohne_reparatur_klebt_die_probebuchung(self):
+        """Sonst misst die Probe nichts: sie muss den Fehler zeigen koennen."""
+        self.assertEqual(self.probe.zwecke()[0], self.probe.GEKLEBT)
+        self.assertFalse(self.probe.die_reparatur_wirkt())
+
+    def test_der_einbau_trennt_die_zeilen_der_bank(self):
+        self.assertTrue(self.compat.ensure_the_purpose_keeps_its_spaces())
+        self.assertEqual(self.probe.zwecke()[0], self.probe.GETRENNT)
+
+    def test_der_einbau_laesst_den_sepa_text_zusammen(self):
+        """Ein Leerzeichen ueberall waere die halbe Reparatur."""
+        self.compat.ensure_the_purpose_keeps_its_spaces()
+        self.assertEqual(self.probe.zwecke()[1], self.probe.SEPA)
+
+    def test_zweimal_aufrufen_aendert_nichts(self):
+        """Der Abruf ruft ihn bei jedem Parsen -- das darf sich
+        nicht stapeln."""
+        self.compat.ensure_the_purpose_keeps_its_spaces()
+        self.compat._SPACES_INSTALLED = False
+        self.compat.ensure_the_purpose_keeps_its_spaces()
+        from mt940 import models
+        kette = models.Transactions.DEFAULT_PROCESSORS[
+            "post_transaction_details"]
+        self.assertEqual(len(kette), 1)
+        self.assertEqual(self.probe.zwecke()[0], self.probe.GETRENNT)
+
+    def test_er_meldet_sich_wenn_er_nicht_greift(self):
+        """Findet er nichts zum Ersetzen, muss er False sagen und sich melden.
+
+        Frueher ging diese Meldung als logger().info() in eine Datei auf dem
+        Bench -- von aussen nicht lesbar, und genau deshalb blieb die Frage
+        "warum klebt es noch" einen halben Tag offen.
+        """
+        from mt940 import models
+        models.Transactions.DEFAULT_PROCESSORS["post_transaction_details"] = []
+        self.assertFalse(self.compat.ensure_the_purpose_keeps_its_spaces())
+        self.assertTrue(self.compat._SPACES_COMPLAINED)
+
+    def test_eine_bibliothek_die_es_selbst_kann_wird_nicht_angefasst(self):
+        """Liefert der Parser schon Leerzeichen, bleibt die Kette
+        unberuehrt."""
+        from mt940 import models
+        self.compat.ensure_the_purpose_keeps_its_spaces()
+        vorher = list(
+            models.Transactions.DEFAULT_PROCESSORS["post_transaction_details"])
+        self.compat._SPACES_INSTALLED = False
+        self.assertTrue(self.compat.ensure_the_purpose_keeps_its_spaces())
+        self.assertEqual(
+            models.Transactions.DEFAULT_PROCESSORS["post_transaction_details"],
+            vorher)
+
+
 if __name__ == "__main__":
     unittest.main()
