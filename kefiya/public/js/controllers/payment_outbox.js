@@ -953,6 +953,11 @@ kefiya.payment_outbox = function (root) {
 				},
 				changed: load,
 			});
+		} else if (outcome === "error" && m.over_limit && m.can_split
+				&& kefiya.limit_way_out) {
+			// Over the bank's limit: the refusal comes with a table of parts
+			// to edit and place, rather than a sum to work out by hand.
+			kefiya.limit_way_out(m, { changed: load });
 		} else if (outcome === "error") {
 			frappe.msgprint({ title: __("Not sent"), indicator: "red",
 				message: esc(m.message || "") });

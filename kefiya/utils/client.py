@@ -1264,7 +1264,12 @@ def _refuse_over_limit(docs):
     if verdict["ok"]:
         return None
 
+    # Names and whether a split can be offered, so the page can open the
+    # table of proposals right in the refusal (limit_way_out). One order with
+    # one payment is what a table of parts can describe.
     return {"status": "error", "over_limit": True,
+            "names": [d.name for d in docs],
+            "can_split": len(docs) == 1 and len(docs[0].items or []) == 1,
             "limit": verdict.get("limit"),
             "available": verdict.get("available"),
             "message": verdict["reason"] + " " + _(
