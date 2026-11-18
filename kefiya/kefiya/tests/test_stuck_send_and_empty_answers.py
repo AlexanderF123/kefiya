@@ -102,3 +102,28 @@ class TestANumberInTheIbanField(unittest.TestCase):
         source = _read("utils", "import_bank_transaction.py")
         self.assertEqual(source.count(
             "applicant_iban, kontonummer = iban_or_number(applicant_iban)"), 2)
+
+
+class TestTheWaitIsVisible(unittest.TestCase):
+    """18.11.2026: the bank's app asked for the release while the page
+    showed nothing -- an eight-second alert, gone, and on a phone not even
+    that."""
+
+    def setUp(self):
+        self.js = _read("public", "js", "controllers", "tan_prompt.js")
+        self.body = self.js.split("function awaitRelease(opts) {")[1].split(
+            "kefiya.await_release = awaitRelease;")[0]
+
+    def test_a_box_stays_while_the_page_waits(self):
+        self.assertIn("waitingBox(login, names, ceiling,", self.body)
+        self.assertIn("waitBox.close()", self.body)
+
+    def test_not_a_second_box_where_one_is_open(self):
+        self.assertIn("(openBoxes[scope] || openBoxes[login]) ? null",
+                      self.body)
+
+    def test_the_box_says_what_and_how_long(self):
+        box = self.js.split("function waitingBox(")[1]
+        self.assertIn("The bank is waiting for your release in its app.",
+                      box)
+        self.assertIn("This page keeps asking for {0} more seconds.", box)

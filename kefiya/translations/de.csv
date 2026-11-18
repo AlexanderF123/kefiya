@@ -706,3 +706,7 @@ The bank delivered no bookings,Die Bank hat keine Umsätze geliefert
 "{0} is already being sent. Wait until that send has finished; the lock against sending it twice ends after ten minutes at the latest. Before sending again, check in your online banking whether the order arrived.","{0} wird bereits gesendet. Bitte warten, bis dieser Vorgang abgeschlossen ist; die Sperre gegen doppeltes Senden endet spätestens nach zehn Minuten. Vor einem erneuten Senden im Online-Banking prüfen, ob der Auftrag angekommen ist."
 A transfer for this Payment Request is already in progress.,Für diese Zahlungsanforderung läuft bereits eine Überweisung.
 A transfer for this document is already in progress.,Für diesen Beleg läuft bereits eine Überweisung.
+Release in your banking app,Freigabe in Ihrer Banking-App
+Stop waiting,Nicht mehr warten
+The bank is waiting for your release in its app.,Die Bank wartet auf Ihre Freigabe in ihrer App.
+This page keeps asking for {0} more seconds.,Diese Seite fragt noch {0} Sekunden lang nach.
