@@ -673,3 +673,6 @@ Left that day,An dem Tag noch frei
 "{0} is approved. It will be cancelled and entered again as {1} drafts, one per part. Each of them has to be approved and sent again. Continue?","{0} ist freigegeben. Er wird storniert und als {1} Entwürfe neu angelegt, einer je Teil. Jeder muss erneut freigegeben und gesendet werden. Fortfahren?"
 No split can be planned.,Keine Aufteilung planbar.
 "Booked by the bank on {0} ({1}, End-To-End ID {2}). Marked as sent from the account statement.","Von der Bank am {0} gebucht ({1}, End-To-End-ID {2}). Laut Kontoauszug als gesendet markiert."
+"Over today's transfer limit as a dated transfer at the bank. Kept here instead and sent on its execution date, {0}.","Als Terminüberweisung bei der Bank über dem heutigen Limit. Stattdessen hier gehalten und am Ausführungstag, {0}, gesendet."
+Today's transfer limit has no room for this as a dated transfer -- the bank counts it on the day it is sent. It is kept here instead and presented for sending on its execution date ({0}). Nothing was sent.,Im heutigen Überweisungslimit ist dafür als Terminüberweisung kein Platz — die Bank zählt sie am Tag des Absendens. Sie wird stattdessen hier gehalten und am Ausführungstag ({0}) zum Senden vorgelegt. Es wurde nichts gesendet.
+Kept here until its date,Bis zum Termin hier gehalten

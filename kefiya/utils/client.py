@@ -1052,6 +1052,7 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
             " ourselves\"."
         ).format(transfer_name, frappe.utils.formatdate(doc.execution_date))}
 
+    _due_dated_goes_today([doc])
     scheduled = _bank_holds_the_date(doc)
     if scheduled:
         _held_by_the_bank_is_never_instant([doc])
@@ -1062,6 +1063,8 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
 
     over = _refuse_over_limit([doc])
     if over:
+        if scheduled:
+            return _keep_here_instead([doc])
         return over
     # And no more than the account holds -- unless the bank keeps the date
     # or a standing order placed it; those the bank refuses itself.
@@ -1184,6 +1187,17 @@ def present_due_transfers():
     :return: {"due": int}
     """
     from frappe.utils import formatdate, nowdate
+
+    # A dated order the bank was to hold, still here on or after its day, is
+    # an ordinary transfer for today -- presented like any order that is due.
+    for name in frappe.get_all(
+            "Kefiya Transfer",
+            filters={"docstatus": 1, "status": "Approved",
+                     "manage_due_date": 0,
+                     "execution_date": ("<=", nowdate())},
+            pluck="name"):
+        frappe.db.set_value("Kefiya Transfer", name, "manage_due_date", 1,
+                            update_modified=False)
 
     names = frappe.get_all(
         "Kefiya Transfer",
@@ -1345,6 +1359,54 @@ def _bank_holds_the_date(doc):
     if cint(doc.manage_due_date):
         return False
     return getdate(doc.execution_date or nowdate()) > getdate(nowdate())
+
+
+def _due_dated_goes_today(docs):
+    """A dated order for today or a day gone by is an ordinary one for today.
+
+    No bank files an order for a day that has arrived, and nothing is gained
+    by pretending it might: the order goes out now as an ordinary transfer.
+    _bank_holds_the_date already answered "no" for such an order; this writes
+    it down, so the page stops calling it a dated transfer (rule given on
+    18.11.2026).
+    """
+    from frappe.utils import cint, getdate, nowdate
+
+    today = getdate(nowdate())
+    for doc in docs:
+        if cint(doc.manage_due_date) or not doc.execution_date:
+            continue
+        if getdate(doc.execution_date) <= today:
+            doc.db_set("manage_due_date", 1)
+            doc.manage_due_date = 1
+
+
+def _keep_here_instead(docs):
+    """A dated order over today's limit waits here instead of at the bank.
+
+    The bank counts a dated order against the limit of the day it is SENT,
+    whatever day it executes. Handing it over today is therefore impossible
+    when today's limit is used up -- and not needed: kept here, it is
+    presented on its date and goes out then, against that day's limit (rule
+    given on 18.11.2026). Nothing is sent now.
+    """
+    from frappe.utils import formatdate
+
+    for doc in docs:
+        doc.db_set("manage_due_date", 1)
+        doc.manage_due_date = 1
+        doc.add_comment("Info", _(
+            "Over today's transfer limit as a dated transfer at the bank. Kept"
+            " here instead and sent on its execution date, {0}."
+        ).format(formatdate(doc.execution_date)))
+    return {"status": "kept_here", "names": [d.name for d in docs],
+            "message": _(
+                "Today's transfer limit has no room for this as a dated"
+                " transfer -- the bank counts it on the day it is sent. It is"
+                " kept here instead and presented for sending on its"
+                " execution date ({0}). Nothing was sent."
+            ).format(", ".join(sorted({formatdate(d.execution_date)
+                                       for d in docs})))}
 
 
 def _held_by_the_bank_is_never_instant(docs):
@@ -1583,6 +1645,7 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
     # One message carries one execution date, so a batch cannot mix orders the
     # bank is to hold with orders that go out now -- the bank would apply one
     # date to all of them.
+    _due_dated_goes_today(docs)
     scheduling = {_bank_holds_the_date(doc) for doc in docs}
     if len(scheduling) > 1:
         return {"status": "error", "message": _(
@@ -1617,6 +1680,8 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
     # ten orders that each fit and together do not.
     over = _refuse_over_limit(docs)
     if over:
+        if scheduled:
+            return _keep_here_instead(docs)
         return over
     # Measured as a whole, like the limit: what leaves the account together.
     from kefiya.utils import funds_check

@@ -165,3 +165,44 @@ class TestTheWiring(unittest.TestCase):
         self.assertIn("start = max(today, plan.as_date(doc.execution_date)",
                       body)
         self.assertIn("plan.banking_days(start,", body)
+
+
+class TestDatedTransfersAndTheLimit(unittest.TestCase):
+    """Rules given on 18.11.2026."""
+
+    def setUp(self):
+        self.client = _read("utils", "client.py")
+
+    def _body(self, name):
+        return self.client.split("def " + name + "(")[1].split("\ndef ")[0]
+
+    def test_a_date_today_or_gone_by_goes_out_today(self):
+        body = self._body("_due_dated_goes_today")
+        self.assertIn("getdate(doc.execution_date) <= today", body)
+        self.assertIn('doc.db_set("manage_due_date", 1)', body)
+        for path in ("submit_kefiya_transfer", "send_transfer_outbox"):
+            send = self._body(path)
+            self.assertLess(send.index("_due_dated_goes_today("),
+                            send.index("_bank_holds_the_date(doc)"))
+
+    def test_the_daily_run_does_the_same(self):
+        body = self._body("present_due_transfers")
+        self.assertLess(body.index('"manage_due_date": 0'),
+                        body.index('"manage_due_date": 1'))
+
+    def test_a_dated_order_over_the_limit_is_kept_here(self):
+        for path in ("submit_kefiya_transfer", "send_transfer_outbox"):
+            send = self._body(path)
+            over = send[send.index("_refuse_over_limit("):]
+            self.assertLess(over.index("if scheduled:"),
+                            over.index("return over"))
+            self.assertIn("return _keep_here_instead(", over)
+        keep = self._body("_keep_here_instead")
+        self.assertIn('doc.db_set("manage_due_date", 1)', keep)
+        self.assertIn('"status": "kept_here"', keep)
+
+    def test_kept_here_is_never_reported_as_sent(self):
+        page = _read("public", "js", "controllers", "payment_outbox.js")
+        self.assertIn('if (m.status === "kept_here") return "kept";', page)
+        form = _read("public", "js", "controllers", "fints_transfer_flow.js")
+        self.assertIn('msg.status === "kept_here"', form)

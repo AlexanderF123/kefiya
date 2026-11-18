@@ -18,7 +18,7 @@ hand. The refusal now comes with a table they can edit:
   arithmetic is a wish, not a permission: the parts add up to the order to
   the cent, no part before today, every account belongs to the same company
   and has a known limit, and no account goes over its limit on any day,
-  counting what is already approved or sent there.
+  counting what has already been sent on that day.
 * **Approved orders too.** The amount is what an approval was about, so an
   approved order is cancelled and entered again as a draft -- only after
   the person confirmed exactly that. Every part is a draft afterwards,
