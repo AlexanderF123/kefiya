@@ -52,6 +52,16 @@ from kefiya.utils.fints_errors import (
 )
 
 
+
+def note_on_login(login_name, message):
+    """One Info entry in the timeline of the Kefiya Login. Never raises."""
+    try:
+        frappe.get_doc("Kefiya Login", login_name).add_comment(
+            "Info", _("The bank asks for a release") + ":<br>"
+            + frappe.utils.escape_html(message).replace("\n", "<br>"))
+    except Exception:
+        pass
+
 class TanSession:
     """Die TAN-Strecke eines FinTSController."""
 
@@ -240,17 +250,14 @@ class TanSession:
                 response, login=self.kefiya_login.name,
                 attended=attended, earlier_today=earlier,
                 challenge_text=challenge_text or "")
-            # Unattended, the run rolls back right after this and the line
-            # would go with it. The schedule writes its own line after the
-            # rollback and appends this one (kefiya_schedule._log_tan_wanted).
+            # Unattended, the run rolls back right after this and the note
+            # would go with it; the schedule writes it after the rollback
+            # (kefiya_schedule._log_tan_wanted). Attended, it goes straight
+            # onto the login's timeline -- not the Error Log, which is for
+            # errors, and a request for a release is none.
             frappe.flags.kefiya_release_trigger = message
             if attended:
-                frappe.log_error(
-                    title="Kefiya: the bank asks for a release",
-                    message=message,
-                    reference_doctype="Kefiya Login",
-                    reference_name=self.kefiya_login.name,
-                )
+                note_on_login(self.kefiya_login.name, message)
         except Exception:
             pass
 

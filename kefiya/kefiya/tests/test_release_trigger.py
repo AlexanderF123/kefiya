@@ -70,6 +70,16 @@ def _read(*parts):
 
 class TestItIsWrittenDownEverywhere(unittest.TestCase):
 
+    def test_it_goes_to_the_timeline_not_the_error_log(self):
+        """The Error Log is for errors (18.11.2026)."""
+        session = _read("utils", "fints_tan_session.py")
+        body = session.split("def _note_release_request(")[1].split(
+            "\n    def ")[0]
+        self.assertNotIn("log_error", body)
+        self.assertIn("note_on_login(", body)
+        note = session.split("def note_on_login(")[1].split("\nclass ")[0]
+        self.assertIn('add_comment(\n            "Info"', note)
+
     def test_every_prompt_notes_it(self):
         session = _read("utils", "fints_tan_session.py")
         body = session.split("def _publish_tan_prompt(")[1].split(
@@ -83,6 +93,7 @@ class TestItIsWrittenDownEverywhere(unittest.TestCase):
                          "kefiya_schedule.py")
         body = schedule.split("def _log_tan_wanted(")[1].split("\ndef ")[0]
         self.assertIn('frappe.flags.pop("kefiya_release_trigger"', body)
+        self.assertIn("note_on_login(login_name, trigger)", body)
 
     def test_the_opening_never_asks_when_nobody_is_there(self):
         controller = _read("utils", "fints_controller.py")

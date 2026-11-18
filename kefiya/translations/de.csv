@@ -676,3 +676,4 @@ No split can be planned.,Keine Aufteilung planbar.
 "Over today's transfer limit as a dated transfer at the bank. Kept here instead and sent on its execution date, {0}.","Als Terminüberweisung bei der Bank über dem heutigen Limit. Stattdessen hier gehalten und am Ausführungstag, {0}, gesendet."
 Today's transfer limit has no room for this as a dated transfer -- the bank counts it on the day it is sent. It is kept here instead and presented for sending on its execution date ({0}). Nothing was sent.,Im heutigen Überweisungslimit ist dafür als Terminüberweisung kein Platz — die Bank zählt sie am Tag des Absendens. Sie wird stattdessen hier gehalten und am Ausführungstag ({0}) zum Senden vorgelegt. Es wurde nichts gesendet.
 Kept here until its date,Bis zum Termin hier gehalten
+The bank asks for a release,Die Bank verlangt eine Freigabe

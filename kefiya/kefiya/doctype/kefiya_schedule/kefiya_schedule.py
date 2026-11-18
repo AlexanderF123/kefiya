@@ -167,6 +167,15 @@ def _log_tan_wanted(login_name):
     in einer Banking-App. Ein Traceback je Konto hat zehn Zeilen Rauschen
     je Nacht erzeugt und die echten Fehlschlaege darin begraben.
     """
+    # Was die Bank freigegeben haben wollte -- vor dem Rollback notiert
+    # (fints_tan_session._note_release_request), hier in den Verlauf des
+    # Zugangs geschrieben, nicht ins Error Log: es ist kein Fehler.
+    trigger = frappe.flags.pop("kefiya_release_trigger", None)
+    if trigger:
+        from kefiya.utils.fints_tan_session import note_on_login
+
+        note_on_login(login_name, trigger)
+
     try:
         frappe.log_error(
             title=("Kefiya Schedule: this access wants a TAN, nobody is"
@@ -178,11 +187,7 @@ def _log_tan_wanted(login_name):
                 " logins are skipped in this run, they would all say the"
                 " same.\n\nNothing was parked: a challenge nobody answers"
                 " is a dialog the bank holds open for nothing."
-            ).format(login_name) + (
-                # What the bank wanted released, noted before the rollback
-                # (fints_tan_session._note_release_request).
-                "\n\n" + frappe.flags.pop("kefiya_release_trigger", "")
-                if frappe.flags.get("kefiya_release_trigger") else ""),
+            ).format(login_name),
             reference_doctype="Kefiya Login",
             reference_name=login_name,
         )
