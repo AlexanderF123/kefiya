@@ -204,6 +204,8 @@ class TanSession:
         which is not a question anybody can answer.
         """
         challenge = tan_challenge.challenge_of(response)
+        self._note_release_request(response, attended=True,
+                                   challenge_text=challenge.get("text", ""))
 
         if response.decoupled if decoupled is None else decoupled:
             self.interactive.request_mfa_confirmation(
@@ -215,6 +217,42 @@ class TanSession:
                 possible_tan_modes=possible_tan_modes,
                 possible_tan_mediums=possible_tan_mediums,
                 challenge=challenge)
+
+    def _note_release_request(self, response, attended,
+                              challenge_text=None):
+        """Write down what the bank wants released -- see release_trigger.
+
+        Never raises: a line in a log must not be what stops a fetch or an
+        order.
+        """
+        try:
+            from frappe.utils import nowdate
+
+            from kefiya.utils import release_trigger
+
+            if challenge_text is None:
+                challenge_text = tan_challenge.challenge_of(
+                    response).get("text", "")
+            earlier = frappe.db.count("Kefiya Import", {
+                "kefiya_login": self.kefiya_login.name, "docstatus": 1,
+                "creation": (">=", nowdate() + " 00:00:00")})
+            message = release_trigger.describe(
+                response, login=self.kefiya_login.name,
+                attended=attended, earlier_today=earlier,
+                challenge_text=challenge_text or "")
+            # Unattended, the run rolls back right after this and the line
+            # would go with it. The schedule writes its own line after the
+            # rollback and appends this one (kefiya_schedule._log_tan_wanted).
+            frappe.flags.kefiya_release_trigger = message
+            if attended:
+                frappe.log_error(
+                    title="Kefiya: the bank asks for a release",
+                    message=message,
+                    reference_doctype="Kefiya Login",
+                    reference_name=self.kefiya_login.name,
+                )
+        except Exception:
+            pass
 
     def _cannot_note_the_challenge(self):
         """The bank is holding a dialog open and nothing wrote it down.
