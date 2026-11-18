@@ -32,7 +32,13 @@ thing it replaces is an exception. It is installed once, lazily, and is a
 no-op on a library version that has fixed this itself.
 """
 
-import frappe
+try:
+    import frappe
+except ImportError:  # pragma: no cover - ohne Bench gibt es frappe nicht
+    # Dieses Modul muss sich ohne Bench importieren lassen. Sonst kann die
+    # Testsuite den ECHTEN Einbau nicht aufrufen und prueft stattdessen eine
+    # Kopie davon -- und eine Kopie war nie das, was auf der Instanz lief.
+    frappe = None
 
 _INSTALLED = False
 
@@ -77,10 +83,11 @@ def ensure_optional_timezone_is_optional():
                         minute="00", offset=None)
     except Exception:
         models.DateTime.__new__ = original
-        frappe.log_error(
-            title="Kefiya: could not repair the MT940 date parser",
-            message=frappe.get_traceback(),
-        )
+        if frappe is not None:
+            frappe.log_error(
+                title="Kefiya: could not repair the MT940 date parser",
+                message=frappe.get_traceback(),
+            )
         return False
 
     _INSTALLED = True
@@ -88,6 +95,42 @@ def ensure_optional_timezone_is_optional():
 
 
 _SPACES_INSTALLED = False
+#: Einmal je Prozess meckern, nicht bei jedem Abruf. Ohne das schriebe ein
+#: Zwanzig-Minuten-Scheduler jede Nacht siebzig gleiche Fehlermeldungen.
+_SPACES_COMPLAINED = False
+
+
+def _beschwerde(grund):
+    """Sagt laut, dass die Reparatur nicht greift -- einmal je Prozess.
+
+    Frueher ging das als ``logger().info()`` in eine Datei auf dem Bench. Die
+    liest niemand, und am 14.11.2026 war sie von aussen gar nicht erreichbar:
+    die Frage "warum klebt der Zweck immer noch" liess sich einen halben Tag
+    lang nicht beantworten, obwohl der Code die Antwort kannte. Deshalb ins
+    Error Log -- das steht in jeder Oberflaeche und in jeder Schnittstelle.
+    """
+    global _SPACES_COMPLAINED
+    if _SPACES_COMPLAINED:
+        return
+    _SPACES_COMPLAINED = True
+    try:
+        from kefiya.utils import mt940_probe
+        befund = mt940_probe.was_der_parser_liefert()
+    except Exception as fehler:
+        befund = "Die Probebuchung lief nicht: " + str(fehler)[:200]
+    try:
+        frappe.log_error(
+            title="Kefiya: Verwendungszweck klebt weiter zusammen",
+            message=(
+                grund + "\n\n" + befund + "\n\n"
+                "Folge: die Teilfelder ?20-?29 des Feldes :86: kommen ohne "
+                "Trenner an, auf jedem Rechnungsabschluss und bei jedem "
+                "mehrzeiligen Verwendungszweck. Siehe mt940_compat und "
+                "verwendungszweck."
+            ),
+        )
+    except Exception:
+        pass
 
 
 def ensure_the_purpose_keeps_its_spaces():
@@ -147,6 +190,13 @@ def ensure_the_purpose_keeps_its_spaces():
             pass
         return original(transactions, tag, tag_dict, result, space=space)
 
+    # Eine Bibliotheksfassung, die das von sich aus richtig macht, braucht von
+    # uns nichts.
+    from kefiya.utils import mt940_probe
+    if mt940_probe.die_reparatur_wirkt():
+        _SPACES_INSTALLED = True
+        return True
+
     ersetzt = 0
     try:
         for index, vorhanden in enumerate(list(kette)):
@@ -154,18 +204,26 @@ def ensure_the_purpose_keeps_its_spaces():
                 kette[index] = je_buchung
                 ersetzt += 1
     except Exception:
+        _beschwerde(
+            "Der Eintrag in DEFAULT_PROCESSORS liess sich nicht "
+            "ersetzen.")
         return False
 
     if not ersetzt:
-        # Eine Bibliotheksfassung, die das selbst entscheidet oder ihre Kette
-        # anders haelt, braucht von uns nichts. Still nichts tun ist richtig;
-        # der Verwendungszweck ist dann entweder schon in Ordnung oder diese
-        # Stelle ist nicht mehr die richtige.
-        try:
-            frappe.logger("kefiya").info(
-                "Kefiya: mt940 purpose processor not found, left untouched")
-        except Exception:
-            pass
+        _beschwerde(
+            "In DEFAULT_PROCESSORS['post_transaction_details'] steht die "
+            "Funktion transaction_details_post_processor nicht (mehr). Diese "
+            "Bibliotheksfassung haelt ihre Kette anders.")
+        return False
+
+    # Gemessen, nicht angenommen: eine erfundene Buchung durch den Parser, und
+    # nachgesehen, was herauskommt. Dass der Eintrag ersetzt wurde, heisst
+    # noch nicht, dass der Zweck danach Leerzeichen hat -- genau diese Luecke
+    # hat am 14.11.2026 einen halben Tag gekostet.
+    if not mt940_probe.die_reparatur_wirkt():
+        _beschwerde(
+            "Der Eintrag wurde ersetzt, aber der Parser liefert den "
+            "Verwendungszweck trotzdem ohne Trenner.")
         return False
 
     _SPACES_INSTALLED = True
