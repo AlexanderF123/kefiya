@@ -22,8 +22,34 @@ from kefiya.utils import auszug_einlesen, statement_import
 
 class KefiyaBankStatementImport(Document):
 
+	def own_file_and_account(self, file_url=None, bank_account=None,
+							 company=None):
+		"""This import's own file and bank account, never the caller's.
+
+		The whitelisted methods below take a file and an account from the
+		client. They used to read whatever file and book into whatever
+		account the request named, with only read or write permission on
+		this document checked -- so a caller could import into another
+		account, or name a file this import was never given. Arguments are
+		now only compared with the document: one that differs is refused,
+		and the document's own values are used.
+
+		From the original (phamos-eu/kefiya#61).
+		"""
+		for value, fieldname in ((file_url, "import_file"),
+								 (bank_account, "bank_account"),
+								 (company, "company")):
+			if value and value != self.get(fieldname):
+				frappe.throw(_("{0} does not match this import.").format(
+					_(self.meta.get_label(fieldname))))
+		if self.bank_account and self.company and frappe.db.get_value(
+				"Bank Account", self.bank_account, "company") != self.company:
+			frappe.throw(_("Bank Account {0} does not belong to company {1}.")
+						 .format(self.bank_account, self.company))
+		return self.import_file, self.bank_account
+
 	@frappe.whitelist()
-	def plan_import(self, file_url, bank_account=None):
+	def plan_import(self, file_url=None, bank_account=None):
 		"""Report what an import would do, without writing anything.
 
 		A bulk insert of bookings is the kind of write that should be looked
@@ -33,18 +59,19 @@ class KefiyaBankStatementImport(Document):
 		"""
 		frappe.has_permission(
 			"Kefiya Bank Statement Import", ptype="read", doc=self, throw=True)
-		summary = statement_import.plan(
-			file_url, bank_account or self.bank_account)
+		file_url, bank_account = self.own_file_and_account(
+			file_url, bank_account)
+		summary = statement_import.plan(file_url, bank_account)
 		summary["same_file_imported_as"] = self.same_file_imported_as(
 			summary.get("file_hash"))
 		return statement_import.without_entries(summary)
 
 	@frappe.whitelist()
-	def start_import(self, file_url, bank_account=None, company=None):
+	def start_import(self, file_url=None, bank_account=None, company=None):
 		"""Book the file.
 
-		:param company: accepted and unused. The company comes from each
-			booking's own Bank Account -- a file covering twenty accounts
+		:param company: only checked against this import, otherwise unused.
+			The company comes from each booking's own Bank Account -- a file covering twenty accounts
 			covers a dozen companies with them, and one field on this form
 			cannot speak for all of them.
 		"""
@@ -52,9 +79,10 @@ class KefiyaBankStatementImport(Document):
 		# who may read the document; importing creates Bank Transactions.
 		frappe.has_permission(
 			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
+		file_url, bank_account = self.own_file_and_account(
+			file_url, bank_account, company)
 
-		summary = statement_import.plan(
-			file_url, bank_account or self.bank_account, dry_run=False)
+		summary = statement_import.plan(file_url, bank_account, dry_run=False)
 
 		# The import log: what was read, how it was recognised, and what
 		# became of every row. Written before the status, so an import that
@@ -96,7 +124,7 @@ class KefiyaBankStatementImport(Document):
 		return statement_import.without_entries(summary)
 
 	@frappe.whitelist()
-	def plan_rebuild(self, file_url, bank_account=None):
+	def plan_rebuild(self, file_url=None, bank_account=None):
 		"""What rebuilding the account from this statement would do.
 
 		Not an import: an import adds what is missing and keeps what is
@@ -106,14 +134,17 @@ class KefiyaBankStatementImport(Document):
 		"""
 		frappe.has_permission(
 			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
-		return auszug_einlesen.plan(file_url, bank_account or self.bank_account)
+		file_url, bank_account = self.own_file_and_account(
+			file_url, bank_account)
+		return auszug_einlesen.plan(file_url, bank_account)
 
 	@frappe.whitelist()
-	def start_rebuild(self, file_url, bank_account=None):
+	def start_rebuild(self, file_url=None, bank_account=None):
 		frappe.has_permission(
 			"Kefiya Bank Statement Import", ptype="write", doc=self, throw=True)
-		return auszug_einlesen.start(
-			file_url, bank_account or self.bank_account, docname=self.name)
+		file_url, bank_account = self.own_file_and_account(
+			file_url, bank_account)
+		return auszug_einlesen.start(file_url, bank_account, docname=self.name)
 
 	def same_file_imported_as(self, file_hash):
 		"""Earlier imports of exactly this file, by content.

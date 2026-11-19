@@ -23,11 +23,12 @@ is a caller.
 import base64
 import datetime
 import hashlib
+import os
 import re
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt
+from frappe.utils import cint, flt, get_files_path
 
 from kefiya.utils import booking_budget
 from kefiya.utils import camt_statement
@@ -385,12 +386,27 @@ def file_content(file_url):
 
     Not site_path + file_url: that string only happens to be the path for a
     public file, and a private attachment lives somewhere else entirely.
+
+    The File record's real path must lie in the site's public or private
+    files folder. A record whose url climbs out with "../" -- File.validate
+    refuses to create one, but a record written past it does not -- would
+    otherwise read any file of the site, site_config.json included. From the
+    original (phamos-eu/kefiya#61).
     """
-    name = frappe.db.get_value("File", {"file_url": file_url})
+    name = frappe.db.get_value("File", {"file_url": file_url}) \
+        if file_url else None
     if not name:
         frappe.throw(_("The attached file could not be found: {0}").format(
             file_url))
-    return frappe.get_doc("File", name).get_content()
+    file_doc = frappe.get_doc("File", name)
+    file_doc.check_permission("read")
+    path = os.path.realpath(file_doc.get_full_path())
+    folders = [os.path.realpath(get_files_path(is_private=private))
+               for private in (0, 1)]
+    if not any(path.startswith(folder + os.sep) for folder in folders):
+        frappe.throw(_("The attached file could not be found: {0}").format(
+            file_url))
+    return file_doc.get_content()
 
 
 def file_sha256(raw):
