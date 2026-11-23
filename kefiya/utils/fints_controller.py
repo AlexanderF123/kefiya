@@ -2283,6 +2283,27 @@ class FinTSController(TanSession):
                         " attempt would fail in the same way: open the bank"
                         " access and press \"Reset Connection\" before trying"
                         " again.")
+                # What the bank actually said. python-fints reports a 9xxx
+                # refusal of the ORDER as "could not fetch BPD", so the
+                # sentence above may be about the wrong thing entirely -- on
+                # 23.11.2026 it stood under an instant payment with no word of
+                # the bank's own. Its lines are kept by the client
+                # (fints_vop_client.last_said); they go into the message and
+                # the Error Log, so the next look is at the reason, not at a
+                # guess.
+                said = "\n".join(
+                    "{0} {1}{2}".format(
+                        code or "", text or "",
+                        " [Segment {0}]".format(ref) if ref else "")
+                    for code, text, ref in list(getattr(
+                        self.fints_connection, "last_said", None) or ())[-10:])
+                frappe.log_error(
+                    title="Kefiya: transfer broke off (could not fetch BPD)",
+                    message="login={0} reference={1}\n{2}".format(
+                        self.kefiya_login.name, payment_reference or "",
+                        said or "(the bank's lines were not recorded)"),
+                    reference_doctype="Kefiya Login",
+                    reference_name=self.kefiya_login.name)
                 frappe.throw(_(
                     "The bank connection for {0} could not be rebuilt from its"
                     " stored state, so this order was NOT sent as far as this"
@@ -2290,7 +2311,9 @@ class FinTSController(TanSession):
                     "\n\nBefore sending again, look in your online banking:"
                     " if the transfer is there after all, cancel this order"
                     " instead of repeating it."
-                ).format(self.kefiya_login.name, outcome),
+                ).format(self.kefiya_login.name, outcome)
+                    + (("\n\n" + _("What the bank said:") + "\n" + said)
+                       if said else ""),
                     title=_("Connection could not be rebuilt"))
             response, parked = self._confirm_or_park_vop(
                 response, pain_xml, payment_reference)
