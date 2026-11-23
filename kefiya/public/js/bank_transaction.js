@@ -20,3 +20,13 @@ frappe.ui.form.on("Bank Transaction Payments", {
                 })
     }
 });
+// An outgoing booking can be paid once more: a new transfer, filled in from
+// it (kefiya.transfer_again, in the bundle).
+frappe.ui.form.on("Bank Transaction", {
+	refresh: function (frm) {
+		if (frm.is_new() || !(frm.doc.withdrawal > 0) || !kefiya.transfer_again) return;
+		frm.add_custom_button(__("Transfer again"), function () {
+			kefiya.transfer_again(frm.doc.name);
+		});
+	},
+});

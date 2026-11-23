@@ -54,6 +54,7 @@ import "./controllers/standing_orders_panel";
 // the amount split into parts. Offered by the outgoing payments and the form.
 import "./controllers/funds_way_out";
 import "./controllers/limit_way_out";
+import "./controllers/transfer_again";
 import "./controllers/payment_outbox";
 // Correcting the forecast by hand. The form, the list and any page that shows
 // the forecast use the same three dialogs.

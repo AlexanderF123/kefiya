@@ -19,6 +19,8 @@ touched by it, only a flag that says somebody wants to come back to this.
 
 import json
 
+import re
+
 import frappe
 from frappe import _
 from frappe.utils import flt
@@ -142,6 +144,56 @@ def transfer_from_transaction(name):
             "purpose": purpose,
         },
     }
+
+
+#: A reference that is only kefiya's own fingerprint of a booking (32 hex
+#: characters) means nothing to the recipient and does not belong in a
+#: purpose line.
+_FINGERPRINT = re.compile(r"^[0-9a-f]{32}$")
+
+
+@frappe.whitelist()
+def transfer_again(name):
+    """The values for paying an executed transfer once more.
+
+    A payment that went out -- the monthly subscription, the same supplier
+    again -- is most of a new transfer already: recipient, IBAN, amount and
+    purpose. Typing them in again is how digits get transposed.
+
+    Only an outgoing booking can be repeated: money that came in is passed
+    on with "forward", which asks where to. Nothing is created here; the
+    caller opens a new, unsaved Kefiya Transfer with these values, and every
+    field can be changed before it is approved and sent with its own TAN.
+
+    :param name: Bank Transaction name
+    :return: {"status": "ok", ...values} or {"status": "error", "message"}
+    """
+    frappe.has_permission("Bank Transaction", ptype="read", doc=name,
+                          throw=True)
+    frappe.has_permission("Kefiya Transfer", ptype="create", throw=True)
+
+    txn = frappe.get_doc("Bank Transaction", name)
+    amount = flt(txn.get("withdrawal"))
+    if amount <= 0:
+        return {"status": "error", "message": _(
+            "Only an outgoing booking can be transferred again. Money that"
+            " came in can be forwarded instead.")}
+
+    values = transfer_from_transaction(name)
+    purpose = (txn.get("description") or "").strip()
+    reference = (txn.get("reference_number") or "").strip()
+    if reference and not _FINGERPRINT.match(reference) \
+            and reference not in purpose:
+        purpose = "{0} {1}".format(purpose, reference).strip()
+    values["item"]["purpose"] = " ".join(purpose.split())[:PURPOSE_LIMIT]
+    values["item"]["amount"] = amount
+    values["amount"] = amount
+    values["status"] = "ok"
+    if not values.get("kefiya_login"):
+        values["warning"] = _(
+            "No bank access pays from the account of this booking. Choose"
+            " the paying account in the new transfer.")
+    return values
 
 
 # --------------------------------------------------------------------------
