@@ -434,6 +434,39 @@ class FinTSController(TanSession):
                _("Connection established"), 100, reload=False
             )
 
+    def _record_statement_answers(self, dialog):
+        """Keep the bank's lines for the statement request -- for
+        _note_empty_answer, which had nothing to show otherwise.
+
+        It read ``last_said`` from the VoP-aware client, and on 20.11.2026
+        every one of four empty answers said "(nothing recorded)": that
+        notebook is not kept on the path the statement request takes. So the
+        lines are taken where the answer arrives, at this dialog's send.
+        Never raises -- a notebook must not stop a fetch.
+        """
+        self._statement_lines = []
+        try:
+            original = dialog.send
+        except Exception:
+            return
+
+        def send(*args, **kwargs):
+            answer = original(*args, **kwargs)
+            try:
+                for line in fints_response.lines_in_message(answer):
+                    self._statement_lines.append(
+                        (line.get("code"), line.get("text"),
+                         line.get("reference")))
+                del self._statement_lines[:-40]
+            except Exception:
+                pass
+            return answer
+
+        try:
+            dialog.send = send
+        except Exception:
+            pass
+
     def _note_empty_answer(self, from_date, to_date):
         """Write down what the bank said when it delivered no bookings.
 
@@ -458,7 +491,9 @@ class FinTSController(TanSession):
                     self.kefiya_login.name, nowdate())), 1, ex=86400,
                     nx=True):
                 return
-            said = getattr(self.fints_connection, "last_said", None) or ()
+            said = (getattr(self, "_statement_lines", None)
+                    or getattr(self.fints_connection, "last_said", None)
+                    or ())
             lines = ["{0} {1}{2}".format(
                 code or "", text or "",
                 " [Segment {0}]".format(ref) if ref else "")
@@ -1256,6 +1291,7 @@ class FinTSController(TanSession):
                 account, start_date, end_date, include_pending)
 
         with get_dialog() as dialog:
+            self._record_statement_answers(dialog)
             try:
                 hkkaz = find_command(HKKAZ5, HKKAZ6, HKKAZ7)
                 # MT940 banks return the challenge instead of the statements;

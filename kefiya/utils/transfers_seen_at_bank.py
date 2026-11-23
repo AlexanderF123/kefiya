@@ -25,9 +25,14 @@ nothing, it only stops a paid order from asking to be paid again.
 
 import re
 
-#: States in which an order may still be sent. "Scheduled at Bank" is not
-#: among them: the bank holds that order and executes it on its date.
+#: States in which an order may still be sent.
 OPEN_STATES = ("Approved", "Due", "Failed", "On Hold")
+
+#: And the orders the bank holds until their date. Once booked they are
+#: executed, and "Scheduled at Bank" -- "Bei der Bank, liegt bis zum Termin"
+#: -- is no longer true: on 23.11.2026 three such orders still stood on the
+#: outgoing page days after the bank had paid them.
+WATCHED_STATES = OPEN_STATES + ("Scheduled at Bank",)
 
 #: How far back a statement is searched, whatever window was imported. An
 #: order wrongly left open is found on the next fetch even when that fetch
@@ -55,7 +60,7 @@ def mark_seen(bank_account, from_date=None, to_date=None):
     open_orders = frappe.get_all(
         "Kefiya Transfer",
         filters={"docstatus": 1, "kefiya_login": ("in", logins),
-                 "status": ("in", OPEN_STATES)},
+                 "status": ("in", WATCHED_STATES)},
         pluck="name")
     if not open_orders:
         return []

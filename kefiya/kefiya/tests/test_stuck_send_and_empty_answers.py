@@ -144,3 +144,46 @@ class TestARefusalIsNoError(unittest.TestCase):
         self.assertIn('getattr(exc, "said", None)', body)
         self.assertLess(body.index("_is_refused_by_the_bank(exc)"),
                         body.index("frappe.log_error("))
+
+
+class TestTheEmptyAnswerIsReadWhereItArrives(unittest.TestCase):
+    """20.11.2026: four empty answers, each noted as "(nothing recorded)"."""
+
+    def test_the_statement_dialog_is_listened_to(self):
+        controller = _read("utils", "fints_controller.py")
+        raw = controller.split("def _get_transactions_raw(")[1].split(
+            "\n    def ")[0]
+        self.assertLess(raw.index("self._record_statement_answers(dialog)"),
+                        raw.index("fetch_mt940("))
+        note = controller.split("def _note_empty_answer(")[1].split(
+            "\n    def ")[0]
+        self.assertLess(note.index('"_statement_lines"'),
+                        note.index('"last_said"'))
+
+
+class TestNotDueYetOffersToPayNow(unittest.TestCase):
+    """23.11.2026: "is due on ... and is managed here" named a field to change
+    by hand, in English, under "Transfer failed"."""
+
+    def setUp(self):
+        self.client = _read("utils", "client.py")
+
+    def test_both_refusals_carry_the_way_out(self):
+        for path in ("submit_kefiya_transfer", "send_transfer_outbox"):
+            body = _body(self.client, path)
+            self.assertIn('"not_due_yet": True', body)
+
+    def test_pay_now_only_moves_the_date(self):
+        body = _body(self.client, "pay_now")
+        self.assertIn("doc.execution_date = nowdate()", body)
+        self.assertIn("if not _not_due_yet(doc):", body)
+        self.assertNotIn("submit_sepa_transfer", body)
+        self.assertIn('ptype="submit" if doc.docstatus == 1', body)
+
+    def test_the_pages_ask_first(self):
+        form = _read("public", "js", "controllers", "fints_transfer_flow.js")
+        offer = form.split("function kefiya_offer_pay_now(")[1]
+        self.assertLess(offer.index("frappe.confirm("),
+                        offer.index("kefiya.utils.client.pay_now"))
+        page = _read("public", "js", "controllers", "payment_outbox.js")
+        self.assertIn("m.not_due_yet", page)
