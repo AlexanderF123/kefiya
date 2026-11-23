@@ -720,3 +720,6 @@ Cannot transfer again,Erneut überweisen nicht möglich
 "New transfer filled in from booking {0}. Check it, then approve and send.","Neue Überweisung aus Buchung {0} vorbelegt. Bitte prüfen, dann freigeben und senden."
 Only an outgoing booking can be transferred again. Money that came in can be forwarded instead.,Nur eine Abbuchung lässt sich erneut überweisen. Eingegangenes Geld kann stattdessen weitergeleitet werden.
 No bank access pays from the account of this booking. Choose the paying account in the new transfer.,Für das Konto dieser Buchung gibt es keinen Bankzugang. Bitte in der neuen Überweisung das zahlende Konto wählen.
+Send these orders today instead of on their date?,Diese Aufträge heute statt am Termin senden?
+Their execution date becomes today. You confirm the send in the next step.,Ihr Ausführungsdatum wird auf heute gesetzt. Das Senden bestätigen Sie im nächsten Schritt.
+due {0},fällig {0}

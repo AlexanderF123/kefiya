@@ -187,3 +187,29 @@ class TestNotDueYetOffersToPayNow(unittest.TestCase):
                         offer.index("kefiya.utils.client.pay_now"))
         page = _read("public", "js", "controllers", "payment_outbox.js")
         self.assertIn("m.not_due_yet", page)
+
+
+class TestSendNowOnTheOutgoingPage(unittest.TestCase):
+    """23.11.2026: approved orders kept here for a later day could not be
+    sent today at all -- the page locked them out before any request."""
+
+    def setUp(self):
+        self.page = _read("public", "js", "controllers", "payment_outbox.js")
+
+    def test_a_button_for_orders_due_later(self):
+        self.assertIn('if (what === "send_now")', self.page)
+        self.assertIn('button("send_now", __("Send now")', self.page)
+        self.assertIn('if (act === "send_now") return sendNow();', self.page)
+
+    def test_asked_first_then_the_ordinary_send(self):
+        body = self.page.split("function sendNow() {")[1].split(
+            "\n\tfunction ")[0]
+        self.assertLess(body.index("frappe.confirm("),
+                        body.index("kefiya.utils.client.pay_now"))
+        self.assertIn("load().then(function () { send(); })", body)
+
+    def test_same_conditions_as_the_server(self):
+        rule = self.page.split("kefiya.outbox_not_due_yet = function")[1][:500]
+        for part in ("r.docstatus !== 1", "r.on_hold", "r.vop_pending",
+                     '"Scheduled at Bank"', "!r.manage_due_date"):
+            self.assertIn(part, rule)

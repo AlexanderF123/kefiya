@@ -206,6 +206,17 @@ kefiya.outbox_only_lacks_approval = function (r) {
 	return !!(r && r.sendable_if_approved);
 };
 
+//: Approved, kept here, due on a later day -- and held up by nothing else.
+//: What "Send now" may bring forward. The same conditions the server's
+//: _not_due_yet and _blocked_reason use, so the button never offers what
+//: pay_now then leaves alone.
+kefiya.outbox_not_due_yet = function (r) {
+	if (!r || r.docstatus !== 1 || r.on_hold || r.vop_pending) return false;
+	if (r.status === "Sent" || r.status === "Scheduled at Bank") return false;
+	if (!r.manage_due_date || !r.execution_date) return false;
+	return String(r.execution_date) > frappe.datetime.get_today();
+};
+
 kefiya.outbox_recipient = function (r) {
 	const items = (r && r.items) || [];
 	if (items.length > 1) {
@@ -395,6 +406,11 @@ kefiya.payment_outbox = function (root) {
 			if (what === "approve_to_send") {
 				return !r.sendable && kefiya.outbox_only_lacks_approval(r);
 			}
+			// Approved, kept here for a later day, and nothing else in the
+			// way: "Send now" brings the date forward to today and sends.
+			if (what === "send_now") {
+				return kefiya.outbox_not_due_yet(r);
+			}
 			return false;
 		});
 	}
@@ -544,6 +560,13 @@ kefiya.payment_outbox = function (root) {
 					? __("Approve and send")
 					: __("Send"),
 				applicable("send").length, "zk-send");
+			// Orders kept here for a later day were locked out of sending
+			// altogether: "Fällig erst am …", and no way to pay them today
+			// short of editing each date by hand (23.11.2026).
+			if (applicable("send_now").length) {
+				h += button("send_now", __("Send now"),
+					applicable("send_now").length);
+			}
 		} else {
 			h += "<div class='zk-sub'>"
 				+ __("Sending needs the right to approve.") + "</div>";
@@ -667,6 +690,7 @@ kefiya.payment_outbox = function (root) {
 		if (act === "hold") return hold(1);
 		if (act === "release") return hold(0);
 		if (act === "send") return send();
+		if (act === "send_now") return sendNow();
 	}
 
 	function details(name) {
@@ -782,6 +806,42 @@ kefiya.payment_outbox = function (root) {
 						__("Deleted: {0}", [gone.length]),
 						__("Not deleted"));
 					load();
+				});
+			});
+	}
+
+	// Bring orders that are due later forward to today, then send them
+	// through the ordinary send -- with its confirmation, limit, funds and
+	// TAN. Asked first; nothing changes before the answer.
+	function sendNow() {
+		const rows = applicable("send_now");
+		if (view.busy || !rows.length) return;
+		const list = rows.map(function (r) {
+			return "<li>" + esc(r.name) + " · " + esc(kefiya.outbox_recipient(r))
+				+ " · " + money(r.total_amount) + " · " + __("due {0}",
+					[esc(dmy(r.execution_date))]) + "</li>";
+		}).join("");
+		frappe.confirm(
+			__("Send these orders today instead of on their date?")
+				+ "<ul style='margin-top:8px'>" + list + "</ul>"
+				+ "<div class='text-muted small'>" + __("Their execution date"
+				+ " becomes today. You confirm the send in the next step.")
+				+ "</div>",
+			function () {
+				frappe.call({
+					method: "kefiya.utils.client.pay_now",
+					args: { transfer_names: JSON.stringify(
+						rows.map(function (r) { return r.name; })) },
+					freeze: true,
+				}).then(function (r) {
+					const res = (r && r.message) || {};
+					if (res.status !== "ok") {
+						reportFailure(__("Not changed"), { message: res.message });
+						return;
+					}
+					// Reloaded first, so the rows are sendable now; the
+					// selection is kept by name and the ordinary send asks.
+					load().then(function () { send(); });
 				});
 			});
 	}
