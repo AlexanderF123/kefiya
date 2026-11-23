@@ -729,10 +729,12 @@ def fetch_all(kefiya_login, user_scope=None):
             "new_count": len(created),
         }
 
-        return fetch_extras(kefiya_login, kefiya_import, summary)
+        return fetch_extras(kefiya_login, kefiya_import, summary,
+                            user_scope=scope)
 
 
-def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True):
+def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True,
+                 user_scope=None):
     """Everything a fetch reads besides the bookings, best effort each.
 
     Balance, pending entries, depot, dated debits and transfers, standing
@@ -741,13 +743,16 @@ def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True):
     costs only itself.
 
     Shared by the fetch by hand (fetch_all) and the nightly run
-    (kefiya_schedule). None of these reads ever asks anybody for a release:
-    where the bank wants one for a read, the read is given up and noted as
-    refused -- which is exactly what an unattended run needs (rule given on
-    18.11.2026: "fetch everything at night that works without a TAN").
+    (kefiya_schedule). Where the bank wants a release for a read, the read
+    is given up and noted as refused -- which is exactly what an unattended
+    run needs (rule given on 18.11.2026: "fetch everything at night that
+    works without a TAN"). One exception, by hand only: the pending entries
+    wait for a decoupled release (rule of 23.11.2026, see
+    FinTSController._pending_read).
 
     :param include_depots: False where the caller fetches the depots by its
         own rhythm, as the nightly run does (_fetch_due_depots)
+    :param user_scope: the page of a fetch by hand; None when unattended
     :return: the summary, filled in
     """
     from frappe.utils import now_datetime
@@ -805,7 +810,14 @@ def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True):
             refresh_planned_payments,
         )
 
-        entries = FetchCtl(kefiya_login).get_fints_pending_transactions()
+        # By hand, somebody is there to release the pending read where the
+        # bank wants that (FinTSController._pending_read); at night nobody is.
+        if user_scope:
+            pending_ctl = FetchCtl(kefiya_login,
+                                   {"docname": user_scope, "enabled": True})
+        else:
+            pending_ctl = FetchCtl(kefiya_login)
+        entries = pending_ctl.get_fints_pending_transactions()
         norm = normalize_pending_entries(entries)
         result = refresh_planned_payments(
             kefiya_login, norm["items"], payment_kinds=(PENDING_KIND,))
@@ -1147,6 +1159,7 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
     if scheduled:
         _held_by_the_bank_is_never_instant([doc])
 
+    _instant_refused_goes_ordinary([doc], scheduled)
     unsupported = _refuse_unsupported([doc], scheduled)
     if unsupported:
         return unsupported
@@ -1376,6 +1389,58 @@ def _refuse_over_limit(docs):
             "available": verdict.get("available"),
             "message": verdict["reason"] + " " + _(
                 "Split it over several days, or reduce it.")}
+
+
+def _instant_refused_goes_ordinary(docs, scheduled):
+    """Send an instant order as an ordinary one where the account refuses
+    instant payments but allows ordinary transfers.
+
+    On 23.11.2026 an approved order on a Sparkasse account carrying the
+    instant flag was stopped with "Die Bank erlaubt 'Echtzeitueberweisung'
+    auf dem Konto ... nicht" -- and stayed stuck until someone found the
+    tick. The rule given that day: "wenn Echtzeitueberweisung nicht moeglich
+    ist, dann stelle auf normale Ueberweisung um." The form already does
+    this for new orders (drop_instant_where_the_bank_refuses_it); an order
+    saved before the bank's list was known still carries the flag.
+
+    Only an explicit refusal of the instant transaction counts, and only
+    where the ordinary one is NOT refused as well -- otherwise the refusal
+    below still speaks. Written onto each order and said out loud.
+    """
+    from frappe.utils import cint
+
+    from kefiya.utils import account_capabilities as caps
+
+    docs = [d for d in (docs or []) if d]
+    instant = [d for d in docs if cint(d.instant_payment)]
+    if not instant:
+        return []
+    bank_account = frappe.db.get_value(
+        "Kefiya Login", docs[0].kefiya_login, "bank_account")
+    if not bank_account:
+        return []
+    count = sum(len(d.items or []) for d in docs)
+    wanted = caps.required_capability(
+        payment_count=count, scheduled=bool(scheduled), instant=True)
+    ordinary = caps.required_capability(
+        payment_count=count, scheduled=bool(scheduled), instant=False)
+    if not caps.refuses(bank_account, wanted) \
+            or caps.refuses(bank_account, ordinary):
+        return []
+
+    changed = []
+    for doc in instant:
+        doc.db_set("instant_payment", 0)
+        doc.add_comment("Info", _(
+            "Instant payment switched off: the bank does not allow it on"
+            " this account. Sent as an ordinary transfer."))
+        changed.append(doc.name)
+    frappe.msgprint(_(
+        "The bank does not allow instant payments on this account. {0}"
+        " therefore goes to the bank as an ordinary transfer."
+    ).format(", ".join(changed)),
+        title=_("Sent as an ordinary transfer"), indicator="orange")
+    return changed
 
 
 def _refuse_unsupported(docs, scheduled):
@@ -1802,6 +1867,7 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
     # Several orders leave as ONE collective message, so the transaction the
     # bank has to allow is the collective one -- an account cleared for a
     # single transfer is not thereby cleared for HKCCM.
+    _instant_refused_goes_ordinary(docs, scheduled)
     unsupported = _refuse_unsupported(docs, scheduled)
     if unsupported:
         return unsupported

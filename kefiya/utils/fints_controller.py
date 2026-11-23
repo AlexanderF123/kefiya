@@ -1572,15 +1572,11 @@ class FinTSController(TanSession):
             # that one dies on the camt unpacking as soon as the bank answers
             # with a TAN challenge, which is the bug this app already fixed
             # once. No reason to reintroduce it here.
-            booked = self._get_transactions_raw(
-                account, start_date, end_date, include_pending=False)
-            both = self._get_transactions_raw(
-                account, start_date, end_date, include_pending=True)
+            booked = self._pending_read(self._get_transactions_raw(
+                account, start_date, end_date, include_pending=False), False)
+            both = self._pending_read(self._get_transactions_raw(
+                account, start_date, end_date, include_pending=True), True)
 
-        for answer in (booked, both):
-            if isinstance(answer, NeedTANResponse):
-                self._note_read_release(answer, "pending_transactions")
-                break
         if isinstance(booked, NeedRetryResponse) \
                 or isinstance(both, NeedRetryResponse):
             # A TAN request here is not worth interrupting the fetch for: the
@@ -1590,6 +1586,41 @@ class FinTSController(TanSession):
         booked_keys = {self._pending_key(t) for t in (booked or [])}
         return [t for t in (both or [])
                 if self._pending_key(t) not in booked_keys]
+
+    def _pending_read(self, answer, include_pending):
+        """One answer of the pending read -- released first, where someone
+        is there to release it.
+
+        Measured on 23.11.2026: every Volksbank account answered the pending
+        read (HKCAZ with pending entries) with a decoupled release request,
+        "Bitte bestaetigen Sie den Vorgang in Ihrer SecureGo plus App", while
+        the booked fetch before it went through without one. kefiya moved on
+        at once, and the request was gone by the time the user confirmed it.
+        The rule given that day: on a fetch by hand, wait for the release.
+
+        So: by hand and decoupled, the prompt goes up and the run waits as it
+        does for the bookings (_await_release, which also gives the next
+        account its breather). Unattended, or a TAN that has to be typed in
+        (comdirect's photoTAN), it is written down and the pending entries are
+        left out, as before. Nothing is parked: the bookings of this account
+        are already in, and a parked challenge would hold up the next one.
+
+        :return: the transactions, or the NeedTANResponse that was not released
+        """
+        if not isinstance(answer, NeedTANResponse):
+            return answer
+        self._note_read_release(answer, "pending_transactions")
+        if not (self.interactive.enabled
+                and getattr(answer, "decoupled", False)):
+            return answer
+        try:
+            self._publish_tan_prompt(answer, decoupled=True)
+        except Exception:
+            return answer
+        released = self._await_release(answer)
+        if released is None:
+            return answer
+        return self._as_transactions(released, include_pending)
 
     @staticmethod
     def _pending_key(entry):
