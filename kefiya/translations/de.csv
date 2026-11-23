@@ -724,3 +724,5 @@ Send these orders today instead of on their date?,Diese Aufträge heute statt am
 Their execution date becomes today. You confirm the send in the next step.,Ihr Ausführungsdatum wird auf heute gesetzt. Das Senden bestätigen Sie im nächsten Schritt.
 due {0},fällig {0}
 "The bank asked for a release for a read beside the bookings; it was not waited for","Die Bank hat für eine Abfrage neben den Umsätzen eine Freigabe verlangt; darauf wurde nicht gewartet"
+Instant payment switched off: the bank does not allow it on this account. Sent as an ordinary transfer.,Echtzeitüberweisung abgeschaltet: Die Bank erlaubt sie auf diesem Konto nicht. Als gewöhnliche Überweisung gesendet.
+The bank does not allow instant payments on this account. {0} therefore goes to the bank as an ordinary transfer.,Die Bank erlaubt auf diesem Konto keine Echtzeitüberweisung. {0} geht deshalb als gewöhnliche Überweisung an die Bank.
