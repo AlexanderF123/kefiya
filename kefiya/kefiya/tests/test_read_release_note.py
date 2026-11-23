@@ -44,6 +44,9 @@ class TestEveryReadNotesItsRelease(unittest.TestCase):
         source = _read("utils", "fints_controller.py")
         for method, label in self.READS.items():
             body = _body(source, method)
+            if method == "get_fints_pending_transactions":
+                # Through _pending_read, which notes before anything else.
+                body = _body(source, "_pending_read")
             self.assertIn('self._note_read_release(', body, method)
             self.assertIn('"{0}"'.format(label), body, method)
 
@@ -69,3 +72,30 @@ class TestEveryReadNotesItsRelease(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPendingReadWaitsByHand(unittest.TestCase):
+    """23.11.2026: the pending read asks every Volksbank account for a
+    decoupled release. By hand it is waited for; at night it is not."""
+
+    def test_both_pending_answers_go_through_the_release(self):
+        body = _body(_read("utils", "fints_controller.py"),
+                     "get_fints_pending_transactions")
+        self.assertEqual(body.count("self._pending_read("), 2)
+
+    def test_waits_only_attended_and_decoupled(self):
+        body = _body(_read("utils", "fints_controller.py"), "_pending_read")
+        self.assertIn("self.interactive.enabled", body)
+        self.assertIn('getattr(answer, "decoupled", False)', body)
+        self.assertLess(body.index("self._note_read_release"),
+                        body.index("self._await_release"))
+        self.assertLess(body.index("self._publish_tan_prompt"),
+                        body.index("self._await_release"))
+        self.assertIn("_as_transactions(released, include_pending)", body)
+        # Nothing parked: the next account must not be held up.
+        self.assertNotIn("_park_tan_challenge", body)
+
+    def test_only_the_fetch_by_hand_is_attended(self):
+        source = _read("utils", "client.py")
+        self.assertIn("user_scope=scope)", source)
+        self.assertIn('{"docname": user_scope, "enabled": True}', source)

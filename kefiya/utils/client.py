@@ -729,10 +729,12 @@ def fetch_all(kefiya_login, user_scope=None):
             "new_count": len(created),
         }
 
-        return fetch_extras(kefiya_login, kefiya_import, summary)
+        return fetch_extras(kefiya_login, kefiya_import, summary,
+                            user_scope=scope)
 
 
-def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True):
+def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True,
+                 user_scope=None):
     """Everything a fetch reads besides the bookings, best effort each.
 
     Balance, pending entries, depot, dated debits and transfers, standing
@@ -741,13 +743,16 @@ def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True):
     costs only itself.
 
     Shared by the fetch by hand (fetch_all) and the nightly run
-    (kefiya_schedule). None of these reads ever asks anybody for a release:
-    where the bank wants one for a read, the read is given up and noted as
-    refused -- which is exactly what an unattended run needs (rule given on
-    18.11.2026: "fetch everything at night that works without a TAN").
+    (kefiya_schedule). Where the bank wants a release for a read, the read
+    is given up and noted as refused -- which is exactly what an unattended
+    run needs (rule given on 18.11.2026: "fetch everything at night that
+    works without a TAN"). One exception, by hand only: the pending entries
+    wait for a decoupled release (rule of 23.11.2026, see
+    FinTSController._pending_read).
 
     :param include_depots: False where the caller fetches the depots by its
         own rhythm, as the nightly run does (_fetch_due_depots)
+    :param user_scope: the page of a fetch by hand; None when unattended
     :return: the summary, filled in
     """
     from frappe.utils import now_datetime
@@ -805,7 +810,14 @@ def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True):
             refresh_planned_payments,
         )
 
-        entries = FetchCtl(kefiya_login).get_fints_pending_transactions()
+        # By hand, somebody is there to release the pending read where the
+        # bank wants that (FinTSController._pending_read); at night nobody is.
+        if user_scope:
+            pending_ctl = FetchCtl(kefiya_login,
+                                   {"docname": user_scope, "enabled": True})
+        else:
+            pending_ctl = FetchCtl(kefiya_login)
+        entries = pending_ctl.get_fints_pending_transactions()
         norm = normalize_pending_entries(entries)
         result = refresh_planned_payments(
             kefiya_login, norm["items"], payment_kinds=(PENDING_KIND,))

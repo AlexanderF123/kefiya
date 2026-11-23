@@ -124,5 +124,8 @@ class TestTheNightFetchesWhatNeedsNoTan(unittest.TestCase):
     def test_the_fetch_by_hand_reads_the_same(self):
         client = _read("utils", "client.py")
         fetch_all = client.split("def fetch_all(")[1].split("\ndef ")[0]
+        # The same reads; only the page is passed on, so the pending read
+        # can wait for a release by hand (_pending_read).
         self.assertIn("return fetch_extras(kefiya_login, kefiya_import,"
-                      " summary)", fetch_all)
+                      " summary,\n                            user_scope=scope)",
+                      fetch_all)
