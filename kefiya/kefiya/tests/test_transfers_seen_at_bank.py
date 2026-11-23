@@ -136,3 +136,26 @@ class TestOnlyWhereItCanBeToldApart(unittest.TestCase):
     def test_a_booking_is_used_once(self):
         source = _read("utils", "transfers_seen_at_bank.py")
         self.assertIn("used.add(txn.get(\"name\"))", source)
+
+
+class TestAHeldOrderIsWatchedToo(unittest.TestCase):
+    """23.11.2026: orders the bank held until their date stood on the
+    outgoing page as "at the bank" days after the bank had paid them."""
+
+    def test_the_bank_held_ones_are_matched(self):
+        from kefiya.utils import transfers_seen_at_bank as seen
+        self.assertIn("Scheduled at Bank", seen.WATCHED_STATES)
+        source = _read("utils", "transfers_seen_at_bank.py")
+        self.assertIn('"status": ("in", WATCHED_STATES)', source)
+
+    def test_the_two_parts_of_one_invoice_stay_apart(self):
+        """Same payee, same purpose up to the part number: the amount
+        decides."""
+        first = plain("Rechnung 4711 Kunde 0815 Abo (Teil1/2)DATUM 01.01",
+                      withdrawal=200.0, name="p1")
+        self.assertIsNone(find_booking_without_id(
+            IBAN, 150.0, "Rechnung 4711 Kunde 0815 Abo (Teil 2/2)",
+            "2026-11-23", [first]))
+        self.assertIs(find_booking_without_id(
+            IBAN, 200.0, "Rechnung 4711 Kunde 0815 Abo (Teil 1/2)",
+            "2026-11-19", [first]), first)

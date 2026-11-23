@@ -144,3 +144,18 @@ class TestARefusalIsNoError(unittest.TestCase):
         self.assertIn('getattr(exc, "said", None)', body)
         self.assertLess(body.index("_is_refused_by_the_bank(exc)"),
                         body.index("frappe.log_error("))
+
+
+class TestTheEmptyAnswerIsReadWhereItArrives(unittest.TestCase):
+    """20.11.2026: four empty answers, each noted as "(nothing recorded)"."""
+
+    def test_the_statement_dialog_is_listened_to(self):
+        controller = _read("utils", "fints_controller.py")
+        raw = controller.split("def _get_transactions_raw(")[1].split(
+            "\n    def ")[0]
+        self.assertLess(raw.index("self._record_statement_answers(dialog)"),
+                        raw.index("fetch_mt940("))
+        note = controller.split("def _note_empty_answer(")[1].split(
+            "\n    def ")[0]
+        self.assertLess(note.index('"_statement_lines"'),
+                        note.index('"last_said"'))
