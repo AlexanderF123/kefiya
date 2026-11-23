@@ -711,3 +711,7 @@ Stop waiting,Nicht mehr warten
 The bank is waiting for your release in its app.,Die Bank wartet auf Ihre Freigabe in ihrer App.
 This page keeps asking for {0} more seconds.,Diese Seite fragt noch {0} Sekunden lang nach.
 "Booked by the bank on {0} ({1}): recipient IBAN, amount and purpose agree, the bank's statement names no End-To-End ID. Marked as sent from the account statement.","Von der Bank am {0} gebucht ({1}): Empfänger-IBAN, Betrag und Verwendungszweck stimmen überein, der Kontoauszug nennt keine End-To-End-ID. Laut Kontoauszug als gesendet markiert."
+"{0} is due on {1} and is managed here, so it is presented for release on that day. To pay it now set the execution date to today; to let the bank hold it, untick ""Manage the due date ourselves"".","{0} ist am {1} fällig und wird hier verwaltet; der Auftrag wird an diesem Tag zur Freigabe vorgelegt. Um ihn jetzt zu bezahlen, das Ausführungsdatum auf heute setzen; damit die Bank ihn hält, „Fälligkeit selbst verwalten“ abwählen."
+{0} is due on {1} and is managed here. It is presented for release on that day; deselect it.,{0} ist am {1} fällig und wird hier verwaltet. Er wird an diesem Tag zur Freigabe vorgelegt; bitte abwählen.
+Pay it today instead?,Stattdessen heute überweisen?
+Execution date brought forward to today to pay it now.,"Ausführungsdatum auf heute vorgezogen, um sofort zu überweisen."

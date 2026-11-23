@@ -70,6 +70,10 @@ function kefiya_handle_transfer_response(frm, msg) {
         }
     } else if (msg.status === "vop_mismatch") {
         kefiya_prompt_vop_release(frm, msg.docname, msg.vop_result);
+    } else if (msg.not_due_yet) {
+        // Kept here for a later day: offered to pay it today instead of
+        // naming the field to change by hand.
+        kefiya_offer_pay_now(frm, msg);
     } else if (msg.over_funds && kefiya.funds_way_out) {
         // Not covered by the account: a dated transfer is offered on the
         // spot, and sent again once the date is set.
@@ -120,3 +124,40 @@ function kefiya_prompt_vop_release(frm, kefiya_login, answer) {
     });
 }
 
+
+
+/**
+ * "Is due on ... and is managed here": offer to pay it today. On a yes the
+ * execution date becomes today (kefiya.utils.client.pay_now) and the order
+ * is sent through the usual confirmed path -- limit, funds and TAN checked
+ * exactly as on its day.
+ */
+function kefiya_offer_pay_now(frm, msg) {
+    frappe.confirm(
+        frappe.utils.escape_html(msg.message || "") + "<br><br><b>"
+            + __("Pay it today instead?") + "</b>",
+        function () {
+            frappe.call({
+                method: "kefiya.utils.client.pay_now",
+                args: { transfer_names: JSON.stringify(msg.names || [frm.doc.name]) },
+                freeze: true,
+            }).then(function (r) {
+                const res = (r && r.message) || {};
+                if (res.status !== "ok") {
+                    frappe.msgprint({ title: __("Not changed"), indicator: "red",
+                        message: frappe.utils.escape_html(res.message || "") });
+                    return;
+                }
+                frappe.call({
+                    method: "kefiya.utils.client.submit_kefiya_transfer",
+                    args: { transfer_name: frm.doc.name,
+                            user_scope: frm.docname, confirmed: 1 },
+                    freeze: true,
+                    freeze_message: __("Sending to bank..."),
+                    callback: function (r2) {
+                        kefiya_handle_transfer_response(frm, r2.message);
+                    },
+                });
+            });
+        });
+}

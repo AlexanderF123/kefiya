@@ -1130,7 +1130,12 @@ def submit_kefiya_transfer(transfer_name, user_scope, confirmed=0):
     # An order we manage ourselves must not be paid before its day just
     # because someone pressed send: the date is the whole point of it.
     if _not_due_yet(doc):
-        return {"status": "error", "message": _(
+        # With the way out attached: the page offers to pay it today
+        # (pay_now) instead of leaving the date to be changed by hand.
+        return {"status": "error", "not_due_yet": True,
+                "names": [transfer_name],
+                "due": str(doc.execution_date),
+                "message": _(
             "{0} is due on {1} and is managed here, so it is presented for"
             " release on that day. To pay it now set the execution date to"
             " today; to let the bank hold it, untick \"Manage the due date"
@@ -1528,6 +1533,47 @@ def _held_by_the_bank_is_never_instant(docs):
             title=_("Sent as an ordinary transfer"), indicator="orange")
 
 
+@frappe.whitelist()
+def pay_now(transfer_names):
+    """Bring orders kept here for a later day forward to today.
+
+    The way out of "is due on ... and is managed here": the page asks, and
+    on a yes the execution date becomes today. Nothing is sent here -- the
+    page sends afterwards, through the same confirmed path as always, with
+    every check (limit, funds, TAN) it would have met on the day.
+
+    Only the date changes, which an approved order may still be told
+    (allow_on_submit). An order at the bank is refused by the document
+    itself (on_update_after_submit).
+
+    :return: {"status": "ok", "names": [...]} or an error dict
+    """
+    from frappe.utils import nowdate
+
+    if isinstance(transfer_names, str):
+        transfer_names = json.loads(transfer_names)
+    names = [n for n in (transfer_names or []) if n]
+    if not names:
+        return {"status": "error", "message": _("No transfers selected.")}
+
+    changed = []
+    for name in names:
+        doc = frappe.get_doc("Kefiya Transfer", name)
+        frappe.has_permission(
+            "Kefiya Transfer",
+            ptype="submit" if doc.docstatus == 1 else "write",
+            doc=doc, throw=True)
+        if not _not_due_yet(doc):
+            continue
+        doc.execution_date = nowdate()
+        doc.manage_due_date = 1
+        doc.save()
+        doc.add_comment("Info", _(
+            "Execution date brought forward to today to pay it now."))
+        changed.append(name)
+    return {"status": "ok", "names": changed}
+
+
 def _not_due_yet(doc):
     """True for an order we manage that has not reached its day."""
     from frappe.utils import cint, getdate, nowdate
@@ -1719,7 +1765,9 @@ def send_transfer_outbox(transfer_names, user_scope, confirmed=0,
                 "{0} is held back. Release it first or deselect it."
             ).format(name)}
         if _not_due_yet(doc):
-            return {"status": "error", "message": _(
+            return {"status": "error", "not_due_yet": True, "names": [name],
+                    "due": str(doc.execution_date),
+                    "message": _(
                 "{0} is due on {1} and is managed here. It is presented for"
                 " release on that day; deselect it."
             ).format(name, frappe.utils.formatdate(doc.execution_date))}

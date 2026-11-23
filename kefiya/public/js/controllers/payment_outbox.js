@@ -954,6 +954,24 @@ kefiya.payment_outbox = function (root) {
 				},
 				changed: load,
 			});
+		} else if (outcome === "error" && m.not_due_yet) {
+			// Kept here for a later day: offered to pay it today, then sent
+			// through the same confirmed path as any send.
+			frappe.confirm(esc(m.message || "") + "<br><br><b>"
+				+ __("Pay it today instead?") + "</b>", function () {
+				frappe.call({
+					method: "kefiya.utils.client.pay_now",
+					args: { transfer_names: JSON.stringify(m.names || names) },
+					freeze: true,
+				}).then(function (r) {
+					const res = (r && r.message) || {};
+					if (res.status !== "ok") {
+						reportFailure(__("Not changed"), { message: res.message });
+						return;
+					}
+					handToBank(m.names || names, login, 0);
+				});
+			});
 		} else if (outcome === "kept") {
 			// Over today's limit as a dated transfer: kept here and sent on
 			// its day instead. Not an error -- and not "handed to the bank".
