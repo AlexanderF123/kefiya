@@ -1577,6 +1577,10 @@ class FinTSController(TanSession):
             both = self._get_transactions_raw(
                 account, start_date, end_date, include_pending=True)
 
+        for answer in (booked, both):
+            if isinstance(answer, NeedTANResponse):
+                self._note_read_release(answer, "pending_transactions")
+                break
         if isinstance(booked, NeedRetryResponse) \
                 or isinstance(both, NeedRetryResponse):
             # A TAN request here is not worth interrupting the fetch for: the
@@ -1612,6 +1616,7 @@ class FinTSController(TanSession):
             account = self._require_fints_account()
             holdings = self.fints_connection.get_holdings(account)
             if isinstance(holdings, NeedTANResponse):
+                self._note_read_release(holdings, "holdings")
                 frappe.throw(
                     _("The bank asks for a TAN to list the holdings."))
             return holding_rows(holdings, self.kefiya_login.account_iban)
@@ -1669,6 +1674,7 @@ class FinTSController(TanSession):
                 subaccount=subaccount or None, blz=blz)
             holdings = conn.get_holdings(depot)
             if isinstance(holdings, NeedTANResponse):
+                self._note_read_release(holdings, "securities_accounts")
                 frappe.throw(
                     _("The bank asks for a TAN to list the holdings."))
             rows = holding_rows(holdings, number)
@@ -1748,7 +1754,11 @@ class FinTSController(TanSession):
                         account),
                     all_accounts=False,
                 )
-                return conn._send_with_possible_retry(dialog, seg, _extract)
+                result = conn._send_with_possible_retry(
+                    dialog, seg, _extract)
+                if isinstance(result, NeedTANResponse):
+                    self._note_read_release(result, "balance")
+                return result
 
     def get_fints_limits(self):
         """What the bank allows this account to transfer, and over what period.
@@ -1871,10 +1881,14 @@ class FinTSController(TanSession):
         with self.client_session():
             account = self._require_fints_account()
             if multiple:
-                return self.fints_connection.get_scheduled_debits(
+                answer = self.fints_connection.get_scheduled_debits(
                     account, multiple)
-            return standing_orders.fetch_scheduled_debits(
-                self.fints_connection, account)
+            else:
+                answer = standing_orders.fetch_scheduled_debits(
+                    self.fints_connection, account)
+            if isinstance(answer, NeedTANResponse):
+                self._note_read_release(answer, "scheduled_debits")
+            return answer
 
     def get_fints_scheduled_transfers(self):
         """The dated transfers the bank holds (HKCSB) -- see
@@ -1883,8 +1897,14 @@ class FinTSController(TanSession):
 
         with self.client_session():
             account = self._require_fints_account()
-            return standing_orders.fetch_scheduled_transfers(
-                self.fints_connection, account)
+            try:
+                return standing_orders.fetch_scheduled_transfers(
+                    self.fints_connection, account)
+            except Exception as exc:
+                wanted = getattr(exc, "release_response", None)
+                if wanted is not None:
+                    self._note_read_release(wanted, "scheduled_transfers")
+                raise
 
     def get_fints_standing_orders(self):
         """The bestand of SEPA standing orders (HKCDB).
@@ -1897,16 +1917,25 @@ class FinTSController(TanSession):
 
         with self.client_session():
             account = self._require_fints_account()
-            return standing_orders.fetch_standing_orders(
-                self.fints_connection, account,
-                login=self.kefiya_login.name)
+            try:
+                return standing_orders.fetch_standing_orders(
+                    self.fints_connection, account,
+                    login=self.kefiya_login.name)
+            except Exception as exc:
+                wanted = getattr(exc, "release_response", None)
+                if wanted is not None:
+                    self._note_read_release(wanted, "standing_orders")
+                raise
 
     def get_fints_statements(self):
         """List available electronic account statements
         (elektronische Kontoauszuege / Dokumente)."""
         with self.client_session():
             account = self._require_fints_account()
-            return self.fints_connection.get_statements(account)
+            answer = self.fints_connection.get_statements(account)
+            if isinstance(answer, NeedTANResponse):
+                self._note_read_release(answer, "statements")
+            return answer
 
     def get_fints_statement(self, number=None, year=None, file_format=None):
         """Fetch one specific electronic account statement document (HIEKA).
@@ -1923,8 +1952,11 @@ class FinTSController(TanSession):
         """Credit card transactions (Kreditkartenumsaetze) for the account."""
         with self.client_session():
             account = self._require_fints_account()
-            return self.fints_connection.get_credit_card_transactions(
+            answer = self.fints_connection.get_credit_card_transactions(
                 account, credit_card_number, start_date, end_date)
+            if isinstance(answer, NeedTANResponse):
+                self._note_read_release(answer, "credit_card")
+            return answer
 
     def get_fints_transactions_xml(self, start_date=None, end_date=None):
         """Fetch transactions as camt XML (richer than MT940: full structured
@@ -2283,6 +2315,27 @@ class FinTSController(TanSession):
                         " attempt would fail in the same way: open the bank"
                         " access and press \"Reset Connection\" before trying"
                         " again.")
+                # What the bank actually said. python-fints reports a 9xxx
+                # refusal of the ORDER as "could not fetch BPD", so the
+                # sentence above may be about the wrong thing entirely -- on
+                # 23.11.2026 it stood under an instant payment with no word of
+                # the bank's own. Its lines are kept by the client
+                # (fints_vop_client.last_said); they go into the message and
+                # the Error Log, so the next look is at the reason, not at a
+                # guess.
+                said = "\n".join(
+                    "{0} {1}{2}".format(
+                        code or "", text or "",
+                        " [Segment {0}]".format(ref) if ref else "")
+                    for code, text, ref in list(getattr(
+                        self.fints_connection, "last_said", None) or ())[-10:])
+                frappe.log_error(
+                    title="Kefiya: transfer broke off (could not fetch BPD)",
+                    message="login={0} reference={1}\n{2}".format(
+                        self.kefiya_login.name, payment_reference or "",
+                        said or "(the bank's lines were not recorded)"),
+                    reference_doctype="Kefiya Login",
+                    reference_name=self.kefiya_login.name)
                 frappe.throw(_(
                     "The bank connection for {0} could not be rebuilt from its"
                     " stored state, so this order was NOT sent as far as this"
@@ -2290,7 +2343,9 @@ class FinTSController(TanSession):
                     "\n\nBefore sending again, look in your online banking:"
                     " if the transfer is there after all, cancel this order"
                     " instead of repeating it."
-                ).format(self.kefiya_login.name, outcome),
+                ).format(self.kefiya_login.name, outcome)
+                    + (("\n\n" + _("What the bank said:") + "\n" + said)
+                       if said else ""),
                     title=_("Connection could not be rebuilt"))
             response, parked = self._confirm_or_park_vop(
                 response, pain_xml, payment_reference)

@@ -235,8 +235,12 @@ def _fetch_pages(connection, dialog, make_segment, response_type,
         # A NeedTANResponse: the bank wants a TAN for reading its bestand.
         # Nothing parks it on this path, so say so instead of reading the
         # challenge as an empty bestand.
-        raise bank_held_orders.BankRefusedQuery(
+        refused = bank_held_orders.BankRefusedQuery(
             response_type, ["the bank asks for a TAN to read this"])
+        # The challenge itself, for the controller to write down which
+        # read it was (FinTSController._note_read_release).
+        refused.release_response = result
+        raise refused
     return collected
 
 

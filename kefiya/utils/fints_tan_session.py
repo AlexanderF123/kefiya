@@ -274,6 +274,52 @@ class TanSession:
         except Exception:
             pass
 
+    def _note_read_release(self, response, what):
+        """A read beside the bookings made the bank ask for a release.
+
+        Written down, nothing else -- see release_trigger. On 23.11.2026 the
+        Volksbank accounts still wanted a release in the app on every fetch
+        by hand, and the releases were "often gone already" when the user
+        confirmed them. The bookings themselves went through without one:
+        each account finished in one or two seconds, nothing waited. What
+        asked was one of the reads after them (balance, pending entries,
+        dated orders, standing orders, statements, ...): the bank pushes the
+        request to the phone the moment it answers, while kefiya reads the
+        answer as "refused" and moves on, and the dialog ends with the
+        release still open. None of those paths wrote anything down, so
+        which read it is could not be told. Agreed on 23.11.2026: first only
+        note it, then decide how to treat it.
+
+        Attended or not: the nightly run sends the same reads. Never raises.
+
+        :param what: the read, in the words of the fetch log
+        """
+        try:
+            from frappe.utils import nowdate
+
+            from kefiya.utils import release_trigger
+
+            attended = bool(getattr(self.interactive, "enabled", False))
+            earlier = frappe.db.count("Kefiya Import", {
+                "kefiya_login": self.kefiya_login.name, "docstatus": 1,
+                "creation": (">=", nowdate() + " 00:00:00")})
+            message = "read={0}\n".format(what) + release_trigger.describe(
+                response, login=self.kefiya_login.name, attended=attended,
+                earlier_today=earlier,
+                challenge_text=tan_challenge.challenge_of(
+                    response).get("text", "") or "")
+            cache = frappe.cache()
+            fresh = cache.set(
+                cache.make_key("kefiya_read_release_note:{0}:{1}".format(
+                    self.kefiya_login.name, what)),
+                1, ex=900, nx=True)
+            if fresh:
+                note_on_login(self.kefiya_login.name, message, heading=_(
+                    "The bank asked for a release for a read beside the"
+                    " bookings; it was not waited for"))
+        except Exception:
+            pass
+
     def _cannot_note_the_challenge(self):
         """The bank is holding a dialog open and nothing wrote it down.
 

@@ -723,3 +723,4 @@ No bank access pays from the account of this booking. Choose the paying account 
 Send these orders today instead of on their date?,Diese Aufträge heute statt am Termin senden?
 Their execution date becomes today. You confirm the send in the next step.,Ihr Ausführungsdatum wird auf heute gesetzt. Das Senden bestätigen Sie im nächsten Schritt.
 due {0},fällig {0}
+"The bank asked for a release for a read beside the bookings; it was not waited for","Die Bank hat für eine Abfrage neben den Umsätzen eine Freigabe verlangt; darauf wurde nicht gewartet"

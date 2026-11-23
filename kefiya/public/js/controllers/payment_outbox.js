@@ -559,14 +559,11 @@ kefiya.payment_outbox = function (root) {
 				applicable("approve_to_send").length
 					? __("Approve and send")
 					: __("Send"),
-				applicable("send").length, "zk-send");
-			// Orders kept here for a later day were locked out of sending
-			// altogether: "Fällig erst am …", and no way to pay them today
-			// short of editing each date by hand (23.11.2026).
-			if (applicable("send_now").length) {
-				h += button("send_now", __("Send now"),
-					applicable("send_now").length);
-			}
+				// Orders kept here for a later day count as well: Send asks
+				// whether they go today (bringLaterForward) -- one button
+				// for one intention, not a second one beside it.
+				applicable("send").length + applicable("send_now").length,
+				"zk-send");
 		} else {
 			h += "<div class='zk-sub'>"
 				+ __("Sending needs the right to approve.") + "</div>";
@@ -690,7 +687,6 @@ kefiya.payment_outbox = function (root) {
 		if (act === "hold") return hold(1);
 		if (act === "release") return hold(0);
 		if (act === "send") return send();
-		if (act === "send_now") return sendNow();
 	}
 
 	function details(name) {
@@ -810,13 +806,12 @@ kefiya.payment_outbox = function (root) {
 			});
 	}
 
-	// Bring orders that are due later forward to today, then send them
-	// through the ordinary send -- with its confirmation, limit, funds and
-	// TAN. Asked first; nothing changes before the answer.
-	function sendNow() {
-		const rows = applicable("send_now");
-		if (view.busy || !rows.length) return;
-		const list = rows.map(function (r) {
+	// Orders kept here for a later day, selected for sending: asked once
+	// whether they go today. On a yes their date becomes today (pay_now), the
+	// page reloads, and the ordinary send runs with its own confirmation,
+	// limit, funds and TAN. Nothing changes before the answer.
+	function bringLaterForward(later) {
+		const list = later.map(function (r) {
 			return "<li>" + esc(r.name) + " · " + esc(kefiya.outbox_recipient(r))
 				+ " · " + money(r.total_amount) + " · " + __("due {0}",
 					[esc(dmy(r.execution_date))]) + "</li>";
@@ -831,7 +826,7 @@ kefiya.payment_outbox = function (root) {
 				frappe.call({
 					method: "kefiya.utils.client.pay_now",
 					args: { transfer_names: JSON.stringify(
-						rows.map(function (r) { return r.name; })) },
+						later.map(function (r) { return r.name; })) },
 					freeze: true,
 				}).then(function (r) {
 					const res = (r && r.message) || {};
@@ -840,7 +835,7 @@ kefiya.payment_outbox = function (root) {
 						return;
 					}
 					// Reloaded first, so the rows are sendable now; the
-					// selection is kept by name and the ordinary send asks.
+					// selection is kept by name.
 					load().then(function () { send(); });
 				});
 			});
@@ -849,6 +844,11 @@ kefiya.payment_outbox = function (root) {
 	function send() {
 		const rows = applicable("send");
 		if (view.busy) return;
+		const later = applicable("send_now");
+		if (later.length) {
+			bringLaterForward(later);
+			return;
+		}
 		if (!rows.length) {
 			// Said, not swallowed. An order held at the payee check was
 			// selected, Send was pressed, and nothing happened at all -- over

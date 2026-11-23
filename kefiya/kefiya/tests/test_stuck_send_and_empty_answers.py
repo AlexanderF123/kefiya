@@ -189,20 +189,22 @@ class TestNotDueYetOffersToPayNow(unittest.TestCase):
         self.assertIn("m.not_due_yet", page)
 
 
-class TestSendNowOnTheOutgoingPage(unittest.TestCase):
+class TestSendAlsoTakesOrdersDueLater(unittest.TestCase):
     """23.11.2026: approved orders kept here for a later day could not be
-    sent today at all -- the page locked them out before any request."""
+    sent today at all. Not a second button for it -- Send asks."""
 
     def setUp(self):
         self.page = _read("public", "js", "controllers", "payment_outbox.js")
 
-    def test_a_button_for_orders_due_later(self):
-        self.assertIn('if (what === "send_now")', self.page)
-        self.assertIn('button("send_now", __("Send now")', self.page)
-        self.assertIn('if (act === "send_now") return sendNow();', self.page)
+    def test_no_second_button(self):
+        self.assertNotIn('button("send_now"', self.page)
+        self.assertIn('applicable("send").length + applicable("send_now").length',
+                      self.page)
 
-    def test_asked_first_then_the_ordinary_send(self):
-        body = self.page.split("function sendNow() {")[1].split(
+    def test_send_asks_first_then_the_ordinary_send(self):
+        send = self.page.split("function send() {")[1].split("\n\tfunction ")[0]
+        self.assertIn("bringLaterForward(later)", send)
+        body = self.page.split("function bringLaterForward(later) {")[1].split(
             "\n\tfunction ")[0]
         self.assertLess(body.index("frappe.confirm("),
                         body.index("kefiya.utils.client.pay_now"))
@@ -213,3 +215,16 @@ class TestSendNowOnTheOutgoingPage(unittest.TestCase):
         for part in ("r.docstatus !== 1", "r.on_hold", "r.vop_pending",
                      '"Scheduled at Bank"', "!r.manage_due_date"):
             self.assertIn(part, rule)
+
+
+class TestABankRefusalReadAsMissingBpdIsShown(unittest.TestCase):
+    """23.11.2026: "could not be rebuilt" under an instant payment, with no
+    word of what the bank had said."""
+
+    def test_the_banks_lines_go_into_message_and_log(self):
+        controller = _read("utils", "fints_controller.py")
+        part = controller.split('title=_("Connection could not be rebuilt"))')[0]
+        part = part[part.rindex("if not _is_missing_bank_parameters(exc):"):]
+        self.assertIn('"last_said"', part)
+        self.assertIn("frappe.log_error(", part)
+        self.assertIn('_("What the bank said:")', part)
