@@ -499,6 +499,51 @@ def _created_transactions(result):
     return []
 
 
+#: How long a release request for the pending read keeps the nightly run
+#: from asking again. After that the night tries once more -- the bank may
+#: have stopped asking.
+PENDING_RELEASE_MEMORY_DAYS = 30
+
+
+def _pending_wants_release(kefiya_login):
+    """Did the bank ask for a release for this login's pending read lately?
+
+    Read off the login's timeline, where FinTSController._note_read_release
+    writes every such request -- by hand or at night. Never raises; in
+    doubt the read is made, as before.
+    """
+    try:
+        from frappe.utils import add_days, now_datetime
+
+        return bool(frappe.db.exists("Comment", {
+            "reference_doctype": "Kefiya Login",
+            "reference_name": kefiya_login,
+            "comment_type": "Info",
+            "content": ("like", "%read=pending_transactions%"),
+            "creation": (">=", add_days(now_datetime(),
+                                        -PENDING_RELEASE_MEMORY_DAYS)),
+        }))
+    except Exception:
+        return False
+
+
+def _speak_the_sites_language():
+    """Set the site's language for a job nobody queued by hand.
+
+    The scheduler runs as Administrator, without a language of its own, so
+    every _() in the nightly run answered in English: the timeline of a
+    login read "The bank delivered no bookings" in the morning and "Die
+    Bank hat keine Umsaetze geliefert" after a fetch by hand (24.11.2026).
+    Never raises.
+    """
+    try:
+        lang = frappe.db.get_single_value("System Settings", "language")
+        if lang:
+            frappe.local.lang = lang
+    except Exception:
+        pass
+
+
 def _optional_fetch(summary, key, label, fn):
     """Run one best-effort extra fetch, telling absent from broken apart.
 
@@ -824,8 +869,20 @@ def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True,
         result["skipped"] = norm["skipped"]
         return result
 
-    summary["pending"] = _optional_fetch(
-        summary, "pending", "pending_transactions", _fetch_pending)
+    # At night, not where the bank asks for a release for it: it pushes the
+    # request to the phone anyway, and nobody answers it. On 24.11.2026
+    # eleven Volksbank accounts did that between 06:01 and 07:02. The rule
+    # given that day: "nachts weglassen". The pending entries already on
+    # file stay as they are -- an empty answer would cancel them.
+    if not user_scope and _pending_wants_release(kefiya_login):
+        summary.setdefault("unsupported", []).append("pending_transactions")
+        summary.setdefault("unsupported_details", {})[
+            "pending_transactions"] = _(
+                "left out at night: the bank asks for a release for it")
+        summary["pending"] = None
+    else:
+        summary["pending"] = _optional_fetch(
+            summary, "pending", "pending_transactions", _fetch_pending)
 
     # 2c) Securities holdings (Depot) -> Kefiya Security Holding.
     def _fetch_holdings():

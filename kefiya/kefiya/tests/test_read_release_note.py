@@ -99,3 +99,33 @@ class TestPendingReadWaitsByHand(unittest.TestCase):
         source = _read("utils", "client.py")
         self.assertIn("user_scope=scope)", source)
         self.assertIn('{"docname": user_scope, "enabled": True}', source)
+
+
+class TestPendingLeftOutAtNight(unittest.TestCase):
+    """24.11.2026: "nachts weglassen" -- the pending read where the bank asks
+    for a release; and the nightly run in the site's language."""
+
+    def test_night_skips_where_the_bank_asked(self):
+        source = _read("utils", "client.py")
+        body = source.split("def fetch_extras(")[1].split("\ndef ")[0]
+        guard = body.index(
+            "if not user_scope and _pending_wants_release(kefiya_login):")
+        self.assertLess(guard, body.index(
+            'summary, "pending", "pending_transactions", _fetch_pending)'))
+
+    def test_memory_is_the_timeline_note(self):
+        source = _read("utils", "client.py")
+        body = source.split("def _pending_wants_release(")[1].split(
+            "\ndef ")[0]
+        self.assertIn("read=pending_transactions", body)
+        self.assertIn("PENDING_RELEASE_MEMORY_DAYS", body)
+        self.assertIn("return False", body)
+
+    def test_schedule_speaks_the_sites_language(self):
+        with open(os.path.join(APP, "doctype", "kefiya_schedule",
+                               "kefiya_schedule.py"),
+                  encoding="utf-8") as handle:
+            source = handle.read()
+        body = source.split("def scheduled_import_fints_payments(")[1]
+        self.assertLess(body.index("_speak_the_sites_language()"),
+                        body.index("frappe.get_single('Kefiya Schedule')"))
