@@ -254,6 +254,11 @@ def scheduled_import_fints_payments(manual=None):
     # kefiya/utils/client.py.
     frappe.has_permission("Kefiya Schedule", ptype="write", throw=True)
 
+    # In the site's language, not the scheduler's English: what this run
+    # writes on the logins' timelines is read by people.
+    from kefiya.utils.client import _speak_the_sites_language
+    _speak_the_sites_language()
+
     schedule_settings = frappe.get_single('Kefiya Schedule')
 
     today = now_datetime().date()
