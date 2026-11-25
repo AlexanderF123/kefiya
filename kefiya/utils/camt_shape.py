@@ -66,3 +66,15 @@ def streams_in(result, include_pending=False):
     if include_pending:
         dokumente += [x for x in (vorgemerkt or []) if x]
     return dokumente
+
+
+def pending_streams(result):
+    """Nur die vorgemerkten camt-Dokumente -- oder **None**, wenn das
+    Ergebnis kein Paar von Dokumentlisten ist.
+
+    Eine leere Liste heisst: die Bank hat camt geantwortet und keine
+    Vormerkungen geschickt. Das ist eine Antwort, kein fehlender Wert.
+    """
+    if streams_in(result, include_pending=False) is None:
+        return None
+    return [x for x in (result[1] or []) if x]

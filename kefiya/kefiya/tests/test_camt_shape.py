@@ -117,3 +117,41 @@ class TestDerAbrufBenutztEsAnBeidenStellen(unittest.TestCase):
         # Und nur dort: eine zweite Kopie waere die naechste, die eine
         # Bibliotheksfassung ueberholt.
         self.assertEqual(self._quelle().count("camt053_to_dict(stream)"), 1)
+
+
+class TestPendingStreams(unittest.TestCase):
+    """25.11.2026: the pending entries come with the booked camt answer; a
+    second request for them is what the Volksbank wanted a release for."""
+
+    def test_only_the_pending_documents(self):
+        from kefiya.utils.camt_shape import pending_streams
+        self.assertEqual(pending_streams(([DOK], [DOK2])), [DOK2])
+
+    def test_none_entries_are_no_documents(self):
+        from kefiya.utils.camt_shape import pending_streams
+        self.assertEqual(pending_streams(([DOK], [None])), [])
+
+    def test_no_pair_is_no_answer(self):
+        from kefiya.utils.camt_shape import pending_streams
+        self.assertIsNone(pending_streams([object()]))
+        self.assertIsNone(pending_streams(None))
+
+
+class TestPendingTakenFromTheBookedFetch(unittest.TestCase):
+    def _controller(self):
+        with open(os.path.join(WURZEL, "utils", "fints_controller.py"),
+                  encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_both_booked_paths_keep_the_pending(self):
+        source = self._controller()
+        self.assertEqual(source.count("self._keep_pending_from(result)"), 1)
+        self.assertEqual(source.count("self._keep_pending_from(released)"),
+                         1)
+
+    def test_the_pending_read_asks_nothing_when_kept(self):
+        source = self._controller()
+        body = source.split("def get_fints_pending_transactions(")[1].split(
+            "\n    def ")[0]
+        self.assertLess(body.index("kept = self.pending_kept()"),
+                        body.index("with self.client_session():"))

@@ -401,13 +401,44 @@ def _say(run, login, summary, error=None):
     """
     if not run:
         return
+    payload = {"run": run, "login": login, "summary": summary,
+               "error": error}
     try:
-        frappe.publish_realtime(
-            "kefiya_fetch_progress",
-            {"run": run, "login": login, "summary": summary, "error": error},
-            user=frappe.session.user)
+        frappe.as_json(payload)
     except Exception:
-        pass
+        # Written down once per run, with the type that failed: until the
+        # cause is known, this is the only place it shows.
+        if not frappe.flags.get("kefiya_progress_unserialisable"):
+            frappe.flags.kefiya_progress_unserialisable = True
+            frappe.log_error(
+                title="Kefiya: fetch progress could not be serialised",
+                message="login={0}\n\n{1}".format(
+                    login, frappe.get_traceback()),
+                reference_doctype="Kefiya Login", reference_name=login)
+    try:
+        # Anything the browser cannot be sent as JSON goes as text. On
+        # 23. and 25.11.2026 not one progress event of a collective fetch
+        # reached the page: the server fetched every account, the panel
+        # waited ten minutes and then reported all of them as failed
+        # ("Der Hintergrundlauf meldet sich nicht mehr"). A summary that
+        # could not be serialised made publish_realtime raise, and the
+        # except below swallowed it -- the line the page lives on.
+        payload = json.loads(json.dumps(payload, default=str))
+    except Exception:
+        payload = {"run": run, "login": login, "summary": None,
+                   "error": error or _("The result could not be shown.")}
+    try:
+        frappe.publish_realtime("kefiya_fetch_progress", payload,
+                                user=frappe.session.user)
+    except Exception:
+        try:
+            frappe.log_error(
+                title="Kefiya: fetch progress not published",
+                message="login={0}\n\n{1}".format(
+                    login, frappe.get_traceback()),
+                reference_doctype="Kefiya Login", reference_name=login)
+        except Exception:
+            pass
 
 
 #: How long a release the bank asked for counts as still open. Banks keep a
@@ -523,6 +554,19 @@ def _pending_wants_release(kefiya_login):
             "creation": (">=", add_days(now_datetime(),
                                         -PENDING_RELEASE_MEMORY_DAYS)),
         }))
+    except Exception:
+        return False
+
+
+def _pending_already_in_hand(kefiya_login):
+    """Did this run's booked fetch bring the pending entries along?
+
+    Then reading them costs no request and no release, at night as well
+    (FinTSController._keep_pending_from).
+    """
+    try:
+        kept = frappe.flags.get("kefiya_pending_from_import") or {}
+        return kefiya_login in kept
     except Exception:
         return False
 
@@ -874,7 +918,8 @@ def fetch_extras(kefiya_login, kefiya_import, summary, include_depots=True,
     # eleven Volksbank accounts did that between 06:01 and 07:02. The rule
     # given that day: "nachts weglassen". The pending entries already on
     # file stay as they are -- an empty answer would cancel them.
-    if not user_scope and _pending_wants_release(kefiya_login):
+    if not user_scope and _pending_wants_release(kefiya_login) \
+            and not _pending_already_in_hand(kefiya_login):
         summary.setdefault("unsupported", []).append("pending_transactions")
         summary.setdefault("unsupported_details", {})[
             "pending_transactions"] = _(
