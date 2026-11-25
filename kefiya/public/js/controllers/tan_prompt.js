@@ -213,9 +213,10 @@ frappe.provide("kefiya");
                         ? __("Confirm the release in your banking app, then"
                             + " press Submit here.")
                         : __("Confirm the release in your banking app."
-                            + " This box closes by itself once the bank reports"
-                            + " the release; you do not need to press anything"
-                            + " here.") });
+                            + " This page asks the bank by itself and shows"
+                            + " the result here. If it does not, close this"
+                            + " box and check the order in your online"
+                            + " banking before sending it again.") });
             }
         }
         // Prepended only now: everything above addresses the fields by index
@@ -302,6 +303,16 @@ frappe.provide("kefiya");
         // must not change, so nothing is focused at all.
         focusTanField(dialog);
 
+        // No button where there is nothing to press. The release is given in
+        // the banking app; this page asks the bank by itself. A "Send" here
+        // resumed the parked dialog a second time -- on 25.11.2026 the bank
+        // answered that with "9010 / 9800 Dialog abgebrochen", and what had
+        // become of the order was no longer known. Closing the box (x) stays.
+        if (data.mfa_required && !data.tan_required
+                && !(opts && opts.confirm_here)) {
+            try { dialog.get_primary_btn().addClass("hide"); } catch (ignoredB) {}
+        }
+
         // Only the decoupled box waits on the server; the others are answered
         // in the box itself.
         if (data.mfa_required && data.docname) {
@@ -376,6 +387,16 @@ frappe.provide("kefiya");
             if (waitBox) {
                 try { waitBox.close(); } catch (ignored) {}
             }
+            // And the box that asked for the release: it waited for an event
+            // that may never come, and with the asking over it has nothing
+            // left to wait for. It stood there after the wait had failed.
+            [scope, login].forEach(function (key) {
+                var box = openBoxes[key];
+                if (box) {
+                    try { box.hide(); } catch (ignoredC) {}
+                    delete openBoxes[key];
+                }
+            });
             if (opts.done) opts.done(status, message);
         }
         function ask() {

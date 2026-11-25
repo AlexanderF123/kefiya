@@ -365,7 +365,7 @@ Release failed,Freigabe fehlgeschlagen
 Released in the banking app. Handed to the bank: {0} orders,In der Banking-App freigegeben. An die Bank übergeben: {0} Aufträge
 Still waiting for the release,Warte noch auf die Freigabe
 "The bank has not reported the release. If you confirmed it in the app, check your online banking before sending again; the order is still marked as not sent here.","Die Bank hat die Freigabe nicht gemeldet. Falls Sie sie in der App bestätigt haben, prüfen Sie Ihr Online-Banking, bevor Sie erneut senden; der Auftrag gilt hier weiterhin als nicht gesendet."
-Confirm the release in your banking app. This box closes by itself once the bank reports the release; you do not need to press anything here.,"Bestätigen Sie die Freigabe in Ihrer Banking-App. Dieses Fenster schließt sich von selbst, sobald die Bank die Freigabe meldet; Sie müssen hier nichts drücken."
+"Confirm the release in your banking app. This page asks the bank by itself and shows the result here. If it does not, close this box and check the order in your online banking before sending it again.","Bestätigen Sie die Freigabe in Ihrer Banking-App. Diese Seite fragt die Bank selbst und zeigt hier das Ergebnis. Geschieht das nicht, schließen Sie dieses Fenster und prüfen Sie den Auftrag im Online-Banking, bevor Sie ihn erneut senden."
 Released in the banking app. Transfer submitted.,In der Banking-App freigegeben. Überweisung übermittelt.
 The bank has not reported the release. Check your online banking before sending again.,"Die Bank hat die Freigabe nicht gemeldet. Prüfen Sie Ihr Online-Banking, bevor Sie erneut senden."
 Rebuild from statement,Aus dem Kontoauszug neu aufbauen
