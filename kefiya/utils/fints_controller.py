@@ -1305,10 +1305,46 @@ class FinTSController(TanSession):
                     dialog, hkcaz, account, start_date, end_date)
                 if isinstance(result, NeedRetryResponse):
                     return result
+                self._keep_pending_from(result)
                 # The unpacking lives in _as_transactions, because the
                 # resume after a release comes back here as well and used to
                 # hand the raw documents on untouched.
                 return self._as_transactions(result, include_pending)
+
+    #: Where the pending entries of this run's booked fetch are kept, per
+    #: login: frappe.flags lives as long as the request or job.
+    PENDING_FLAG = "kefiya_pending_from_import"
+
+    def _keep_pending_from(self, result):
+        """Keep the pending entries the booked fetch brought along.
+
+        A camt answer carries the pending entries next to the bookings, and
+        the request is the same either way -- ``include_pending`` only
+        decides what python-fints unpacks. kefiya threw them away and asked
+        the bank a second time for them. That second request is the one the
+        Volksbank wanted a release for, on every account and every fetch
+        (23.--25.11.2026); after the release it broke off with "9010
+        Nachricht enthaelt Fehler / 9800 Dialog abgebrochen". Kept here, the
+        pending read needs no request at all. Never raises.
+        """
+        try:
+            streams = camt_shape.pending_streams(result)
+            if streams is None:
+                return
+            # Unpacked where everything camt is unpacked: an empty booked
+            # side and the pending documents.
+            entries = self._as_transactions(([], streams),
+                                            include_pending=True)
+            kept = frappe.flags.get(self.PENDING_FLAG) or {}
+            kept[self.kefiya_login.name] = entries
+            frappe.flags[self.PENDING_FLAG] = kept
+        except Exception:
+            pass
+
+    def pending_kept(self):
+        """The pending entries this run's booked fetch brought, or None."""
+        return (frappe.flags.get(self.PENDING_FLAG) or {}).get(
+            self.kefiya_login.name)
 
     def _as_transactions(self, result, include_pending=False):
         """What the library handed back, as transactions.
@@ -1386,6 +1422,7 @@ class FinTSController(TanSession):
             self._publish_tan_prompt(response, decoupled=True)
             released = self._await_release(response)
             if released is not None:
+                self._keep_pending_from(released)
                 return self._as_transactions(released)
             # Out of patience. NOW park it, so the release still finds
             # something to unlock when it arrives; the prompt is already up.
@@ -1552,6 +1589,12 @@ class FinTSController(TanSession):
 
         :return: list of entries the bank has not booked yet
         """
+        # Already in hand from the booked fetch: no second request, so no
+        # release the bank could ask for (_keep_pending_from).
+        kept = self.pending_kept()
+        if kept is not None:
+            return kept
+
         from kefiya.utils.mt940_compat import ensure_optional_timezone_is_optional
 
         # Without this the pending block of several Sparkassen cannot be parsed

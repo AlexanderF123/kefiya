@@ -109,7 +109,7 @@ class TestPendingLeftOutAtNight(unittest.TestCase):
         source = _read("utils", "client.py")
         body = source.split("def fetch_extras(")[1].split("\ndef ")[0]
         guard = body.index(
-            "if not user_scope and _pending_wants_release(kefiya_login):")
+            "if not user_scope and _pending_wants_release(kefiya_login)")
         self.assertLess(guard, body.index(
             'summary, "pending", "pending_transactions", _fetch_pending)'))
 
