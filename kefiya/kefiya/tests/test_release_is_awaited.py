@@ -183,9 +183,24 @@ class TestTheBoxClosesOnTheTransferPathToo(unittest.TestCase):
         self.assertLess(body.index("self._persist_fints_state()"),
                         body.index("self._tell_the_browser_it_can_stop_waiting()"))
 
-    def test_the_box_says_it_closes_by_itself(self):
+    def test_the_box_says_what_happens_and_offers_no_send(self):
+        """25.11.2026: "schliesst sich von selbst" was not true -- the box
+        stood there -- and its button resumed the parked dialog a second
+        time, which the bank broke off. The box now says what the page does
+        and what to do if it does not, and has no button to press."""
         source = _js("tan_prompt.js")
-        self.assertIn("This box closes by itself once the bank reports", source)
+        self.assertNotIn("This box closes by itself once the bank reports",
+                         source)
+        self.assertIn("This page asks the bank by itself", source)
+        self.assertIn('dialog.get_primary_btn().addClass("hide")', source)
+
+    def test_the_end_of_the_wait_closes_the_asking_box(self):
+        source = _js("tan_prompt.js")
+        body = source.split("function awaitRelease(")[1].split(
+            "kefiya.await_release")[0]
+        finish = body.split("function finish(")[1].split("function ask(")[0]
+        self.assertIn("openBoxes[key]", finish)
+        self.assertIn("box.hide()", finish)
 
 
 class TestAReleasedPayeeCheckIsWrittenDown(unittest.TestCase):
