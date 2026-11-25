@@ -154,7 +154,9 @@ class TestTheEmptyAnswerIsReadWhereItArrives(unittest.TestCase):
         raw = controller.split("def _get_transactions_raw(")[1].split(
             "\n    def ")[0]
         self.assertLess(raw.index("self._record_statement_answers(dialog)"),
-                        raw.index("fetch_mt940("))
+                        # The MT940 fetch, now through the helper that
+                        # keeps the pending block (25.11.2026).
+                        raw.index("self._fetch_mt940_keeping_pending("))
         note = controller.split("def _note_empty_answer(")[1].split(
             "\n    def ")[0]
         self.assertLess(note.index('"_statement_lines"'),

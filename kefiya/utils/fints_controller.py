@@ -1296,9 +1296,9 @@ class FinTSController(TanSession):
                 hkkaz = find_command(HKKAZ5, HKKAZ6, HKKAZ7)
                 # MT940 banks return the challenge instead of the statements;
                 # it is passed through untouched for the caller to handle.
-                return fetch_mt940(
+                return self._fetch_mt940_keeping_pending(
                     dialog, hkkaz, account, start_date, end_date,
-                    include_pending)
+                    include_pending, fallback=fetch_mt940)
             except FinTSUnsupportedOperation:
                 hkcaz = find_command(HKCAZ1)
                 result = fetch_xml(
@@ -1333,13 +1333,80 @@ class FinTSController(TanSession):
                 return
             # Unpacked where everything camt is unpacked: an empty booked
             # side and the pending documents.
-            entries = self._as_transactions(([], streams),
-                                            include_pending=True)
-            kept = frappe.flags.get(self.PENDING_FLAG) or {}
-            kept[self.kefiya_login.name] = entries
-            frappe.flags[self.PENDING_FLAG] = kept
+            self._store_pending(self._as_transactions(
+                ([], streams), include_pending=True))
         except Exception:
             pass
+
+    def _store_pending(self, entries):
+        """Remember this login's pending entries for the rest of the run."""
+        kept = frappe.flags.get(self.PENDING_FLAG) or {}
+        kept[self.kefiya_login.name] = list(entries or [])
+        frappe.flags[self.PENDING_FLAG] = kept
+
+    def _fetch_mt940_keeping_pending(self, dialog, hkkaz, account,
+                                     start_date, end_date, include_pending,
+                                     fallback):
+        """python-fints' MT940 fetch -- keeping the pending block it drops.
+
+        The MT940 answer (HIKAZ) carries the pending entries in a field of
+        its own, next to the bookings; the request is the same either way,
+        and ``include_pending`` only decides whether the library parses
+        that field. kefiya asked without it and then asked again with it --
+        and the second request is the one comdirect wanted a photoTAN for,
+        on every fetch (23.--25.11.2026), which nobody types in. Same rule
+        as for camt (_keep_pending_from): one request, both parts kept.
+
+        Mirrors the library's _get_transactions_mt940 with its own response
+        processor. Where the internals are not there, the library's call is
+        used as before.
+        """
+        conn = self.fints_connection
+        try:
+            fetch = conn._fetch_with_touchdowns
+            from fints.utils import mt940_to_array
+        except (AttributeError, ImportError):
+            return fallback(dialog, hkkaz, account, start_date, end_date,
+                            include_pending)
+
+        from kefiya.utils.mt940_compat import (
+            ensure_optional_timezone_is_optional,
+        )
+
+        def both_parts(responses):
+            ensure_optional_timezone_is_optional()
+            booked = mt940_to_array("".join(
+                seg.statement_booked.decode("iso-8859-1")
+                for seg in responses))
+            pending_text = "".join(
+                seg.statement_pending.decode("iso-8859-1")
+                for seg in responses if seg.statement_pending)
+            pending = []
+            if pending_text:
+                try:
+                    pending = mt940_to_array(pending_text)
+                except Exception:
+                    # A pending block that does not parse must not cost the
+                    # bookings; the pending read falls back to asking.
+                    pending = None
+            if pending is not None:
+                self._store_pending(pending)
+            return list(booked) + list(pending or []) if include_pending \
+                else booked
+
+        return fetch(
+            dialog,
+            lambda touchdown: hkkaz(
+                account=hkkaz._fields["account"].type.from_sepa_account(
+                    account),
+                all_accounts=False,
+                date_start=start_date,
+                date_end=end_date,
+                touchdown_point=touchdown,
+            ),
+            both_parts,
+            "HIKAZ",
+        )
 
     def pending_kept(self):
         """The pending entries this run's booked fetch brought, or None."""
