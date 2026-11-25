@@ -155,3 +155,32 @@ class TestPendingTakenFromTheBookedFetch(unittest.TestCase):
             "\n    def ")[0]
         self.assertLess(body.index("kept = self.pending_kept()"),
                         body.index("with self.client_session():"))
+
+
+class TestPendingTakenFromTheMt940Answer(unittest.TestCase):
+    """25.11.2026: comdirect asks for a photoTAN for the second request; the
+    pending block already came with the first MT940 answer."""
+
+    def _controller(self):
+        with open(os.path.join(WURZEL, "utils", "fints_controller.py"),
+                  encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_booked_fetch_keeps_the_pending_block(self):
+        source = self._controller()
+        raw = source.split("def _get_transactions_raw(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("self._fetch_mt940_keeping_pending(", raw)
+        self.assertNotIn("return fetch_mt940(", raw)
+
+    def test_the_processor_stores_and_still_answers_as_before(self):
+        source = self._controller()
+        body = source.split("def _fetch_mt940_keeping_pending(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("seg.statement_pending", body)
+        self.assertIn("self._store_pending(pending)", body)
+        self.assertIn("ensure_optional_timezone_is_optional()", body)
+        # Without the internals, the library's own call as before.
+        self.assertIn("return fallback(dialog, hkkaz, account", body)
+        # A pending block that does not parse keeps the bookings.
+        self.assertIn("pending = None", body)
