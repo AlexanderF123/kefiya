@@ -402,7 +402,10 @@ def _say(run, login, summary, error=None):
     if not run:
         return
     payload = {"run": run, "login": login, "summary": summary,
-               "error": error}
+               "error": error,
+               # When this account was done, in site time: the log shows
+               # it per account.
+               "at": str(frappe.utils.now_datetime())[:19]}
     try:
         frappe.as_json(payload)
     except Exception:

@@ -248,6 +248,16 @@ frappe.provide("kefiya");
     }
 
 
+    // "25.11.2026 19:07:22" in the user's date format; the raw value where
+    // it cannot be read.
+    function whenOf(at) {
+        try {
+            return frappe.datetime.str_to_user(String(at).slice(0, 19));
+        } catch (ignoredW) {
+            return String(at);
+        }
+    }
+
     function logBody() {
         var entries = (run && run.log) || [];
         var body;
@@ -280,7 +290,11 @@ frappe.provide("kefiya");
                 return "<div style='margin-bottom:12px;padding-bottom:8px;"
                     + "border-bottom:1px solid var(--border-color)'>"
                     + "<div style='font-weight:600'><span style='color:" + col
-                    + "'>" + icon + "</span> " + esc(e.ln) + "</div>"
+                    + "'>" + icon + "</span> " + esc(e.ln)
+                    + (e.at ? " <span style='font-weight:400;font-size:11px;"
+                        + "color:" + C_MUTED + "'>" + esc(whenOf(e.at))
+                        + "</span>" : "")
+                    + "</div>"
                     + "<table style='font-size:12px;margin-top:4px'>" + rows
                     + "</table>" + detail + "</div>";
             }).join("");
@@ -309,10 +323,13 @@ frappe.provide("kefiya");
         dlg.show();
     }
 
-    function record(ln, state, lines, detail) {
+    function record(ln, state, lines, detail, at) {
         if (!run) return;
+        // Date and time per account (25.11.2026): a log that says "failed"
+        // without saying when cannot be read against the bank's own records.
         run.log.push({ ln: ln, state: state, lines: lines || [],
-                       detail: detail || "" });
+                       detail: detail || "",
+                       at: at || frappe.datetime.now_datetime() });
         run.done++;
         if (state === "err") run.fail++;
         else if (state === "tan") run.tan++;
@@ -407,12 +424,14 @@ frappe.provide("kefiya");
     // account-by-account fallback below hand in the same summary, so they must
     // read it the same way -- two copies of this drifted once and the log said
     // "2 neu" for every account in the run.
-    function noteResult(ln, x, failure) {
+    // at: when the server finished this account (site time), from the
+    // event; otherwise the moment this page learned of it.
+    function noteResult(ln, x, failure, at) {
         if (!run) return "err";
         if (failure) {
             record(ln, "err",
                 [{ label: __("Fetch"), text: __("failed"), kind: "err" }],
-                String(failure).slice(0, 600));
+                String(failure).slice(0, 600), at);
             return "err";
         }
         x = x || {};
@@ -421,7 +440,7 @@ frappe.provide("kefiya");
         if (x.skipped || t.status === "skipped") state = "skip";
         else if (x.tan_required || t.status === "tan_required") state = "tan";
         run.tot += (t.new_count || 0);
-        record(ln, state, kefiya.fetch_log_lines(x));
+        record(ln, state, kefiya.fetch_log_lines(x), "", at);
         return state;
     }
 
@@ -444,7 +463,7 @@ frappe.provide("kefiya");
             var g = d && pending[d.run];
             if (!g) return;
             g.seen();
-            noteResult(d.login, d.summary, d.error);
+            noteResult(d.login, d.summary, d.error, d.at);
             progressLabel(g.btn, g.total);
         });
         frappe.realtime.on("kefiya_fetch_group_done", function (d) {

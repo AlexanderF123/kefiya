@@ -878,6 +878,33 @@ class FinTSController(TanSession):
             )
             return False
 
+    #: What _persist_fints_state writes -- the connection state, nothing a
+    #: person edits in the form.
+    STATE_FIELDS = (
+        "stored_client_state", "stored_tan_state", "tan_state_updated",
+        "stored_tan_state_decoupled", "stored_vop_id_state",
+        "stored_dialog_state", "stored_gateway_state",
+        fints_state_fields.SYSTEM_ID_FIELD,
+    )
+
+    def _write_state_fields(self):
+        """Write the connection state straight to the row, without save().
+
+        save() compares the login's timestamp with the one it was loaded
+        with. On 25.11.2026 a collective fetch and a transfer worked on the
+        same Volksbank access at the same time; the fetch wrote the login,
+        and the transfer's save() then refused: "Volksbank ... (Kefiya
+        Login) has been modified after you have opened it" -- the accounts
+        could not be loaded, and the payee release ended there. These fields
+        are the bank's state, not an edit; the last writer is right, and
+        the row's modified stays as it is.
+        """
+        meta = frappe.get_meta("Kefiya Login")
+        values = {field: self.kefiya_login.get(field)
+                  for field in self.STATE_FIELDS if meta.has_field(field)}
+        frappe.db.set_value("Kefiya Login", self.kefiya_login.name, values,
+                            update_modified=False)
+
     def _persist_fints_state(self, tan_state=None, clear:bool=False):
         """Persist the current client/dialog state to the database.
         :param tan_state: An additional TAN state to persist if given.
@@ -936,7 +963,7 @@ class FinTSController(TanSession):
             self.kefiya_login.stored_dialog_blob = None
             self.kefiya_login.stored_gateway_blob = None
 
-        self.kefiya_login.save()
+        self._write_state_fields()
 
         # A clean, TAN-free authenticated state was just persisted -> share it
         # with the sibling logins of the same bank so a single TAN unlocks every
