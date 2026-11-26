@@ -175,6 +175,17 @@ frappe.provide("kefiya");
     // answered through send_transfer_tan. Without it the box resolves the
     // login's interaction, as it does for a fetch.
     function tanPrompt(data, done, opts) {
+        // One release box per access. While a decoupled release is awaited
+        // the page asks the bank every few seconds, and every "not yet" came
+        // back as a fresh request for the release -- on 26.11.2026 the same
+        // transfer's box opened five times over itself. The box already open
+        // is the answer to all of them.
+        if (data && data.mfa_required && !data.tan_required && data.docname) {
+            var open = openBoxes[data.docname];
+            if (open && open.$wrapper && open.$wrapper.is(":visible")) {
+                return open;
+            }
+        }
         var fields = [];
         if (data.possible_tan_modes) {
             fields.push({ fieldtype: "Select", fieldname: "tan_mode",
@@ -423,6 +434,11 @@ frappe.provide("kefiya");
             });
         }
         setTimeout(ask, every);
+        // And an end that does not depend on the bank answering. ask() checks
+        // the ceiling only when a request comes back; one that never did left
+        // the wait -- and the "Send" of the outgoing page, which waits for it
+        // -- hanging for good, the button grey (26.11.2026).
+        setTimeout(function () { finish("timeout"); }, ceiling + 30000);
         return { stop: function () {
             stopped = true;
             delete awaitingRelease[login];

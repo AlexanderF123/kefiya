@@ -249,3 +249,23 @@ class TestAReleasedPayeeCheckIsWrittenDown(unittest.TestCase):
         zweig = body.split('outcome === "payee"')[1]
         self.assertIn("r2.transfer_names", zweig)
         self.assertIn(": names", zweig)
+
+
+class TestOneBoxAndAnEndToTheWait(unittest.TestCase):
+    """26.11.2026: several orders from several accounts, sent one after
+    another. The first order's release box opened five times, and after it
+    nothing happened any more -- the Send button stayed grey."""
+
+    def test_an_open_release_box_is_not_opened_again(self):
+        source = _js("tan_prompt.js")
+        body = source.split("function tanPrompt(")[1].split(
+            "var fields = [];")[0]
+        self.assertIn("openBoxes[data.docname]", body)
+        self.assertIn("return open;", body)
+
+    def test_the_wait_ends_even_without_an_answer(self):
+        source = _js("tan_prompt.js")
+        body = source.split("function awaitRelease(")[1].split(
+            "kefiya.await_release")[0]
+        self.assertIn('setTimeout(function () { finish("timeout"); },'
+                      ' ceiling + 30000);', body)
