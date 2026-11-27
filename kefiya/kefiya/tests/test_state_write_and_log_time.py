@@ -40,6 +40,53 @@ class TestTheStateIsWrittenWithoutTheTimestampCheck(unittest.TestCase):
             self.assertIn(name, fields)
 
 
+class TestTheRawWriteKeepsNotNullColumnsFilled(unittest.TestCase):
+    """27.11.2026: every account fetch ended on (1048, "Column
+    'stored_tan_state_decoupled' cannot be null"). save() used to turn the
+    None into 0; the direct write since #147 does not."""
+
+    def _state_fields(self):
+        source = _read("utils", "fints_controller.py")
+        block = source.split("STATE_FIELDS = (")[1].split(")")[0]
+        return [part.strip().strip('"') for part in block.split(",")
+                if part.strip().startswith('"')]
+
+    def test_a_none_check_becomes_zero_and_text_stays_none(self):
+        from kefiya.utils import fints_state_fields
+        self.assertEqual(fints_state_fields.for_raw_write("Check", None), 0)
+        self.assertEqual(fints_state_fields.for_raw_write("Check", 1), 1)
+        self.assertIsNone(
+            fints_state_fields.for_raw_write("Long Text", None))
+        self.assertIsNone(fints_state_fields.for_raw_write("Datetime", None))
+
+    def test_every_not_null_state_field_is_covered(self):
+        import json
+        from kefiya.utils import fints_state_fields
+        meta = json.loads(_read("kefiya", "doctype", "kefiya_login",
+                                "kefiya_login.json"))
+        types = {f["fieldname"]: f["fieldtype"] for f in meta["fields"]}
+        checked = 0
+        for field in self._state_fields():
+            fieldtype = types.get(field)
+            if fieldtype in ("Check", "Int", "Float", "Currency", "Percent"):
+                checked += 1
+                self.assertEqual(
+                    fints_state_fields.for_raw_write(fieldtype, None), 0,
+                    field)
+        self.assertGreaterEqual(checked, 1,
+                                "stored_tan_state_decoupled is a Check")
+
+    def test_the_direct_write_goes_through_it(self):
+        source = _read("utils", "fints_controller.py")
+        body = source.split("def _write_state_fields(")[1].split(
+            "\n    def ")[0]
+        self.assertIn("fints_state_fields.for_raw_write(", body)
+
+    def test_the_controller_never_sets_the_check_to_none(self):
+        source = _read("utils", "fints_controller.py")
+        self.assertNotIn("stored_tan_state_decoupled = None", source)
+
+
 class TestTheLogSaysWhen(unittest.TestCase):
     def test_the_server_sends_the_time(self):
         source = _read("utils", "client.py")

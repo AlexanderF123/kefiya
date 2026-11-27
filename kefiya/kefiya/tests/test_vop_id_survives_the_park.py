@@ -156,8 +156,10 @@ class TestBothEndsAreWired(unittest.TestCase):
         quietly drop to two.
         """
         body = _source("utils", "fints_controller.py")
+        # 0, not None, since 27.11.2026: the state goes to the row without
+        # save() now, and a Check column refuses NULL (error 1048).
         forgets = body.count(
-            "stored_tan_state_decoupled = None")
+            "stored_tan_state_decoupled = 0")
         clears = body.count("stored_vop_id_blob = None")
         self.assertEqual(
             forgets, clears,
