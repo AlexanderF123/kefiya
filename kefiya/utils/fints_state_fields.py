@@ -125,3 +125,23 @@ def usable_system_id(value):
 def cleared():
     """Eine eigene Kopie, damit kein Aufrufer die Vorlage veraendert."""
     return dict(CLEARED)
+
+
+#: Feldtypen, deren Spalte in MariaDB NOT NULL ist. Ein Dokument-save()
+#: macht aus None still eine 0, rohes SQL nicht.
+NOT_NULL_TYPES = ("Check", "Int", "Float", "Currency", "Percent")
+
+
+def for_raw_write(fieldtype, value):
+    """Der Wert so, wie ihn die Spalte annimmt, wenn er ohne save() geht.
+
+    Am 27.11.2026 scheiterte jeder Kontenabruf mit (1048, "Column
+    'stored_tan_state_decoupled' cannot be null"): _persist_fints_state
+    schrieb den Zustand seit dem Vortag per frappe.db.set_value statt per
+    save(), und der Controller setzt das Check-Feld beim Aufraeumen auf
+    None. Dieselbe Falle, die oben bei CLEARED beschrieben ist -- diesmal
+    an der Stelle, die jeden Abruf beendet.
+    """
+    if value is None and fieldtype in NOT_NULL_TYPES:
+        return 0
+    return value

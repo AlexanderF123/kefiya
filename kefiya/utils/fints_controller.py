@@ -839,7 +839,7 @@ class FinTSController(TanSession):
         the sibling logins of the same bank.
         """
         self.kefiya_login.stored_tan_blob = None
-        self.kefiya_login.stored_tan_state_decoupled = None
+        self.kefiya_login.stored_tan_state_decoupled = 0
         self.kefiya_login.stored_vop_id_blob = None
         self.kefiya_login.stored_dialog_blob = None
         self.kefiya_login.save()
@@ -900,8 +900,15 @@ class FinTSController(TanSession):
         the row's modified stays as it is.
         """
         meta = frappe.get_meta("Kefiya Login")
-        values = {field: self.kefiya_login.get(field)
-                  for field in self.STATE_FIELDS if meta.has_field(field)}
+        values = {}
+        for field in self.STATE_FIELDS:
+            df = meta.get_field(field)
+            if not df:
+                continue
+            # Ohne save() wandelt niemand None in 0 um; ein Check-Feld ist
+            # in MariaDB NOT NULL. Siehe fints_state_fields.for_raw_write.
+            values[field] = fints_state_fields.for_raw_write(
+                df.fieldtype, self.kefiya_login.get(field))
         frappe.db.set_value("Kefiya Login", self.kefiya_login.name, values,
                             update_modified=False)
 
@@ -958,7 +965,7 @@ class FinTSController(TanSession):
                 gateway_session.cookies_of(self.fints_connection))
         else:
             self.kefiya_login.stored_tan_blob = None
-            self.kefiya_login.stored_tan_state_decoupled = None
+            self.kefiya_login.stored_tan_state_decoupled = 0
             self.kefiya_login.stored_vop_id_blob = None
             self.kefiya_login.stored_dialog_blob = None
             self.kefiya_login.stored_gateway_blob = None
