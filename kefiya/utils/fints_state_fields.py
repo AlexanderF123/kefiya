@@ -127,21 +127,27 @@ def cleared():
     return dict(CLEARED)
 
 
-#: Feldtypen, deren Spalte in MariaDB NOT NULL ist. Ein Dokument-save()
-#: macht aus None still eine 0, rohes SQL nicht.
-NOT_NULL_TYPES = ("Check", "Int", "Float", "Currency", "Percent")
-
-
-def for_raw_write(fieldtype, value):
-    """Der Wert so, wie ihn die Spalte annimmt, wenn er ohne save() geht.
-
-    Am 27.11.2026 scheiterte jeder Kontenabruf mit (1048, "Column
-    'stored_tan_state_decoupled' cannot be null"): _persist_fints_state
-    schrieb den Zustand seit dem Vortag per frappe.db.set_value statt per
-    save(), und der Controller setzt das Check-Feld beim Aufraeumen auf
-    None. Dieselbe Falle, die oben bei CLEARED beschrieben ist -- diesmal
-    an der Stelle, die jeden Abruf beendet.
-    """
-    if value is None and fieldtype in NOT_NULL_TYPES:
-        return 0
-    return value
+#: Was der Controller nach einem Dialog in die Zeile schreibt -- direkt, ohne
+#: save() und ohne Zeitstempelpruefung (siehe _write_state_fields). Jeder
+#: Zustand mit seinem Zeitstempel: die Setter in kefiya_login.py setzen beide
+#: zusammen, also muessen beide zusammen in die Datenbank.
+#:
+#: Bis 27.11.2026 stand eine eigene Liste im Controller, ohne
+#: client_state_updated und dialog_state_updated. Die Zeitstempel blieben
+#: damit stehen, wo das letzte save() sie hingeschrieben hatte -- und die
+#: Wahl zwischen Geschwister-Logins ("wer hat den frischesten Zustand")
+#: rechnete mit veralteten Zeiten. Ein verworfener Zustand behielt seinen
+#: alten Zeitstempel, das, wovor CLEARED oben warnt.
+#:
+#: Nicht hier: stored_vop_state und stored_vop_dialog_state. Die schreibt
+#: der Ueberweisungsweg selbst; ein Abruf, der den Stand von vor seinem
+#: Dialog mitschriebe, wuerde eine laufende Empfaengerpruefung ueberschreiben.
+PERSISTED = (
+    "stored_client_state", "client_state_updated",
+    "stored_dialog_state", "dialog_state_updated",
+    "stored_tan_state", "tan_state_updated",
+    "stored_tan_state_decoupled",
+    "stored_vop_id_state",
+    "stored_gateway_state",
+    SYSTEM_ID_FIELD,
+)
