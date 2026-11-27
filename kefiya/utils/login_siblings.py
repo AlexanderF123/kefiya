@@ -134,25 +134,3 @@ def belongs_to_one_dialog(fieldname):
             or fieldname.startswith("vop_")
             or fieldname.endswith("_state_updated")
             or fieldname in _DIALOG)
-
-
-def rights_hold_for(reading_key, payer_keys):
-    """Gelten die Rechte, die ein Zugang fuer ein Konto meldet, fuer dieses Konto?
-
-    Die Bank nennt in HIUPD, was DIESER Zugang auf einem Konto darf -- nicht
-    das Konto selbst. Ein Konto, das ein zweiter Zugang nur einsehen darf
-    (eine Vollmacht, ein Saldo-Zugriff), steht dort mit Saldo und ohne
-    Ueberweisung. Am 26.11.2026 um 12:45 hat genau so ein Zugang die Liste
-    eines Sparkassen-Geschaeftskontos ueberschrieben; vier Minuten nachdem
-    von diesem Konto eine Ueberweisung hinausgegangen war, hiess es "Die Bank
-    erlaubt 'Ueberweisung' auf dem Konto nicht", und jedes Senden stand.
-
-    :param reading_key: access_key() des Zugangs, der die Liste las
-    :param payer_keys: access_key() der Logins, die von dem Konto zahlen
-    :return: True, wenn die Liste auf das Konto geschrieben werden darf --
-        es zahlt niemand davon, oder einer der Zahlenden ist derselbe Zugang
-    """
-    payers = [key for key in (payer_keys or []) if key]
-    if not payers:
-        return True
-    return reading_key is not None and reading_key in payers

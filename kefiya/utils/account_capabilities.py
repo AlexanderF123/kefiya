@@ -208,10 +208,21 @@ def refresh_account_capabilities(kefiya_login, controller=None):
         return {"stored": [], "skipped": [{"reason": _("the bank sent no HIUPD")}],
                 "checked_on": None}
 
+    # What the bank lists on HIUPD is what THIS access may do on an account,
+    # not what the account can do. On 26.11.2026 a second Sparkasse access,
+    # allowed only to look at a business account, overwrote that account's
+    # list -- balance yes, transfer no -- four minutes after a transfer had
+    # left it, and every send from it was refused from then on. So the list
+    # goes only onto the accounts of this access: its own and its siblings'.
     from kefiya.utils import login_siblings
 
-    reading_key = login_siblings.access_key(
-        login.get("blz"), login.get("fints_login"))
+    ours = {login.get("bank_account")}
+    same = login_siblings.same_access(
+        login.name, login.get("blz"), login.get("fints_login"))
+    if same:
+        ours.update(frappe.get_all("Kefiya Login", filters=same,
+                                   pluck="bank_account"))
+    ours.discard(None)
 
     stored, skipped = [], []
     for row in rows:
@@ -222,20 +233,9 @@ def refresh_account_capabilities(kefiya_login, controller=None):
                 "reason": _("no bank account with this IBAN"),
             })
             continue
-        # What this access may do there -- not what the account can do.
-        # Another access paying from the account keeps its own list.
-        payer_keys = [
-            login_siblings.access_key(p.blz, p.fints_login)
-            for p in frappe.get_all(
-                "Kefiya Login", filters={"bank_account": account},
-                fields=["blz", "fints_login"])]
-        if account != login.get("bank_account") and \
-                not login_siblings.rights_hold_for(reading_key, payer_keys):
-            skipped.append({
-                "bank_account": account,
-                "reason": _("paid from by another access; its rights there"
-                            " are not this access's"),
-            })
+        if account not in ours:
+            skipped.append({"bank_account": account,
+                            "reason": _("not an account of this access")})
             continue
         if store_for_account(account, row.get("segments") or {}):
             stored.append(account)

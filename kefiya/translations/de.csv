@@ -728,4 +728,4 @@ Instant payment switched off: the bank does not allow it on this account. Sent a
 The bank does not allow instant payments on this account. {0} therefore goes to the bank as an ordinary transfer.,Die Bank erlaubt auf diesem Konto keine Echtzeitüberweisung. {0} geht deshalb als gewöhnliche Überweisung an die Bank.
 "left out at night: the bank asks for a release for it","nachts ausgelassen: die Bank verlangt dafür eine Freigabe"
 The result could not be shown.,Das Ergebnis lässt sich nicht anzeigen.
-"paid from by another access; its rights there are not this access's","ein anderer Zugang zahlt von diesem Konto; dessen Rechte dort sind nicht die dieses Zugangs"
+not an account of this access,kein Konto dieses Zugangs
