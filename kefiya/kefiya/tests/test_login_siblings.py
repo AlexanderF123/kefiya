@@ -201,3 +201,37 @@ class TestWelcheLoginsZumSelbenZugangGehoeren(unittest.TestCase):
         eine = login_siblings.same_access("A", "99999999", "nutzer1")
         andere = login_siblings.same_access("A", "99999999", "nutzer2")
         self.assertNotEqual(eine["fints_login"], andere["fints_login"])
+
+
+class TestRightsHoldForTheirOwnAccess(unittest.TestCase):
+    """26.11.2026: a second Sparkasse access, allowed only to look at an
+    account, overwrote that account's list -- and every send from it was
+    refused as "not allowed" by the bank."""
+
+    OWN = ("99999999", "kennung-a")
+    OTHER = ("99999999", "kennung-b")
+
+    def test_the_paying_access_writes(self):
+        self.assertTrue(login_siblings.rights_hold_for(self.OWN, [self.OWN]))
+
+    def test_another_access_does_not(self):
+        self.assertFalse(
+            login_siblings.rights_hold_for(self.OTHER, [self.OWN]))
+
+    def test_an_account_nobody_pays_from_may_be_written(self):
+        self.assertTrue(login_siblings.rights_hold_for(self.OTHER, []))
+        self.assertTrue(login_siblings.rights_hold_for(self.OTHER, [None]))
+
+    def test_without_a_key_nothing_is_claimed(self):
+        self.assertFalse(login_siblings.rights_hold_for(None, [self.OWN]))
+
+    def test_the_refresh_asks_before_it_writes(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(os.path.dirname(os.path.dirname(here)),
+                               "utils", "account_capabilities.py"),
+                  encoding="utf-8") as handle:
+            source = handle.read()
+        body = source.split("def refresh_account_capabilities(")[1].split(
+            "\ndef ")[0]
+        self.assertLess(body.index("login_siblings.rights_hold_for("),
+                        body.index("store_for_account(account,"))

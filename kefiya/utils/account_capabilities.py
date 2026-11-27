@@ -208,6 +208,11 @@ def refresh_account_capabilities(kefiya_login, controller=None):
         return {"stored": [], "skipped": [{"reason": _("the bank sent no HIUPD")}],
                 "checked_on": None}
 
+    from kefiya.utils import login_siblings
+
+    reading_key = login_siblings.access_key(
+        login.get("blz"), login.get("fints_login"))
+
     stored, skipped = [], []
     for row in rows:
         account = _match_bank_account(row, login)
@@ -215,6 +220,21 @@ def refresh_account_capabilities(kefiya_login, controller=None):
             skipped.append({
                 "iban": _mask(row.get("iban")),
                 "reason": _("no bank account with this IBAN"),
+            })
+            continue
+        # What this access may do there -- not what the account can do.
+        # Another access paying from the account keeps its own list.
+        payer_keys = [
+            login_siblings.access_key(p.blz, p.fints_login)
+            for p in frappe.get_all(
+                "Kefiya Login", filters={"bank_account": account},
+                fields=["blz", "fints_login"])]
+        if account != login.get("bank_account") and \
+                not login_siblings.rights_hold_for(reading_key, payer_keys):
+            skipped.append({
+                "bank_account": account,
+                "reason": _("paid from by another access; its rights there"
+                            " are not this access's"),
             })
             continue
         if store_for_account(account, row.get("segments") or {}):
