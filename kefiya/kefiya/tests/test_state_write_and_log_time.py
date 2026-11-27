@@ -21,66 +21,95 @@ def _read(*parts):
 
 
 class TestTheStateIsWrittenWithoutTheTimestampCheck(unittest.TestCase):
-    def test_persist_writes_the_fields_not_the_document(self):
+    def _body(self, name):
         source = _read("utils", "fints_controller.py")
-        body = source.split("def _persist_fints_state(")[1].split(
-            "\n    def ")[0]
+        return source.split("def {0}(".format(name))[1].split("\n    def ")[0]
+
+    def test_persist_writes_the_fields_not_the_document(self):
+        body = self._body("_persist_fints_state")
         self.assertIn("self._write_state_fields()", body)
         self.assertNotIn("self.kefiya_login.save()", body)
 
-    def test_only_state_fields_and_modified_untouched(self):
-        source = _read("utils", "fints_controller.py")
-        body = source.split("def _write_state_fields(")[1].split(
-            "\n    def ")[0]
+    def test_discarding_a_challenge_writes_the_same_way(self):
+        """The second path that wrote connection state with save(), and
+        with it the timestamp check #147 removed from the first."""
+        body = self._body("__discard_parked_challenge")
+        self.assertIn("self._write_state_fields()", body)
+        self.assertNotIn("self.kefiya_login.save()", body)
+
+    def test_one_list_and_the_conversion_save_uses(self):
+        body = self._body("_write_state_fields")
         self.assertIn("update_modified=False", body)
-        self.assertIn("self.STATE_FIELDS", body)
-        fields = source.split("STATE_FIELDS = (")[1].split(")")[0]
-        for name in ("stored_client_state", "stored_tan_state",
-                     "stored_dialog_state", "stored_gateway_state"):
-            self.assertIn(name, fields)
-
-
-class TestTheRawWriteKeepsNotNullColumnsFilled(unittest.TestCase):
-    """27.11.2026: every account fetch ended on (1048, "Column
-    'stored_tan_state_decoupled' cannot be null"). save() used to turn the
-    None into 0; the direct write since #147 does not."""
-
-    def _state_fields(self):
+        self.assertIn("fints_state_fields.PERSISTED", body)
+        # The same per-type conversion save() writes with: a None Check
+        # becomes 0. Raw set_value does not convert -- 27.11.2026, error 1048
+        # on every fetch.
+        self.assertIn("self.kefiya_login.get_valid_dict()", body)
         source = _read("utils", "fints_controller.py")
-        block = source.split("STATE_FIELDS = (")[1].split(")")[0]
-        return [part.strip().strip('"') for part in block.split(",")
-                if part.strip().startswith('"')]
+        self.assertNotIn("STATE_FIELDS", source)
 
-    def test_a_none_check_becomes_zero_and_text_stays_none(self):
-        from kefiya.utils import fints_state_fields
-        self.assertEqual(fints_state_fields.for_raw_write("Check", None), 0)
-        self.assertEqual(fints_state_fields.for_raw_write("Check", 1), 1)
-        self.assertIsNone(
-            fints_state_fields.for_raw_write("Long Text", None))
-        self.assertIsNone(fints_state_fields.for_raw_write("Datetime", None))
 
-    def test_every_not_null_state_field_is_covered(self):
+class TestTheListIsComplete(unittest.TestCase):
+    """What the controller writes without save(), checked against the
+    document it writes to."""
+
+    def _setters(self):
+        """{setter name: fields it assigns} from kefiya_login.py."""
+        import ast
+        tree = ast.parse(_read("kefiya", "doctype", "kefiya_login",
+                               "kefiya_login.py"))
+        found = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if not any(isinstance(d, ast.Attribute) and d.attr == "setter"
+                       for d in node.decorator_list):
+                continue
+            fields = set()
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Assign):
+                    for target in sub.targets:
+                        if (isinstance(target, ast.Attribute)
+                                and isinstance(target.value, ast.Name)
+                                and target.value.id == "self"):
+                            fields.add(target.attr)
+            found[node.name] = fields
+        return found
+
+    def test_every_field_exists_on_the_login(self):
         import json
         from kefiya.utils import fints_state_fields
         meta = json.loads(_read("kefiya", "doctype", "kefiya_login",
                                 "kefiya_login.json"))
-        types = {f["fieldname"]: f["fieldtype"] for f in meta["fields"]}
-        checked = 0
-        for field in self._state_fields():
-            fieldtype = types.get(field)
-            if fieldtype in ("Check", "Int", "Float", "Currency", "Percent"):
-                checked += 1
-                self.assertEqual(
-                    fints_state_fields.for_raw_write(fieldtype, None), 0,
-                    field)
-        self.assertGreaterEqual(checked, 1,
-                                "stored_tan_state_decoupled is a Check")
+        names = {f["fieldname"] for f in meta["fields"]}
+        for field in fints_state_fields.PERSISTED:
+            self.assertIn(field, names)
 
-    def test_the_direct_write_goes_through_it(self):
-        source = _read("utils", "fints_controller.py")
-        body = source.split("def _write_state_fields(")[1].split(
-            "\n    def ")[0]
-        self.assertIn("fints_state_fields.for_raw_write(", body)
+    def test_a_state_goes_with_its_timestamp(self):
+        """Until 27.11.2026 client_state_updated and dialog_state_updated
+        were set by the setters and never written: the choice between
+        sibling logins compared stale times, and a discarded state kept its
+        old one."""
+        from kefiya.utils import fints_state_fields
+        persisted = set(fints_state_fields.PERSISTED)
+        setters = self._setters()
+        self.assertIn("stored_client_blob", setters)
+        for name, fields in setters.items():
+            if fields & persisted:
+                self.assertLessEqual(
+                    fields, persisted,
+                    "{0} sets {1}, but only part of it is written".format(
+                        name, sorted(fields)))
+        self.assertIn("client_state_updated", persisted)
+        self.assertIn("dialog_state_updated", persisted)
+
+    def test_the_payee_check_is_not_written_by_a_fetch(self):
+        """The transfer writes its own; a fetch writing the state from
+        before its dialog would overwrite a payee check in progress."""
+        from kefiya.utils import fints_state_fields
+        self.assertNotIn("stored_vop_state", fints_state_fields.PERSISTED)
+        self.assertNotIn("stored_vop_dialog_state",
+                         fints_state_fields.PERSISTED)
 
     def test_the_controller_never_sets_the_check_to_none(self):
         source = _read("utils", "fints_controller.py")

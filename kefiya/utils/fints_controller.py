@@ -837,12 +837,16 @@ class FinTSController(TanSession):
         client state at this moment may be the one the failed replay left
         behind -- and that is not a state worth keeping, let alone sharing with
         the sibling logins of the same bank.
+
+        Written like every other piece of connection state, without save():
+        the timestamp check that save() makes failed here just as it did in
+        _persist_fints_state when a fetch and a transfer met on one access.
         """
         self.kefiya_login.stored_tan_blob = None
         self.kefiya_login.stored_tan_state_decoupled = 0
         self.kefiya_login.stored_vop_id_blob = None
         self.kefiya_login.stored_dialog_blob = None
-        self.kefiya_login.save()
+        self._write_state_fields()
 
     def _forget_client_state(self):
         """Drop the stored connection state of this login and its siblings.
@@ -878,15 +882,6 @@ class FinTSController(TanSession):
             )
             return False
 
-    #: What _persist_fints_state writes -- the connection state, nothing a
-    #: person edits in the form.
-    STATE_FIELDS = (
-        "stored_client_state", "stored_tan_state", "tan_state_updated",
-        "stored_tan_state_decoupled", "stored_vop_id_state",
-        "stored_dialog_state", "stored_gateway_state",
-        fints_state_fields.SYSTEM_ID_FIELD,
-    )
-
     def _write_state_fields(self):
         """Write the connection state straight to the row, without save().
 
@@ -898,17 +893,16 @@ class FinTSController(TanSession):
         could not be loaded, and the payee release ended there. These fields
         are the bank's state, not an edit; the last writer is right, and
         the row's modified stays as it is.
+
+        The values come from get_valid_dict(), the same conversion save()
+        writes with: a Check that is None becomes 0, and so on per field
+        type. Raw set_value does none of that -- on 27.11.2026 every fetch
+        ended on (1048, "Column 'stored_tan_state_decoupled' cannot be
+        null") because a None went to the column unconverted.
         """
-        meta = frappe.get_meta("Kefiya Login")
-        values = {}
-        for field in self.STATE_FIELDS:
-            df = meta.get_field(field)
-            if not df:
-                continue
-            # Ohne save() wandelt niemand None in 0 um; ein Check-Feld ist
-            # in MariaDB NOT NULL. Siehe fints_state_fields.for_raw_write.
-            values[field] = fints_state_fields.for_raw_write(
-                df.fieldtype, self.kefiya_login.get(field))
+        row = self.kefiya_login.get_valid_dict()
+        values = {field: row[field] for field in fints_state_fields.PERSISTED
+                  if field in row}
         frappe.db.set_value("Kefiya Login", self.kefiya_login.name, values,
                             update_modified=False)
 

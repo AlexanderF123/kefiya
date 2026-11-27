@@ -73,16 +73,21 @@ class TestParkedChallengeExpiry(unittest.TestCase):
             controller(Login(None))._FinTSController__parked_challenge_is_stale()
         )
 
-    def test_discarding_clears_all_three_fields_and_saves(self):
+    def test_discarding_clears_all_three_fields_and_writes_them(self):
         login = Login(add_to_date(now_datetime(), days=-15))
-        controller(login)._FinTSController__discard_parked_challenge()
+        instance = controller(login)
+
+        with patch.object(FinTSController, "_write_state_fields") as write:
+            instance._FinTSController__discard_parked_challenge()
 
         self.assertIsNone(login.stored_tan_blob)
         self.assertIsNone(login.stored_dialog_blob)
-        self.assertIsNone(login.stored_tan_state_decoupled)
-        self.assertTrue(
-            login.saved, "a discarded challenge that is not written stays parked"
-        )
+        # 0, not None: the column is a NOT NULL Check (error 1048).
+        self.assertEqual(login.stored_tan_state_decoupled, 0)
+        write.assert_called_once_with()
+        # Written like the rest of the connection state, without save() and
+        # its timestamp check.
+        self.assertFalse(login.saved)
 
     def test_the_client_state_is_left_alone(self):
         """Discarding must not push a broken session onto the sibling logins."""
@@ -91,7 +96,7 @@ class TestParkedChallengeExpiry(unittest.TestCase):
 
         with patch.object(
             FinTSController, "_persist_fints_state"
-        ) as persist:
+        ) as persist, patch.object(FinTSController, "_write_state_fields"):
             instance._FinTSController__discard_parked_challenge()
 
         persist.assert_not_called()
