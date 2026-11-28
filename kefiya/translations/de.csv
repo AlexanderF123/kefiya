@@ -729,3 +729,4 @@ The bank does not allow instant payments on this account. {0} therefore goes to 
 "left out at night: the bank asks for a release for it","nachts ausgelassen: die Bank verlangt dafür eine Freigabe"
 The result could not be shown.,Das Ergebnis lässt sich nicht anzeigen.
 not an account of this access,kein Konto dieses Zugangs
+"The bank named this account {0} times in its account list; the entries were combined:","Die Bank hat dieses Konto {0}-mal in ihrer Kontenliste genannt; die Einträge wurden zusammengefasst:"

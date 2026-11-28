@@ -209,12 +209,9 @@ def refresh_account_capabilities(kefiya_login, controller=None):
                 "checked_on": None}
 
     # What the bank lists on HIUPD is what THIS access may do on an account,
-    # not what the account can do. On 26.11.2026 a second Sparkasse access,
-    # allowed only to look at a business account, overwrote that account's
-    # list -- balance yes, transfer no -- four minutes after a transfer had
-    # left it, and every send from it was refused from then on. So the list
-    # goes only onto the accounts of this access: its own and its siblings'.
-    from kefiya.utils import login_siblings
+    # not what the account can do. So the list goes only onto the accounts
+    # of this access: its own and its siblings'.
+    from kefiya.utils import capability_merge, login_siblings
 
     ours = {login.get("bank_account")}
     same = login_siblings.same_access(
@@ -225,6 +222,10 @@ def refresh_account_capabilities(kefiya_login, controller=None):
     ours.discard(None)
 
     stored, skipped = [], []
+    # Every entry first, then one write per account: the bank names some
+    # accounts more than once, and written one after the other the last
+    # entry won -- see capability_merge.
+    entries = {}
     for row in rows:
         account = _match_bank_account(row, login)
         if not account:
@@ -237,7 +238,12 @@ def refresh_account_capabilities(kefiya_login, controller=None):
             skipped.append({"bank_account": account,
                             "reason": _("not an account of this access")})
             continue
-        if store_for_account(account, row.get("segments") or {}):
+        entries.setdefault(account, []).append(row.get("segments") or {})
+
+    for account, lists in entries.items():
+        if len(lists) > 1:
+            _note_repeated_account(kefiya_login, account, lists)
+        if store_for_account(account, capability_merge.merged(lists)):
             stored.append(account)
         else:
             skipped.append({"bank_account": account,
@@ -245,6 +251,30 @@ def refresh_account_capabilities(kefiya_login, controller=None):
 
     return {"stored": stored, "skipped": skipped,
             "checked_on": str(now_datetime())}
+
+
+def _note_repeated_account(kefiya_login, account, lists):
+    """Write down, once a day, that the bank named an account more than once.
+
+    The evidence for capability_merge: which entry allowed what. Only the
+    segment codes -- no account data. Never raises.
+    """
+    try:
+        cache = frappe.cache()
+        if not cache.set(cache.make_key("kefiya_upd_repeat:{0}:{1}".format(
+                kefiya_login, account)), 1, ex=86400, nx=True):
+            return
+        lines = [_("The bank named this account {0} times in its account"
+                   " list; the entries were combined:").format(len(lists))]
+        for index, segments in enumerate(lists, start=1):
+            lines.append("{0}: {1}".format(
+                index, ", ".join(sorted(segments)) or "-"))
+        frappe.get_doc("Kefiya Login", kefiya_login).add_comment(
+            "Info", "{0}<br>{1}".format(
+                frappe.utils.escape_html(account),
+                "<br>".join(frappe.utils.escape_html(x) for x in lines)))
+    except Exception:
+        pass
 
 
 def _mask(iban):
